@@ -420,6 +420,53 @@ export async function getGameServers(placeId: number, limit: number = 10) {
   }
 }
 
+/** Получить значки (badges) игрока в конкретной игре */
+export async function getPlayerGameBadges(userId: number, universeId: number) {
+  try {
+    // 1. Получаем все значки этой игры
+    const gameBadgesData = await fetchJson(
+      `https://badges.roblox.com/v1/universes/${universeId}/badges?limit=100&sortOrder=Desc`
+    ).catch(() => ({ data: [] }));
+    const gameBadges = gameBadgesData?.data || [];
+    
+    if (gameBadges.length === 0) {
+      return { gameBadgesTotal: 0, earnedBadges: [], earnedCount: 0 };
+    }
+    
+    // 2. Проверяем, какие значки есть у игрока
+    const badgeIds = gameBadges.map((b: any) => b.id);
+    // API принимает до 100 значков за раз
+    const awardedData = await fetchJson(
+      `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIds.join(',')}`
+    ).catch(() => ({ data: [] }));
+    
+    const awardedMap = new Map<number, string>();
+    for (const a of (awardedData?.data || [])) {
+      awardedMap.set(a.badgeId, a.awardedDate);
+    }
+    
+    // 3. Формируем результат
+    const earnedBadges = gameBadges
+      .filter((b: any) => awardedMap.has(b.id))
+      .map((b: any) => ({
+        id: b.id,
+        name: b.name,
+        description: b.description || '',
+        awardedDate: awardedMap.get(b.id),
+        iconImageId: b.displayIconImageId,
+      }));
+    
+    return {
+      gameBadgesTotal: gameBadges.length,
+      earnedBadges: earnedBadges.slice(0, 25), // Максимум 25 показываем
+      earnedCount: earnedBadges.length,
+    };
+  } catch (e: any) {
+    console.log('getPlayerGameBadges error:', e.message);
+    return { gameBadgesTotal: 0, earnedBadges: [], earnedCount: 0 };
+  }
+}
+
 /** Полный поиск по username — агрегированные данные */
 export async function lookupUser(username: string) {
   // 1. Ищем userId

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Gamepad2, Clock, Users, UserPlus, Eye, ExternalLink, User, Calendar, Shield, Loader2, History, XCircle, Globe, Star, Trash2, ThumbsUp, Server, Heart, BarChart3, ArrowLeft } from "lucide-react";
+import { Search, Gamepad2, Clock, Users, UserPlus, Eye, ExternalLink, User, Calendar, Shield, Loader2, History, XCircle, Globe, Star, Trash2, ThumbsUp, Server, Heart, BarChart3, ArrowLeft, Trophy, Award } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -276,6 +276,18 @@ export default function RobloxTracker() {
     staleTime: 15000,
   });
 
+  // Player game badges — когда есть и игрок и выбранная игра
+  const playerUserId = playerInGameResult?.success ? playerInGameResult.user?.id : null;
+  const { data: playerGameBadges, isLoading: badgesLoading } = useQuery<{ success: boolean; gameBadgesTotal: number; earnedBadges: any[]; earnedCount: number }>({
+    queryKey: ['/api/roblox/player-game-badges', playerUserId, selectedGameId],
+    queryFn: async () => {
+      const res = await fetch(`/api/roblox/player-game-badges/${playerUserId}/${selectedGameId}`);
+      return res.json();
+    },
+    enabled: !!playerUserId && !!selectedGameId && activeTab === 'games',
+    staleTime: 30000,
+  });
+
   // Сохраняем в локальную историю при успешном поиске
   useEffect(() => {
     if (result?.success && result.user) {
@@ -427,7 +439,7 @@ export default function RobloxTracker() {
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   type="text"
-                  placeholder="Никнейм игрока — узнать, во что играет..."
+                  placeholder={selectedGameId ? "Никнейм — значки игрока в этой игре" : "Никнейм игрока — узнать, во что играет..."}
                   value={playerSearchInput}
                   onChange={(e) => setPlayerSearchInput(e.target.value)}
                   className="pl-10 h-11 text-sm glass glass-border"
@@ -475,6 +487,44 @@ export default function RobloxTracker() {
                       )}
                     </div>
                   </div>
+                  
+                  {/* Player game badges */}
+                  {selectedGameId && badgesLoading && (
+                    <div className="mt-3 pt-3 border-t border-white/10 flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Загрузка значков...
+                    </div>
+                  )}
+                  {selectedGameId && playerGameBadges?.success && (
+                    <div className="mt-3 pt-3 border-t border-white/10">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Trophy className="h-4 w-4 text-yellow-400" />
+                        <span className="text-xs font-semibold">
+                          Значки в этой игре: {playerGameBadges.earnedCount} / {playerGameBadges.gameBadgesTotal}
+                        </span>
+                        {playerGameBadges.gameBadgesTotal > 0 && (
+                          <Badge variant="secondary" className="text-xs ml-auto">
+                            {Math.round((playerGameBadges.earnedCount / playerGameBadges.gameBadgesTotal) * 100)}%
+                          </Badge>
+                        )}
+                      </div>
+                      {playerGameBadges.earnedBadges.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {playerGameBadges.earnedBadges.slice(0, 12).map((badge: any) => (
+                            <div key={badge.id} className="glass glass-border rounded px-2 py-1 text-xs flex items-center gap-1" title={badge.description || badge.name}>
+                              <Award className="h-3 w-3 text-yellow-400 flex-shrink-0" />
+                              <span className="truncate max-w-[120px]">{badge.name}</span>
+                            </div>
+                          ))}
+                          {playerGameBadges.earnedBadges.length > 12 && (
+                            <span className="text-xs text-muted-foreground px-2 py-1">+{playerGameBadges.earnedBadges.length - 12} ещё</span>
+                          )}
+                        </div>
+                      )}
+                      {playerGameBadges.gameBadgesTotal > 0 && playerGameBadges.earnedCount === 0 && (
+                        <p className="text-xs text-muted-foreground">Ни одного значка не получено</p>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>

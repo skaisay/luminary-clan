@@ -211,6 +211,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Получить значки игрока в конкретной игре
+  app.get("/api/roblox/player-game-badges/:userId/:universeId", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      const universeId = parseInt(req.params.universeId);
+      if (isNaN(userId) || isNaN(universeId)) {
+        return res.status(400).json({ success: false, error: 'Неверные параметры' });
+      }
+      const badges = await robloxApi.getPlayerGameBadges(userId, universeId);
+      res.json({ success: true, ...badges });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Ошибка при загрузке значков' });
+    }
+  });
+
   // Получить серверы игры
   app.get("/api/roblox/game/:placeId/servers", async (req, res) => {
     try {

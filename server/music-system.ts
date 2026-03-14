@@ -69,23 +69,57 @@ export async function addSong(
       throw new Error('DisTube не инициализирован');
     }
 
-    // Попытка предварительного подключения к голосовому каналу
+    // Предварительное подключение к голосовому каналу с networking workaround для cloud-хостинга
     try {
-      const { joinVoiceChannel, VoiceConnectionStatus, entersState } = await import('@discordjs/voice');
-      const existingConnection = distube.voices.get(guild.id);
-      if (!existingConnection) {
-        const connection = joinVoiceChannel({
+      const { joinVoiceChannel, VoiceConnectionStatus, entersState, getVoiceConnection } = await import('@discordjs/voice');
+      let connection = getVoiceConnection(guild.id);
+      
+      if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) {
+        connection = joinVoiceChannel({
           channelId: voiceChannel.id,
           guildId: guild.id,
           adapterCreator: guild.voiceAdapterCreator as any,
           selfDeaf: true,
         });
+        
+        // CRITICAL: Networking workaround для cloud platforms (Render, Railway, Heroku)
+        // Предотвращает проблемы с UDP keepAlive, которые мешают установить соединение
+        connection.on('stateChange', (oldState: any, newState: any) => {
+          const oldNetworking = Reflect.get(oldState, 'networking');
+          const newNetworking = Reflect.get(newState, 'networking');
+          
+          newNetworking?.on('stateChange', (oldNetworkState: any, newNetworkState: any) => {
+            const newUdp = Reflect.get(newNetworkState, 'udp');
+            clearInterval(newUdp?.keepAliveInterval);
+          });
+        });
+        
+        // Обработка разрыва соединения — пытаемся переподключиться
+        connection.on(VoiceConnectionStatus.Disconnected, async () => {
+          try {
+            await Promise.race([
+              entersState(connection!, VoiceConnectionStatus.Signalling, 5_000),
+              entersState(connection!, VoiceConnectionStatus.Connecting, 5_000),
+            ]);
+            // Переподключение
+          } catch {
+            connection?.destroy();
+          }
+        });
+        
         // Ждём подключения до 60 секунд
         await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
-        console.log(`✅ Предварительное подключение к voice каналу успешно`);
+        console.log(`✅ Предварительное подключение к voice каналу успешно (networking workaround)`);
+      } else if (connection.state.status !== VoiceConnectionStatus.Ready) {
+        // Если соединение есть, но не Ready — ждём
+        await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
+        console.log(`✅ Существующее voice соединение перешло в Ready`);
+      } else {
+        console.log(`✅ Voice соединение уже активно`);
       }
     } catch (preConnErr: any) {
       console.log('⚠️ Предварительное подключение не удалось:', preConnErr.message);
+      // Не выбрасываем ошибку — пусть DisTube попробует сам
     }
 
     const result = await distube.play(voiceChannel, query, {
@@ -312,6 +346,28 @@ export async function addPlaylist(
 ): Promise<{ success: boolean; message: string; count?: number }> {
   try {
     if (!distube) throw new Error('DisTube не инициализирован');
+
+    // Предварительное подключение с networking workaround
+    try {
+      const { joinVoiceChannel, VoiceConnectionStatus, entersState, getVoiceConnection } = await import('@discordjs/voice');
+      let connection = getVoiceConnection(guild.id);
+      if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) {
+        connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId: guild.id,
+          adapterCreator: guild.voiceAdapterCreator as any,
+          selfDeaf: true,
+        });
+        connection.on('stateChange', (oldState: any, newState: any) => {
+          const newNetworking = Reflect.get(newState, 'networking');
+          newNetworking?.on('stateChange', (_: any, ns: any) => {
+            const newUdp = Reflect.get(ns, 'udp');
+            clearInterval(newUdp?.keepAliveInterval);
+          });
+        });
+        await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
+      }
+    } catch {}
 
     const result = await distube.play(voiceChannel, playlistUrl, {
       textChannel: textChannel,
