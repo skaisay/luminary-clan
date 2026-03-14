@@ -16,9 +16,8 @@ export function CoinBalance() {
     const savedId = localStorage.getItem("discord_id");
     if (savedId) {
       setDiscordId(savedId);
-    } else {
-      setShowInput(true);
     }
+    // Do NOT auto-open the popup — keep it hidden by default
   }, []);
 
   const { data: balanceData } = useQuery<{ balance: number }>({

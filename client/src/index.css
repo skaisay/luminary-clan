@@ -154,76 +154,76 @@ textarea,
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 220 30% 6%;
+  --background: 350 18% 6%;
 
-  --foreground: 220 15% 92%;
+  --foreground: 40 15% 92%;
 
-  --border: 220 20% 18%;
+  --border: 350 12% 18%;
 
-  --card: 220 25% 10%;
+  --card: 350 14% 10%;
 
-  --card-foreground: 220 15% 92%;
+  --card-foreground: 40 15% 92%;
 
-  --card-border: 220 20% 16%;
+  --card-border: 350 12% 16%;
 
-  --sidebar: 220 28% 8%;
+  --sidebar: 350 16% 8%;
 
-  --sidebar-foreground: 220 15% 90%;
+  --sidebar-foreground: 40 10% 90%;
 
-  --sidebar-border: 220 20% 15%;
+  --sidebar-border: 350 12% 15%;
 
-  --sidebar-primary: 188 95% 52%;
+  --sidebar-primary: 2 83% 45%;
 
-  --sidebar-primary-foreground: 220 20% 98%;
+  --sidebar-primary-foreground: 40 20% 98%;
 
-  --sidebar-accent: 220 20% 16%;
+  --sidebar-accent: 350 14% 16%;
 
-  --sidebar-accent-foreground: 220 15% 88%;
+  --sidebar-accent-foreground: 40 10% 88%;
 
-  --sidebar-ring: 188 90% 60%;
+  --sidebar-ring: 2 80% 55%;
 
-  --popover: 220 25% 12%;
+  --popover: 350 14% 11%;
 
-  --popover-foreground: 220 15% 92%;
+  --popover-foreground: 40 15% 92%;
 
-  --popover-border: 220 20% 20%;
+  --popover-border: 350 12% 20%;
 
-  --primary: 188 95% 52%;
+  --primary: 2 83% 45%;
 
-  --primary-foreground: 220 20% 98%;
+  --primary-foreground: 40 20% 98%;
 
-  --secondary: 220 20% 20%;
+  --secondary: 350 14% 20%;
 
-  --secondary-foreground: 220 15% 88%;
+  --secondary-foreground: 40 10% 88%;
 
-  --muted: 220 20% 18%;
+  --muted: 350 14% 18%;
 
-  --muted-foreground: 220 12% 65%;
+  --muted-foreground: 30 8% 60%;
 
-  --accent: 280 85% 65%;
+  --accent: 92 100% 40%;
 
-  --accent-foreground: 220 20% 98%;
+  --accent-foreground: 40 20% 98%;
 
-  --destructive: 0 85% 60%;
+  --destructive: 359 100% 35%;
 
   --destructive-foreground: 0 0% 100%;
 
-  --input: 210 12% 32%;
-  --ring: 195 85% 50%;
-  --chart-1: 195 88% 55%;
-  --chart-2: 280 80% 65%;
-  --chart-3: 340 75% 62%;
-  --chart-4: 45 85% 60%;
-  --chart-5: 160 70% 58%;
+  --input: 350 10% 28%;
+  --ring: 2 80% 50%;
+  --chart-1: 2 83% 50%;
+  --chart-2: 92 100% 42%;
+  --chart-3: 60 90% 75%;
+  --chart-4: 131 95% 30%;
+  --chart-5: 359 100% 38%;
 
-  --shadow-2xs: 0px 1px 2px 0px hsl(195 88% 42% / 0.15);
-  --shadow-xs: 0px 2px 4px 0px hsl(195 88% 42% / 0.18);
-  --shadow-sm: 0px 2px 6px 0px hsl(195 88% 42% / 0.20), 0px 1px 2px -1px hsl(195 88% 42% / 0.12);
-  --shadow: 0px 4px 8px 0px hsl(195 88% 42% / 0.22), 0px 1px 2px -1px hsl(195 88% 42% / 0.14);
-  --shadow-md: 0px 6px 12px 0px hsl(195 88% 42% / 0.25), 0px 2px 4px -1px hsl(195 88% 42% / 0.16);
-  --shadow-lg: 0px 10px 20px 0px hsl(195 88% 42% / 0.28), 0px 4px 6px -1px hsl(195 88% 42% / 0.18);
-  --shadow-xl: 0px 16px 32px 0px hsl(195 88% 42% / 0.32), 0px 8px 10px -1px hsl(195 88% 42% / 0.20);
-  --shadow-2xl: 0px 24px 48px 0px hsl(195 88% 42% / 0.38);
+  --shadow-2xs: 0px 1px 2px 0px hsl(2 80% 42% / 0.15);
+  --shadow-xs: 0px 2px 4px 0px hsl(2 80% 42% / 0.18);
+  --shadow-sm: 0px 2px 6px 0px hsl(2 80% 42% / 0.20), 0px 1px 2px -1px hsl(2 80% 42% / 0.12);
+  --shadow: 0px 4px 8px 0px hsl(2 80% 42% / 0.22), 0px 1px 2px -1px hsl(2 80% 42% / 0.14);
+  --shadow-md: 0px 6px 12px 0px hsl(2 80% 42% / 0.25), 0px 2px 4px -1px hsl(2 80% 42% / 0.16);
+  --shadow-lg: 0px 10px 20px 0px hsl(2 80% 42% / 0.28), 0px 4px 6px -1px hsl(2 80% 42% / 0.18);
+  --shadow-xl: 0px 16px 32px 0px hsl(2 80% 42% / 0.32), 0px 8px 10px -1px hsl(2 80% 42% / 0.20);
+  --shadow-2xl: 0px 24px 48px 0px hsl(2 80% 42% / 0.38);
 
   /* Automatically computed borders - intensity can be controlled by the user by the --opaque-button-border-intensity setting */
   --sidebar-primary-border: hsl(var(--sidebar-primary));
@@ -388,23 +388,23 @@ textarea,
   }
 
   .neon-glow-cyan {
-    box-shadow: 0 0 10px rgba(0, 240, 255, 0.3), 0 0 20px rgba(0, 240, 255, 0.2);
+    box-shadow: 0 0 10px rgba(211, 25, 20, 0.3), 0 0 20px rgba(211, 25, 20, 0.2);
   }
 
   .neon-glow-purple {
-    box-shadow: 0 0 10px rgba(168, 85, 247, 0.3), 0 0 20px rgba(168, 85, 247, 0.2);
+    box-shadow: 0 0 10px rgba(95, 202, 0, 0.3), 0 0 20px rgba(95, 202, 0, 0.2);
   }
 
   .neon-text-cyan {
-    text-shadow: 0 0 10px rgba(0, 240, 255, 0.5), 0 0 20px rgba(0, 240, 255, 0.3);
+    text-shadow: 0 0 10px rgba(211, 25, 20, 0.5), 0 0 20px rgba(211, 25, 20, 0.3);
   }
 
   @keyframes pulse-glow {
     0%, 100% {
-      box-shadow: 0 0 10px rgba(0, 240, 255, 0.3), 0 0 20px rgba(0, 240, 255, 0.2);
+      box-shadow: 0 0 10px rgba(211, 25, 20, 0.3), 0 0 20px rgba(211, 25, 20, 0.2);
     }
     50% {
-      box-shadow: 0 0 20px rgba(0, 240, 255, 0.5), 0 0 30px rgba(0, 240, 255, 0.3);
+      box-shadow: 0 0 20px rgba(211, 25, 20, 0.5), 0 0 30px rgba(211, 25, 20, 0.3);
     }
   }
 
@@ -438,7 +438,7 @@ textarea,
     background: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(0, 240, 255, 0.1) 50%,
+      rgba(211, 25, 20, 0.1) 50%,
       transparent 100%
     );
     background-size: 200% 100%;
@@ -483,9 +483,9 @@ textarea,
     color: hsl(var(--primary));
     padding: 8px;
     border-radius: 8px;
-    background: rgba(0, 240, 255, 0.15);
+    background: rgba(211, 25, 20, 0.15);
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(0, 240, 255, 0.2);
+    border: 1px solid rgba(211, 25, 20, 0.2);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -570,9 +570,9 @@ textarea,
   }
 
   .discord-flower-btn:hover .discord-text {
-    background: rgba(168, 85, 247, 0.25);
-    border-color: rgba(168, 85, 247, 0.4);
-    box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
+    background: rgba(95, 202, 0, 0.2);
+    border-color: rgba(95, 202, 0, 0.35);
+    box-shadow: 0 0 20px rgba(95, 202, 0, 0.25);
   }
 
   .discord-flower-btn:hover div.flower1 {
@@ -663,7 +663,7 @@ textarea,
     left: -5%;
     width: 40%;
     height: 40%;
-    background: radial-gradient(circle, rgba(255, 130, 50, 0.15) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(211, 25, 20, 0.12) 0%, transparent 70%);
     filter: blur(80px);
     pointer-events: none;
     z-index: 0;
@@ -677,7 +677,7 @@ textarea,
     left: -5%;
     width: 30%;
     height: 30%;
-    background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(95, 202, 0, 0.08) 0%, transparent 70%);
     filter: blur(70px);
     pointer-events: none;
     z-index: 0;
@@ -732,7 +732,7 @@ textarea,
   }
 
   .glass-nav-btn-compact:hover .nav-btn-icon-compact {
-    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.6));
+    filter: drop-shadow(0 0 4px rgba(211, 25, 20, 0.6));
   }
 
   /* Gradient wave animation */
@@ -741,9 +741,9 @@ textarea,
     inset: 0;
     background: linear-gradient(
       135deg,
-      rgba(59, 130, 246, 0.15) 0%,
-      rgba(139, 92, 246, 0.15) 50%,
-      rgba(59, 130, 246, 0.15) 100%
+      rgba(211, 25, 20, 0.15) 0%,
+      rgba(95, 202, 0, 0.12) 50%,
+      rgba(211, 25, 20, 0.15) 100%
     );
     opacity: 0;
     transform: translateY(100%);
@@ -777,13 +777,13 @@ textarea,
 
   /* Active state */
   .glass-nav-btn-compact.active {
-    background: rgba(59, 130, 246, 0.15);
-    border-color: rgba(59, 130, 246, 0.3);
+    background: rgba(211, 25, 20, 0.15);
+    border-color: rgba(211, 25, 20, 0.3);
   }
 
   .dark .glass-nav-btn-compact.active {
-    background: rgba(59, 130, 246, 0.2);
-    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(211, 25, 20, 0.2);
+    border-color: rgba(211, 25, 20, 0.4);
   }
 
   /* Compact label text */
@@ -839,13 +839,13 @@ textarea,
   }
 
   .glass-nav-btn-mobile.active {
-    background: rgba(59, 130, 246, 0.15);
-    border-color: rgba(59, 130, 246, 0.3);
+    background: rgba(211, 25, 20, 0.15);
+    border-color: rgba(211, 25, 20, 0.3);
   }
 
   .dark .glass-nav-btn-mobile.active {
-    background: rgba(59, 130, 246, 0.2);
-    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(211, 25, 20, 0.2);
+    border-color: rgba(211, 25, 20, 0.4);
   }
 
   /* Glass utility class for other components */
@@ -887,4 +887,106 @@ textarea,
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.4);
+}
+
+/* ==================== LOGIN PAGE ANIMATED BG ==================== */
+.login-animated-bg {
+  background: linear-gradient(
+    -45deg,
+    #0a0505,
+    #1a0808,
+    #0a0f05,
+    #0d0a15,
+    #150505,
+    #050a08
+  );
+  background-size: 400% 400%;
+  animation: loginGradientShift 20s ease infinite;
+}
+
+@keyframes loginGradientShift {
+  0% { background-position: 0% 50%; }
+  25% { background-position: 100% 50%; }
+  50% { background-position: 100% 0%; }
+  75% { background-position: 0% 100%; }
+  100% { background-position: 0% 50%; }
+}
+
+.login-particle {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.4;
+  filter: blur(1px);
+}
+
+.login-particle-1 {
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(211, 25, 20, 0.3) 0%, transparent 70%);
+  top: 10%;
+  left: 15%;
+  animation: loginFloat1 18s ease-in-out infinite;
+}
+
+.login-particle-2 {
+  width: 250px;
+  height: 250px;
+  background: radial-gradient(circle, rgba(95, 202, 0, 0.2) 0%, transparent 70%);
+  bottom: 15%;
+  right: 10%;
+  animation: loginFloat2 22s ease-in-out infinite;
+}
+
+.login-particle-3 {
+  width: 180px;
+  height: 180px;
+  background: radial-gradient(circle, rgba(88, 101, 242, 0.25) 0%, transparent 70%);
+  top: 50%;
+  right: 25%;
+  animation: loginFloat3 15s ease-in-out infinite;
+}
+
+.login-particle-4 {
+  width: 120px;
+  height: 120px;
+  background: radial-gradient(circle, rgba(255, 255, 201, 0.15) 0%, transparent 70%);
+  bottom: 30%;
+  left: 10%;
+  animation: loginFloat1 25s ease-in-out infinite reverse;
+}
+
+.login-particle-5 {
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(163, 0, 2, 0.2) 0%, transparent 70%);
+  top: 20%;
+  right: 5%;
+  animation: loginFloat2 20s ease-in-out infinite reverse;
+}
+
+.login-particle-6 {
+  width: 160px;
+  height: 160px;
+  background: radial-gradient(circle, rgba(3, 108, 23, 0.2) 0%, transparent 70%);
+  bottom: 5%;
+  left: 40%;
+  animation: loginFloat3 17s ease-in-out infinite;
+}
+
+@keyframes loginFloat1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(40px, -60px) scale(1.1); }
+  66% { transform: translate(-30px, 40px) scale(0.9); }
+}
+
+@keyframes loginFloat2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-50px, 30px) scale(1.15); }
+  66% { transform: translate(30px, -50px) scale(0.85); }
+}
+
+@keyframes loginFloat3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(25px, 35px) scale(1.1); }
 }

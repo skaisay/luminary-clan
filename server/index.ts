@@ -5,12 +5,13 @@ import passport from "passport";
 import { registerRoutes } from "./routes";
 import { log, serveStatic } from "./production";
 import { setupDiscordBot } from "./bot-commands";
+import { pool } from "./db";
 import "./auth";
 
 const app = express();
 const PgStore = connectPg(session);
 
-app.set('trust proxy', 1);
+app.set('trust proxy', true);
 
 declare module 'http' {
   interface IncomingMessage {
@@ -27,15 +28,15 @@ app.use(express.urlencoded({ extended: false }));
 app.use(
   session({
     store: new PgStore({
-      conString: process.env.DATABASE_URL,
+      pool: pool as any,
       createTableIfMissing: true,
       tableName: 'session',
     }),
+    name: 'luminary.sid',
     secret: process.env.SESSION_SECRET || "clan-command-secret-key-change-in-production",
     resave: false,
     saveUninitialized: false,
     rolling: true,
-    proxy: true,
     cookie: {
       maxAge: 1000 * 60 * 60 * 24 * 90,
       httpOnly: true,
