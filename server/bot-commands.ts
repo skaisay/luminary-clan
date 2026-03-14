@@ -407,7 +407,7 @@ export async function setupDiscordBot() {
       ),
   ];
 
-  client.once('clientReady', async () => {
+  client.once('ready', async () => {
     console.log(`✅ Discord бот запущен: ${client.user?.tag}`);
     console.log(`📊 База данных: ${process.env.DATABASE_URL?.substring(0, 50)}...`);
     console.log(`🌍 Окружение: ${process.env.NODE_ENV || 'development'}`);
