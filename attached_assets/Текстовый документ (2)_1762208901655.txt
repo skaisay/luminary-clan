@@ -1,0 +1,32 @@
+<!-- HTML (Body-Only) -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <defs>
+    <filter id="dissolve-filter" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="sRGB" overflow="visible">
+      <feTurbulence type="fractalNoise" baseFrequency="0.004" numOctaves="1" result="bigNoise" />
+      <feComponentTransfer in="bigNoise" result="bigNoiseAdjusted">
+        <feFuncR type="linear" slope="5" intercept="-2" />
+        <feFuncG type="linear" slope="5" intercept="-2" />
+      </feComponentTransfer>
+      <feTurbulence type="fractalNoise" baseFrequency="1" numOctaves="1" result="fineNoise" />
+      <feMerge result="mergedNoise">
+        <feMergeNode in="bigNoiseAdjusted" />
+        <feMergeNode in="fineNoise" />
+      </feMerge>
+      <feDisplacementMap in="SourceGraphic" in2="mergedNoise" scale="0" xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+  </defs>
+</svg>
+
+<div class="container">
+  <div class="image-container">
+    <img id="displayed-image" src="https://i.ibb.co/2sxT6jZ/Retro-80s-Human-Flying-Poster-cropped.jpg" alt="Selected Image">
+    <button id="delete-image">Delete Image</button>
+  </div>
+  <p class="support-text">
+    Crafted by <a href="https://refero.design?aff=9gJqd" target="_blank" rel="noopener noreferrer">Refero</a> team – we make design research faster and easier than ever
+  </p>
+</div>
+
+<div class="safari-warning hidden">
+  <p>⚠️ <strong>Safari is currently not supported.</strong> If you'd like to help improve Safari support, feel free to contribute to this project!</p>
+</div>

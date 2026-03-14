@@ -1,0 +1,94 @@
+/* CSS */
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  flex-direction: column;
+}
+.container {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.image-container {
+  position: relative;
+  width: 500px;
+  max-width: 90vw;
+  height: 500px;
+  margin-bottom: 20px;
+  background: #000;
+  overflow: visible;
+  border-radius: 24px;
+}
+#displayed-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: url(#dissolve-filter);
+  -webkit-filter: url(#dissolve-filter);
+  transform: scale(1);
+  opacity: 1;
+  border-radius: 24px;
+  /* GPU acceleration hint */
+  will-change: transform, opacity;
+}
+#delete-image {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 12px 24px;
+  font-size: 16px;
+  cursor: pointer;
+  background: #650000;
+  color: #ff5c5c;
+  border: none;
+  border-radius: 25px;
+  transition: transform 0.2s ease;
+  z-index: 1;
+}
+#delete-image:hover {
+  transform: translate(-50%, -50%) scale(1.2);
+}
+#delete-image:active {
+  transform: translate(-50%, -50%) scale(0.9);
+}
+.hidden {
+  display: none;
+}
+.support-text {
+  font-size: 14px;
+  color: #cfd3e1;
+  width: 400px;
+  margin-top: 10px;
+}
+.support-text a {
+  color: #4babff;
+  text-decoration: none;
+}
+.support-text a:hover {
+  text-decoration: underline;
+}
+.safari-warning {
+  padding: 20px;
+  background: #af8900;
+  color: #000;
+  border: 2px solid #ff9900;
+  border-radius: 8px;
+  max-width: 500px;
+  text-align: center;
+}
+.safari-warning p {
+  margin: 0;
+  font-size: 16px;
+}

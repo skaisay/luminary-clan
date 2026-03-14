@@ -1,0 +1,70 @@
+// JavaScript
+document.addEventListener("DOMContentLoaded", () => {
+  const $ = (sel) => document.querySelector(sel),
+    $id = (id) => document.getElementById(id),
+    delBtn = $id("delete-image"),
+    img = $id("displayed-image"),
+    filt = $("#dissolve-filter"),
+    disp = filt.querySelector("feDisplacementMap"),
+    bNoise = filt.querySelector('feTurbulence[result="bigNoise"]'),
+    warn = $(".safari-warning"),
+    cont = $(".container");
+
+  // Simple Safari check
+  if (
+    /Safari/.test(navigator.userAgent) &&
+    !/Chrome/.test(navigator.userAgent)
+  ) {
+    cont.classList.add("hidden");
+    warn.classList.remove("hidden");
+    return;
+  }
+
+  const config = { d: 1000, max: 2000, ease: (t) => 1 - (1 - t) ** 3 },
+    imgs = [
+      "https://i.ibb.co/2sxT6jZ/Retro-80s-Human-Flying-Poster-cropped.jpg",
+      "https://i.ibb.co/W5qWCkK/mishkadoing-summer-flowers-sky-close-up-details-painting-grad-0e9886ef-403e-4514-866f-e7806fa3dad8-1.jpg",
+      "https://i.ibb.co/Xp6s8KR/Monet-Flowers-Rocks-Corals.png",
+      "https://i.ibb.co/cYp3hCD/Field-of-Wildflowers-Constellations.png",
+      "https://i.ibb.co/5FP5HD9/Summer-Flowers-Sky-Close-Up.png",
+      "https://i.ibb.co/cL1fKgc/Summer-Flowers-Painting.png"
+    ];
+  let i = 0;
+  const preload = (url) => (new Image().src = url);
+
+  // Optimized dissolve animation with cached config values
+  const animate = (cb) => {
+    const start = performance.now(),
+      { d, max, ease } = config; // cache configuration values
+    bNoise.setAttribute("seed", Math.floor(Math.random() * 1000));
+    const step = (now) => {
+      const t = Math.min((now - start) / d, 1),
+        e = ease(t);
+      disp.setAttribute("scale", e * max);
+      // Batch style updates
+      img.style.transform = `scale(${1 + 0.1 * e})`;
+      img.style.opacity = t < 0.5 ? "1" : String(1 - (t - 0.5) / 0.5);
+      t < 1 ? requestAnimationFrame(step) : cb();
+    };
+    requestAnimationFrame(step);
+  };
+
+  delBtn.addEventListener("click", () => {
+    if (img.style.display === "none") return;
+    delBtn.classList.add("hidden");
+    animate(() => {
+      // Reset image state
+      img.style.display = "none";
+      img.style.transform = "scale(1)";
+      img.style.opacity = "1";
+      disp.setAttribute("scale", "0");
+      // Update image and preload next one
+      img.src = imgs[(i = ++i % imgs.length)];
+      img.style.display = "block";
+      delBtn.classList.remove("hidden");
+      preload(imgs[(i + 1) % imgs.length]);
+    });
+  });
+
+  preload(imgs[(i + 1) % imgs.length]);
+});

@@ -1,0 +1,15 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+.env
+uploads/videos/*.mp4
+uploads/thumbnails/
+.local/
+.replit
+.cache/
+replit.nix
+.config/
+attached_assets/video-backgrounds/

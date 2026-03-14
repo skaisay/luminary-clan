@@ -1,0 +1,55 @@
+/* From Uiverse.io by sohoning */ 
+.button_01 {
+  position: relative;
+  font-family: 'Comic Sans MS', cursive;
+  padding-top: 20px;
+  padding-bottom: 20px;
+  padding-left: 20px;
+  padding-right: 70px;
+  outline: none;
+  border: none;
+  background-color: #DEB887;
+  border-radius: 1em;
+  color: whitesmoke;
+  font-size: 25px;
+  box-shadow: 0 0 10px #DEB887;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.button_01 a {
+  position: relative;
+  z-index: 2;
+}
+
+.tree {
+  position: absolute;
+  display: block;
+  right: -20px;
+  width: 60%;
+  height: 80%;
+  bottom: -5px;
+  transition-duration: 0.75s;
+  z-index: 1;
+}
+
+.wave {
+  position: absolute;
+  display: block;
+  top: -100%;
+  left: 0%;
+  z-index: 1;
+  transition-duration: 0.5s;
+}
+
+.button_01:hover {
+  box-shadow: 0 0 10px #0693e3;
+}
+
+.button_01:hover .tree {
+  bottom: -100%;
+}
+
+.button_01:hover .wave {
+  top: 0%;
+}

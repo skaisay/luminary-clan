@@ -1,0 +1,8 @@
+<!-- From Uiverse.io by dexter-st --> 
+<div class="btn-wrapper">
+  <button class="btn">
+    <span class="btn-txt">View Offers</span>
+    <div class="dot pulse"></div>
+  </button>
+  <span class="disclaimer-txt">*Terms &amp; conditions apply</span>
+</div>
