@@ -42,6 +42,7 @@ import Search from "@/pages/video-platform/Search";
 import Settings from "@/pages/video-platform/Settings";
 import Liked from "@/pages/video-platform/Liked";
 import ChannelManagement from "@/pages/video-platform/ChannelManagement";
+import RobloxTracker from "@/pages/roblox-tracker";
 import NotFound from "@/pages/not-found";
 
 function MainRouter() {
@@ -59,6 +60,7 @@ function MainRouter() {
       <Route path="/requests" component={() => <MaintenanceGate pageId="requests"><RequestsPage /></MaintenanceGate>} />
       <Route path="/forum" component={() => <MaintenanceGate pageId="forum"><ForumPage /></MaintenanceGate>} />
       <Route path="/about" component={() => <MaintenanceGate pageId="about"><About /></MaintenanceGate>} />
+      <Route path="/roblox-tracker" component={() => <RobloxTracker />} />
       <Route component={NotFound} />
     </Switch>
   );

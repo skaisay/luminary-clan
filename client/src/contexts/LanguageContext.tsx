@@ -71,6 +71,7 @@ const translations = {
       requests: 'Запросы',
       videos: 'Видео',
       about: 'О клане',
+      roblox: 'Roblox',
       menu: 'Меню',
     },
     dashboard: {
@@ -353,6 +354,7 @@ const translations = {
       requests: 'Requests',
       videos: 'Videos',
       about: 'About',
+      roblox: 'Roblox',
       menu: 'Menu',
     },
     dashboard: {

@@ -144,6 +144,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date().toISOString() });
   });
 
+  // === Roblox Tracker API ===
+  const robloxApi = await import('./roblox-api');
+
+  // Поиск пользователя Roblox по username
+  app.get("/api/roblox/lookup/:username", async (req, res) => {
+    try {
+      const { username } = req.params;
+      if (!username || username.length < 3 || username.length > 20) {
+        return res.status(400).json({ success: false, error: 'Имя пользователя должно быть от 3 до 20 символов' });
+      }
+      const result = await robloxApi.lookupUser(username);
+      res.json(result);
+    } catch (error: any) {
+      console.error('Roblox lookup error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка при поиске пользователя' });
+    }
+  });
+
+  // История поисков (in-memory)
+  app.get("/api/roblox/history", (_req, res) => {
+    res.json({ history: robloxApi.getSearchHistory() });
+  });
+
+  // Информация об игре по placeId
+  app.get("/api/roblox/game/:placeId", async (req, res) => {
+    try {
+      const placeId = parseInt(req.params.placeId);
+      if (isNaN(placeId)) {
+        return res.status(400).json({ success: false, error: 'Неверный placeId' });
+      }
+      const game = await robloxApi.getGameInfo(placeId);
+      if (!game) {
+        return res.status(404).json({ success: false, error: 'Игра не найдена' });
+      }
+      res.json({ success: true, game });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Ошибка при загрузке информации об игре' });
+    }
+  });
+
   app.get("/auth/discord", (req, res, next) => {
     // Валидируем и сохраняем returnTo параметр в session
     const returnTo = req.query.returnTo as string;
