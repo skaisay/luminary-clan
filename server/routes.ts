@@ -161,7 +161,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Получаем сохраненный returnTo (уже валидированный) или используем дефолтный
       const returnTo = req.session.returnTo || "/";
       delete req.session.returnTo; // Очищаем после использования
-      res.redirect(returnTo);
+      // Явно сохраняем сессию перед редиректом чтобы данные успели записаться в БД
+      req.session.save((err) => {
+        if (err) console.error('Ошибка сохранения сессии:', err);
+        res.redirect(returnTo);
+      });
     }
   );
 

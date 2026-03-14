@@ -402,8 +402,18 @@ export async function setupDiscordBot() {
       const rest = new REST({ version: '10' }).setToken(botToken!);
       const commandData = commands.map(cmd => cmd.toJSON());
       
-      // Регистрируем глобально (доступно на всех серверах через ~1 час)
-      // Или для конкретного сервера — моментально
+      // Сначала очищаем глобальные команды (могут вызывать дубликаты)
+      try {
+        await rest.put(
+          Routes.applicationCommands(client.user!.id),
+          { body: [] }
+        );
+        console.log('🧹 Глобальные команды очищены');
+      } catch (clearErr) {
+        console.error('⚠️ Не удалось очистить глобальные команды:', clearErr);
+      }
+      
+      // Регистрируем per-guild (моментально)
       const guilds = client.guilds.cache;
       for (const guild of guilds.values()) {
         try {
@@ -536,6 +546,16 @@ export async function setupDiscordBot() {
     if (member.user.bot) return;
     
     try {
+      // Автоматически назначаем роль Luminary_Member
+      const roleName = 'Luminary_Member';
+      const role = member.guild.roles.cache.find(r => r.name === roleName);
+      if (role) {
+        await member.roles.add(role);
+        console.log(`🏷️ Роль ${roleName} выдана: ${member.user.username}`);
+      } else {
+        console.log(`⚠️ Роль ${roleName} не найдена на сервере ${member.guild.name}`);
+      }
+      
       // Проверяем, существует ли уже участник в базе
       const existingMember = await db.query.clanMembers.findFirst({
         where: eq(clanMembers.discordId, member.user.id)
@@ -721,52 +741,43 @@ export async function setupDiscordBot() {
 
         // Музыка
         case 'играть':
-          await handlePlayCommand(interaction);
-          break;
         case 'пауза':
-          await handlePauseCommand(interaction);
-          break;
         case 'продолжить':
-          await handleResumeCommand(interaction);
-          break;
         case 'скип':
-          await handleSkipCommand(interaction);
-          break;
         case 'стоп':
-          await handleStopCommand(interaction);
-          break;
         case 'очередь':
-          await handleQueueCommand(interaction);
-          break;
         case 'текущее':
-          await handleNowPlayingCommand(interaction);
-          break;
         case 'повтор':
-          await handleLoopCommand(interaction);
-          break;
         case 'громкость':
-          await handleVolumeCommand(interaction);
-          break;
         case 'перемешать':
-          await handleShuffleCommand(interaction);
-          break;
         case 'удалить':
-          await handleRemoveCommand(interaction);
-          break;
         case 'очистить-очередь':
-          await handleClearQueueCommand(interaction);
-          break;
         case 'перейти':
-          await handleJumpCommand(interaction);
-          break;
         case 'поиск':
-          await handleSearchCommand(interaction);
-          break;
         case 'плейлист':
-          await handlePlaylistCommand(interaction);
-          break;
         case 'меню-музыки':
-          await handleMusicMenuCommand(interaction);
+          if (!music) {
+            await interaction.reply({ content: '❌ Музыкальная система недоступна. Требуется @discordjs/voice и DisTube.', ephemeral: true });
+            break;
+          }
+          switch (commandName) {
+            case 'играть': await handlePlayCommand(interaction); break;
+            case 'пауза': await handlePauseCommand(interaction); break;
+            case 'продолжить': await handleResumeCommand(interaction); break;
+            case 'скип': await handleSkipCommand(interaction); break;
+            case 'стоп': await handleStopCommand(interaction); break;
+            case 'очередь': await handleQueueCommand(interaction); break;
+            case 'текущее': await handleNowPlayingCommand(interaction); break;
+            case 'повтор': await handleLoopCommand(interaction); break;
+            case 'громкость': await handleVolumeCommand(interaction); break;
+            case 'перемешать': await handleShuffleCommand(interaction); break;
+            case 'удалить': await handleRemoveCommand(interaction); break;
+            case 'очистить-очередь': await handleClearQueueCommand(interaction); break;
+            case 'перейти': await handleJumpCommand(interaction); break;
+            case 'поиск': await handleSearchCommand(interaction); break;
+            case 'плейлист': await handlePlaylistCommand(interaction); break;
+            case 'меню-музыки': await handleMusicMenuCommand(interaction); break;
+          }
           break;
 
         // Модерация
@@ -845,42 +856,47 @@ export async function setupDiscordBot() {
       return;
     }
 
+    if (!music) {
+      await interaction.reply({ content: '❌ Музыкальная система недоступна', ephemeral: true });
+      return;
+    }
+
     try {
       let result;
       
       switch (customId) {
         case 'music_pause':
-          result = music.pauseMusic(interaction.guild.id);
+          result = await music.pauseSong(interaction.guild.id);
           await interaction.reply({ content: result.message, ephemeral: true });
           break;
           
         case 'music_resume':
-          result = music.resumeMusic(interaction.guild.id);
+          result = await music.resumeSong(interaction.guild.id);
           await interaction.reply({ content: result.message, ephemeral: true });
           break;
           
         case 'music_skip':
-          result = music.skipSong(interaction.guild.id);
+          result = await music.skipSong(interaction.guild.id);
           await interaction.reply({ content: result.message, ephemeral: false });
           break;
           
         case 'music_stop':
-          result = music.stopMusic(interaction.guild.id);
+          result = await music.stopSong(interaction.guild.id);
           await interaction.reply({ content: result.message, ephemeral: false });
           break;
           
         case 'music_shuffle':
-          result = music.shuffleQueue(interaction.guild.id);
+          result = await music.shuffleQueue(interaction.guild.id);
           await interaction.reply({ content: result.message, ephemeral: true });
           break;
           
         case 'music_loop':
-          result = music.toggleLoop(interaction.guild.id);
+          result = await music.toggleLoop(interaction.guild.id);
           await interaction.reply({ content: result.message, ephemeral: true });
           break;
           
         case 'music_queue':
-          const queueResult = music.getQueue(interaction.guild.id);
+          const queueResult = await music.getQueue(interaction.guild.id);
           
           if (!queueResult.success || !queueResult.queue) {
             await interaction.reply({ content: queueResult.message!, ephemeral: true });
@@ -892,13 +908,13 @@ export async function setupDiscordBot() {
             .setColor(0xA855F7)
             .setTitle('🎵 Очередь треков')
             .setDescription(
-              queue.songs.slice(0, 10).map((song, index) => 
-                `**${index + 1}.** ${song.title} [${song.duration}]`
+              queue!.map((song: any) => 
+                `**${song.position}.** ${song.title} [${song.duration}]${song.isPlaying ? ' ▶️' : ''}`
               ).join('\n') || 'Очередь пуста'
             )
             .addFields(
-              { name: 'Всего треков', value: `${queue.songs.length}`, inline: true },
-              { name: 'Повтор', value: queue.loop ? 'Вкл' : 'Выкл', inline: true }
+              { name: 'Всего треков', value: `${queueResult.totalSongs || queue!.length}`, inline: true },
+              { name: 'Повтор', value: queueResult.loop ? 'Вкл' : 'Выкл', inline: true }
             )
             .setFooter({ text: 'Показано первых 10 треков' })
             .setTimestamp();
@@ -1155,7 +1171,7 @@ async function handlePauseCommand(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const result = music.pauseMusic(interaction.guild.id);
+  const result = await music.pauseSong(interaction.guild.id);
   await interaction.reply({ content: result.message, ephemeral: !result.success });
 }
 
@@ -1165,7 +1181,7 @@ async function handleResumeCommand(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const result = music.resumeMusic(interaction.guild.id);
+  const result = await music.resumeSong(interaction.guild.id);
   await interaction.reply({ content: result.message, ephemeral: !result.success });
 }
 
@@ -1175,7 +1191,7 @@ async function handleSkipCommand(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const result = music.skipSong(interaction.guild.id);
+  const result = await music.skipSong(interaction.guild.id);
   await interaction.reply({ content: result.message });
 }
 
@@ -1185,7 +1201,7 @@ async function handleStopCommand(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const result = music.stopMusic(interaction.guild.id);
+  const result = await music.stopSong(interaction.guild.id);
   await interaction.reply({ content: result.message });
 }
 
@@ -1195,7 +1211,7 @@ async function handleQueueCommand(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const result = music.getQueue(interaction.guild.id);
+  const result = await music.getQueue(interaction.guild.id);
   
   if (!result.success || !result.queue) {
     await interaction.reply({ content: result.message!, ephemeral: true });
@@ -1207,13 +1223,13 @@ async function handleQueueCommand(interaction: ChatInputCommandInteraction) {
     .setColor(0xA855F7)
     .setTitle('🎵 Очередь треков')
     .setDescription(
-      queue.songs.map((song, index) => 
-        `**${index + 1}.** ${song.title} [${song.duration}] - *запросил ${song.requestedBy}*`
+      queue!.map((song: any) => 
+        `**${song.position}.** ${song.title} [${song.duration}]${song.isPlaying ? ' ▶️' : ''}`
       ).join('\n') || 'Очередь пуста'
     )
     .addFields(
-      { name: 'Всего треков', value: `${queue.songs.length}`, inline: true },
-      { name: 'Повтор', value: queue.loop ? 'Включен' : 'Выключен', inline: true }
+      { name: 'Всего треков', value: `${result.totalSongs || queue!.length}`, inline: true },
+      { name: 'Повтор', value: result.loop ? 'Включен' : 'Выключен', inline: true }
     )
     .setFooter({ text: 'Luminary Gaming Clan' })
     .setTimestamp();
@@ -1227,7 +1243,7 @@ async function handleNowPlayingCommand(interaction: ChatInputCommandInteraction)
     return;
   }
 
-  const result = music.getCurrentSong(interaction.guild.id);
+  const result = await music.getCurrentSong(interaction.guild.id);
   
   if (!result.success || !result.song) {
     await interaction.reply({ content: result.message!, ephemeral: true });
@@ -1259,7 +1275,7 @@ async function handleLoopCommand(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const result = music.toggleLoop(interaction.guild.id);
+  const result = await music.toggleLoop(interaction.guild.id);
   await interaction.reply({ content: result.message, ephemeral: !result.success });
 }
 
@@ -1270,7 +1286,7 @@ async function handleVolumeCommand(interaction: ChatInputCommandInteraction) {
   }
 
   const volume = interaction.options.getInteger('уровень', true);
-  const result = music.setVolume(interaction.guild.id, volume);
+  const result = await music.setVolume(interaction.guild.id, volume);
   await interaction.reply({ content: result.message, ephemeral: !result.success });
 }
 
@@ -1280,7 +1296,7 @@ async function handleShuffleCommand(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const result = music.shuffleQueue(interaction.guild.id);
+  const result = await music.shuffleQueue(interaction.guild.id);
   await interaction.reply({ content: result.message, ephemeral: !result.success });
 }
 
@@ -1291,7 +1307,7 @@ async function handleRemoveCommand(interaction: ChatInputCommandInteraction) {
   }
 
   const index = interaction.options.getInteger('номер', true);
-  const result = music.removeSong(interaction.guild.id, index);
+  const result = await music.removeSong(interaction.guild.id, index);
   await interaction.reply({ content: result.message, ephemeral: !result.success });
 }
 
@@ -1301,7 +1317,7 @@ async function handleClearQueueCommand(interaction: ChatInputCommandInteraction)
     return;
   }
 
-  const result = music.clearQueue(interaction.guild.id);
+  const result = await music.clearQueue(interaction.guild.id);
   await interaction.reply({ content: result.message, ephemeral: !result.success });
 }
 
@@ -1312,7 +1328,7 @@ async function handleJumpCommand(interaction: ChatInputCommandInteraction) {
   }
 
   const index = interaction.options.getInteger('номер', true);
-  const result = music.jumpToSong(interaction.guild.id, index);
+  const result = await music.jumpToSong(interaction.guild.id, index);
   await interaction.reply({ content: result.message, ephemeral: !result.success });
 }
 
@@ -1375,8 +1391,8 @@ async function handleMusicMenuCommand(interaction: ChatInputCommandInteraction) 
     return;
   }
 
-  const result = music.getCurrentSong(interaction.guild.id);
-  const queue = music.getQueue(interaction.guild.id);
+  const result = await music.getCurrentSong(interaction.guild.id);
+  const queue = await music.getQueue(interaction.guild.id);
 
   const embed = new EmbedBuilder()
     .setColor(0xA855F7)
