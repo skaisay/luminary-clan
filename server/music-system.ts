@@ -1,6 +1,6 @@
 import { Client, TextChannel, VoiceBasedChannel, Guild } from 'discord.js';
 import { DisTube, Queue, Song as DisTubeSong } from 'distube';
-import { YtDlpPlugin } from '@distube/yt-dlp';
+import { YouTubePlugin } from '@distube/youtube';
 import { getVoiceConnection } from '@discordjs/voice';
 
 // Подключаем ffmpeg-static если доступен
@@ -23,7 +23,7 @@ export function initializeMusicSystem(client: Client) {
       emitAddSongWhenCreatingQueue: false,
       emitAddListWhenCreatingQueue: false,
       nsfw: false,
-      plugins: [new YtDlpPlugin({ update: true })],
+      plugins: [new YouTubePlugin()],
     });
 
     // Событие: начало воспроизведения

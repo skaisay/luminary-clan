@@ -156,7 +156,7 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-function formatRelativeTime(dateStr: string) {
+function formatRelativeTime(dateStr: string, t: (key: string) => string) {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const diff = now - then;
@@ -165,10 +165,10 @@ function formatRelativeTime(dateStr: string) {
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
   
-  if (minutes < 1) return 'Только что';
-  if (minutes < 60) return `${minutes} мин. назад`;
-  if (hours < 24) return `${hours} ч. назад`;
-  if (days < 30) return `${days} дн. назад`;
+  if (minutes < 1) return t('roblox.justNow');
+  if (minutes < 60) return `${minutes} ${t('roblox.minAgo')}`;
+  if (hours < 24) return `${hours} ${t('roblox.hoursAgo')}`;
+  if (days < 30) return `${days} ${t('roblox.daysAgo')}`;
   return formatDate(dateStr);
 }
 
@@ -202,18 +202,19 @@ function StatusIndicator({ status, color }: { status: string; color: string }) {
   );
 }
 
-function AccountAge(props: { created: string }) {
+function AccountAge(props: { created: string; t: (key: string) => string }) {
+  const { t } = props;
   const created = new Date(props.created);
   const now = new Date();
   const years = now.getFullYear() - created.getFullYear();
   const months = now.getMonth() - created.getMonth();
   const totalMonths = years * 12 + months;
   
-  if (totalMonths < 1) return <span>Меньше месяца</span>;
-  if (totalMonths < 12) return <span>{totalMonths} мес.</span>;
+  if (totalMonths < 1) return <span>{t('roblox.lessThanMonth')}</span>;
+  if (totalMonths < 12) return <span>{totalMonths} {t('roblox.months')}</span>;
   const y = Math.floor(totalMonths / 12);
   const m = totalMonths % 12;
-  return <span>{y} г. {m > 0 ? `${m} мес.` : ''}</span>;
+  return <span>{y} {t('roblox.years')} {m > 0 ? `${m} ${t('roblox.months')}` : ''}</span>;
 }
 
 export default function RobloxTracker() {
@@ -376,11 +377,11 @@ export default function RobloxTracker() {
             <Gamepad2 className="h-8 w-8 text-red-400" />
           </div>
           <h1 className="text-4xl md:text-5xl font-bold neon-text-cyan tracking-wide">
-            Roblox Трекер
+            {t('roblox.title')}
           </h1>
         </div>
         <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-          Отслеживайте активность любого игрока Roblox в реальном времени
+          {t('roblox.subtitle')}
         </p>
       </div>
 
@@ -392,7 +393,7 @@ export default function RobloxTracker() {
           className={`gap-2 ${activeTab === 'player' ? 'bg-gradient-to-r from-red-600 to-orange-600' : 'glass glass-border'}`}
         >
           <User className="h-4 w-4" />
-          Поиск игрока
+          {t('roblox.playerSearch')}
         </Button>
         <Button
           variant={activeTab === 'games' ? 'default' : 'outline'}
@@ -400,7 +401,7 @@ export default function RobloxTracker() {
           className={`gap-2 ${activeTab === 'games' ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : 'glass glass-border'}`}
         >
           <Gamepad2 className="h-4 w-4" />
-          Поиск игр
+          {t('roblox.gameSearch')}
         </Button>
       </div>
 
@@ -414,7 +415,7 @@ export default function RobloxTracker() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   type="text"
-                  placeholder="Название игры или ссылка roblox.com/games/..."
+                  placeholder={t('roblox.gamePlaceholder')}
                   value={gameSearchInput}
                   onChange={(e) => setGameSearchInput(e.target.value)}
                   className="pl-10 h-12 text-base glass glass-border"
@@ -427,7 +428,7 @@ export default function RobloxTracker() {
                 className="h-12 px-6 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500"
               >
                 {gamesLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
-                <span className="ml-2 hidden sm:inline">Найти</span>
+                <span className="ml-2 hidden sm:inline">{t('roblox.find')}</span>
               </Button>
             </div>
           </form>
@@ -439,7 +440,7 @@ export default function RobloxTracker() {
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   type="text"
-                  placeholder={selectedGameId ? "Никнейм — значки игрока в этой игре" : "Никнейм игрока — узнать, во что играет..."}
+                  placeholder={selectedGameId ? t('roblox.playerBadgesPlaceholder') : t('roblox.playerInGamePlaceholder')}
                   value={playerSearchInput}
                   onChange={(e) => setPlayerSearchInput(e.target.value)}
                   className="pl-10 h-11 text-sm glass glass-border"
@@ -473,17 +474,17 @@ export default function RobloxTracker() {
                       </div>
                       {playerInGameResult.user.currentGame ? (
                         <p className="text-xs text-blue-400">
-                          🎮 Играет в: <strong>{playerInGameResult.user.currentGame.name}</strong>
+                          🎮 {t('roblox.playsIn')}: <strong>{playerInGameResult.user.currentGame.name}</strong>
                           {playerInGameResult.user.currentGame.placeId > 0 && (
-                            <a href={`https://www.roblox.com/games/${playerInGameResult.user.currentGame.placeId}`} target="_blank" rel="noopener noreferrer" className="ml-2 underline">Открыть</a>
+                            <a href={`https://www.roblox.com/games/${playerInGameResult.user.currentGame.placeId}`} target="_blank" rel="noopener noreferrer" className="ml-2 underline">{t('roblox.open')}</a>
                           )}
                         </p>
                       ) : playerInGameResult.user.presence?.type === 2 ? (
-                        <p className="text-xs text-muted-foreground">🎮 В игре (информация скрыта)</p>
+                        <p className="text-xs text-muted-foreground">🎮 {t('roblox.inGameHidden')}</p>
                       ) : playerInGameResult.user.presence?.type === 1 ? (
-                        <p className="text-xs text-green-400">🟢 Онлайн на сайте Roblox</p>
+                        <p className="text-xs text-green-400">🟢 {t('roblox.onlineOnSite')}</p>
                       ) : (
-                        <p className="text-xs text-muted-foreground">⚫ Оффлайн</p>
+                        <p className="text-xs text-muted-foreground">⚫ {t('roblox.offlineStatus')}</p>
                       )}
                     </div>
                   </div>
@@ -491,7 +492,7 @@ export default function RobloxTracker() {
                   {/* Player game badges */}
                   {selectedGameId && badgesLoading && (
                     <div className="mt-3 pt-3 border-t border-white/10 flex items-center gap-2 text-xs text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Загрузка значков...
+                      <Loader2 className="h-3 w-3 animate-spin" /> {t('roblox.loadingBadges')}
                     </div>
                   )}
                   {selectedGameId && playerGameBadges?.success && (
@@ -499,7 +500,7 @@ export default function RobloxTracker() {
                       <div className="flex items-center gap-2 mb-2">
                         <Trophy className="h-4 w-4 text-yellow-400" />
                         <span className="text-xs font-semibold">
-                          Значки в этой игре: {playerGameBadges.earnedCount} / {playerGameBadges.gameBadgesTotal}
+                          {t('roblox.badgesInGame')}: {playerGameBadges.earnedCount} / {playerGameBadges.gameBadgesTotal}
                         </span>
                         {playerGameBadges.gameBadgesTotal > 0 && (
                           <Badge variant="secondary" className="text-xs ml-auto">
@@ -516,12 +517,12 @@ export default function RobloxTracker() {
                             </div>
                           ))}
                           {playerGameBadges.earnedBadges.length > 12 && (
-                            <span className="text-xs text-muted-foreground px-2 py-1">+{playerGameBadges.earnedBadges.length - 12} ещё</span>
+                            <span className="text-xs text-muted-foreground px-2 py-1">+{playerGameBadges.earnedBadges.length - 12} {t('roblox.more')}</span>
                           )}
                         </div>
                       )}
                       {playerGameBadges.gameBadgesTotal > 0 && playerGameBadges.earnedCount === 0 && (
-                        <p className="text-xs text-muted-foreground">Ни одного значка не получено</p>
+                        <p className="text-xs text-muted-foreground">{t('roblox.noBadges')}</p>
                       )}
                     </div>
                   )}
@@ -536,11 +537,11 @@ export default function RobloxTracker() {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <History className="h-4 w-4" />
-                  <span>Недавние игры</span>
+                  <span>{t('roblox.recentGames')}</span>
                 </div>
                 <button onClick={handleClearGameHistory} className="text-xs text-muted-foreground hover:text-red-400 transition-colors flex items-center gap-1">
                   <Trash2 className="h-3 w-3" />
-                  Очистить
+                  {t('roblox.clear')}
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -568,7 +569,7 @@ export default function RobloxTracker() {
           {selectedGameId && (
             <div className="max-w-4xl mx-auto mb-6">
               <Button variant="ghost" size="sm" className="mb-4 gap-1" onClick={() => setSelectedGameId(null)}>
-                <ArrowLeft className="h-4 w-4" /> Назад к результатам
+                <ArrowLeft className="h-4 w-4" /> {t('roblox.backToResults')}
               </Button>
               
               {detailsLoading && (
@@ -595,7 +596,7 @@ export default function RobloxTracker() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <h2 className="text-2xl font-bold mb-1">{gameDetails.game.name}</h2>
-                          <p className="text-sm text-muted-foreground mb-1">от {gameDetails.game.creator}</p>
+                          <p className="text-sm text-muted-foreground mb-1">{t('roblox.by')} {gameDetails.game.creator}</p>
                           {gameDetails.game.genre && (
                             <Badge variant="secondary" className="text-xs mb-2">{gameDetails.game.genre}</Badge>
                           )}
@@ -605,7 +606,7 @@ export default function RobloxTracker() {
                           <div className="flex gap-2 mt-2">
                             <a href={`roblox://experiences/start?placeId=${gameDetails.game.placeId}`}>
                               <Button size="sm" className="gap-1.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500">
-                                <Gamepad2 className="h-4 w-4" /> Играть
+                                <Gamepad2 className="h-4 w-4" /> {t('roblox.play')}
                               </Button>
                             </a>
                             <a href={`https://www.roblox.com/games/${gameDetails.game.placeId}`} target="_blank" rel="noopener noreferrer">
@@ -624,17 +625,17 @@ export default function RobloxTracker() {
                     <div className="glass glass-border rounded-lg p-3 text-center">
                       <Users className="h-4 w-4 mx-auto text-green-400 mb-1" />
                       <div className="text-lg font-bold">{formatNumber(gameDetails.game.playing)}</div>
-                      <div className="text-xs text-muted-foreground">Сейчас играют</div>
+                      <div className="text-xs text-muted-foreground">{t('roblox.nowPlayingCount')}</div>
                     </div>
                     <div className="glass glass-border rounded-lg p-3 text-center">
                       <Eye className="h-4 w-4 mx-auto text-blue-400 mb-1" />
                       <div className="text-lg font-bold">{formatNumber(gameDetails.game.visits)}</div>
-                      <div className="text-xs text-muted-foreground">Посещений</div>
+                      <div className="text-xs text-muted-foreground">{t('roblox.totalVisits')}</div>
                     </div>
                     <div className="glass glass-border rounded-lg p-3 text-center">
                       <Heart className="h-4 w-4 mx-auto text-red-400 mb-1" />
                       <div className="text-lg font-bold">{formatNumber(gameDetails.game.favoritedCount)}</div>
-                      <div className="text-xs text-muted-foreground">В избранном</div>
+                      <div className="text-xs text-muted-foreground">{t('roblox.favorites')}</div>
                     </div>
                     <div className="glass glass-border rounded-lg p-3 text-center">
                       <ThumbsUp className="h-4 w-4 mx-auto text-yellow-400 mb-1" />
@@ -644,24 +645,24 @@ export default function RobloxTracker() {
                           : '—'
                         }
                       </div>
-                      <div className="text-xs text-muted-foreground">Рейтинг</div>
+                      <div className="text-xs text-muted-foreground">{t('roblox.rating')}</div>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 pt-0">
                     <div className="glass glass-border rounded-lg p-3 text-center">
                       <BarChart3 className="h-4 w-4 mx-auto text-purple-400 mb-1" />
                       <div className="text-sm font-bold">👍 {formatNumber(gameDetails.game.upVotes)}</div>
-                      <div className="text-xs text-muted-foreground">Лайки</div>
+                      <div className="text-xs text-muted-foreground">{t('roblox.likes')}</div>
                     </div>
                     <div className="glass glass-border rounded-lg p-3 text-center">
                       <Users className="h-4 w-4 mx-auto text-orange-400 mb-1" />
                       <div className="text-sm font-bold">{gameDetails.game.maxPlayers}</div>
-                      <div className="text-xs text-muted-foreground">Макс. игроков</div>
+                      <div className="text-xs text-muted-foreground">{t('roblox.maxPlayers')}</div>
                     </div>
                     <div className="glass glass-border rounded-lg p-3 text-center">
                       <Calendar className="h-4 w-4 mx-auto text-cyan-400 mb-1" />
                       <div className="text-sm font-bold">{gameDetails.game.created ? formatDate(gameDetails.game.created) : '—'}</div>
-                      <div className="text-xs text-muted-foreground">Создана</div>
+                      <div className="text-xs text-muted-foreground">{t('roblox.createdDate')}</div>
                     </div>
                   </div>
                 </Card>
@@ -673,14 +674,14 @@ export default function RobloxTracker() {
           {gamesLoading && (
             <div className="flex flex-col items-center justify-center py-20">
               <Loader2 className="h-12 w-12 animate-spin text-blue-400 mb-4" />
-              <p className="text-muted-foreground">Поиск игр...</p>
+              <p className="text-muted-foreground">{t('roblox.searchingGames')}</p>
             </div>
           )}
 
           {/* Game results */}
           {!selectedGameId && gameResults?.success && gameResults.games && gameResults.games.length > 0 && (
             <div className="max-w-4xl mx-auto">
-              <p className="text-sm text-muted-foreground mb-4">Найдено: {gameResults.games.length} игр</p>
+              <p className="text-sm text-muted-foreground mb-4">{t('roblox.found')}: {gameResults.games.length} {t('roblox.games')}</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {gameResults.games.map((game: any, idx: number) => (
                   <Card key={game.universeId || idx} className="glass glass-border hover:border-blue-500/40 transition-colors cursor-pointer" onClick={() => handleSelectGame(game)}>
@@ -702,12 +703,12 @@ export default function RobloxTracker() {
                           <div className="flex flex-wrap gap-2 mt-2">
                             <Badge variant="secondary" className="text-xs gap-1">
                               <Users className="h-3 w-3" />
-                              {formatNumber(game.playerCount || 0)} в игре
+                              {formatNumber(game.playerCount || 0)} {t('roblox.inGameLabel')}
                             </Badge>
                             {game.visits > 0 && (
                               <Badge variant="secondary" className="text-xs gap-1">
                                 <Eye className="h-3 w-3" />
-                                {formatNumber(game.visits)} визитов
+                                {formatNumber(game.visits)} {t('roblox.visitsLabel')}
                               </Badge>
                             )}
                             {game.totalUpVotes > 0 && (
@@ -725,13 +726,13 @@ export default function RobloxTracker() {
                             <a href={`roblox://experiences/start?placeId=${game.placeId || game.rootPlaceId}`} onClick={(e) => e.stopPropagation()}>
                               <Button size="sm" className="gap-1.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-xs h-7">
                                 <Gamepad2 className="h-3 w-3" />
-                                Играть
+                                {t('roblox.play')}
                               </Button>
                             </a>
                             <a href={`https://www.roblox.com/games/${game.placeId || game.rootPlaceId}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
                               <Button size="sm" variant="outline" className="gap-1.5 glass glass-border text-xs h-7">
                                 <ExternalLink className="h-3 w-3" />
-                                Страница
+                                {t('roblox.page')}
                               </Button>
                             </a>
                           </div>
@@ -748,7 +749,7 @@ export default function RobloxTracker() {
           {!selectedGameId && gameResults?.success && gameResults.games && gameResults.games.length === 0 && (
             <div className="max-w-2xl mx-auto text-center py-12">
               <XCircle className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-              <p className="text-muted-foreground">Игры не найдены. Попробуйте другой запрос или вставьте ссылку.</p>
+              <p className="text-muted-foreground">{t('roblox.gamesNotFound')}</p>
             </div>
           )}
 
@@ -758,9 +759,9 @@ export default function RobloxTracker() {
               <div className="p-6 rounded-3xl bg-gradient-to-br from-blue-500/10 to-cyan-500/10 mb-6">
                 <Search className="h-16 w-16 text-blue-400/50" />
               </div>
-              <h3 className="text-xl font-semibold mb-2">Поиск игр Roblox</h3>
+              <h3 className="text-xl font-semibold mb-2">{t('roblox.gameSearchTitle')}</h3>
               <p className="text-muted-foreground max-w-md">
-                Введите название игры или вставьте ссылку (roblox.com/games/...) чтобы найти информацию: онлайн, рейтинг, ссылку для запуска
+                {t('roblox.gameSearchDesc')}
               </p>
             </div>
           )}
@@ -777,7 +778,7 @@ export default function RobloxTracker() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
               type="text"
-              placeholder="Введите никнейм в Roblox..."
+              placeholder={t('roblox.searchPlaceholder')}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="pl-10 h-12 text-base glass glass-border"
@@ -790,7 +791,7 @@ export default function RobloxTracker() {
             className="h-12 px-6 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500"
           >
             {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
-            <span className="ml-2 hidden sm:inline">Найти</span>
+            <span className="ml-2 hidden sm:inline">{t('roblox.find')}</span>
           </Button>
         </div>
       </form>
@@ -801,14 +802,14 @@ export default function RobloxTracker() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <History className="h-4 w-4" />
-              <span>Недавние поиски</span>
+              <span>{t('roblox.recentSearches')}</span>
             </div>
             <button 
               onClick={handleClearHistory}
               className="text-xs text-muted-foreground hover:text-red-400 transition-colors flex items-center gap-1"
             >
               <Trash2 className="h-3 w-3" />
-              Очистить
+              {t('roblox.clear')}
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -834,7 +835,7 @@ export default function RobloxTracker() {
       {isLoading && (
         <div className="flex flex-col items-center justify-center py-20">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">Загрузка данных из Roblox...</p>
+          <p className="text-muted-foreground">{t('roblox.loadingData')}</p>
         </div>
       )}
 
@@ -845,8 +846,8 @@ export default function RobloxTracker() {
             <CardContent className="flex items-center gap-4 py-8">
               <XCircle className="h-12 w-12 text-red-400 flex-shrink-0" />
               <div>
-                <h3 className="text-lg font-semibold text-red-400">Пользователь не найден</h3>
-                <p className="text-muted-foreground">{result.error || 'Проверьте правильность никнейма'}</p>
+                <h3 className="text-lg font-semibold text-red-400">{t('roblox.userNotFound')}</h3>
+                <p className="text-muted-foreground">{result.error || t('roblox.checkUsername')}</p>
               </div>
             </CardContent>
           </Card>
@@ -889,7 +890,7 @@ export default function RobloxTracker() {
                       {user.isBanned && (
                         <Badge variant="destructive" className="gap-1">
                           <Shield className="h-3 w-3" />
-                          Заблокирован
+                          {t('roblox.banned')}
                         </Badge>
                       )}
                     </div>
@@ -903,16 +904,16 @@ export default function RobloxTracker() {
                     <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 text-sm text-muted-foreground">
                       <span className="flex items-center gap-1.5">
                         <Calendar className="h-4 w-4" />
-                        Создан: {formatDate(user.created)}
+                        {t('roblox.created')}: {formatDate(user.created)}
                       </span>
                       <span className="flex items-center gap-1.5">
                         <Clock className="h-4 w-4" />
-                        Возраст: <AccountAge created={user.created} />
+                        {t('roblox.age')}: <AccountAge created={user.created} t={t} />
                       </span>
                       {user.lastOnline && user.presence?.type === 0 && (
                         <span className="flex items-center gap-1.5">
                           <Globe className="h-4 w-4" />
-                          Был: {formatRelativeTime(user.lastOnline)}
+                          {t('roblox.lastSeen')}: {formatRelativeTime(user.lastOnline, t)}
                         </span>
                       )}
                     </div>
@@ -927,7 +928,7 @@ export default function RobloxTracker() {
                   >
                     <Button variant="outline" className="gap-2 glass glass-border">
                       <ExternalLink className="h-4 w-4" />
-                      Профиль
+                      {t('roblox.profile')}
                     </Button>
                   </a>
                 </div>
@@ -941,21 +942,21 @@ export default function RobloxTracker() {
               <div className="flex flex-col items-center gap-1">
                 <Users className="h-5 w-5 text-blue-400" />
                 <span className="text-2xl font-bold">{formatNumber(user.stats.friends)}</span>
-                <span className="text-xs text-muted-foreground">Друзья</span>
+                <span className="text-xs text-muted-foreground">{t('roblox.friends')}</span>
               </div>
             </Card>
             <Card className="glass glass-border text-center py-4">
               <div className="flex flex-col items-center gap-1">
                 <UserPlus className="h-5 w-5 text-purple-400" />
                 <span className="text-2xl font-bold">{formatNumber(user.stats.followers)}</span>
-                <span className="text-xs text-muted-foreground">Подписчики</span>
+                <span className="text-xs text-muted-foreground">{t('roblox.followers')}</span>
               </div>
             </Card>
             <Card className="glass glass-border text-center py-4">
               <div className="flex flex-col items-center gap-1">
                 <Eye className="h-5 w-5 text-green-400" />
                 <span className="text-2xl font-bold">{formatNumber(user.stats.followings)}</span>
-                <span className="text-xs text-muted-foreground">Подписки</span>
+                <span className="text-xs text-muted-foreground">{t('roblox.following')}</span>
               </div>
             </Card>
           </div>
@@ -966,7 +967,7 @@ export default function RobloxTracker() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-blue-400">
                   <Gamepad2 className="h-5 w-5" />
-                  Сейчас играет
+                  {t('roblox.nowPlaying')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -980,13 +981,13 @@ export default function RobloxTracker() {
                       {user.currentGame.playing > 0 && (
                         <Badge variant="secondary" className="gap-1">
                           <Users className="h-3 w-3" />
-                          {formatNumber(user.currentGame.playing)} играют
+                          {formatNumber(user.currentGame.playing)} {t('roblox.playing')}
                         </Badge>
                       )}
                       {user.currentGame.visits > 0 && (
                         <Badge variant="secondary" className="gap-1">
                           <Eye className="h-3 w-3" />
-                          {formatNumber(user.currentGame.visits)} посещений
+                          {formatNumber(user.currentGame.visits)} {t('roblox.visits')}
                         </Badge>
                       )}
                       {user.currentGame.creator && (
@@ -1005,7 +1006,7 @@ export default function RobloxTracker() {
                       >
                         <Button className="w-full gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500">
                           <Gamepad2 className="h-4 w-4" />
-                          Присоединиться
+                          {t('roblox.join')}
                         </Button>
                       </a>
                     )}
@@ -1017,7 +1018,7 @@ export default function RobloxTracker() {
                       >
                         <Button variant="outline" className="w-full gap-2 glass glass-border">
                           <ExternalLink className="h-4 w-4" />
-                          Страница игры
+                          {t('roblox.gamePage')}
                         </Button>
                       </a>
                     )}
@@ -1033,9 +1034,9 @@ export default function RobloxTracker() {
               <CardContent className="flex items-center gap-4 py-6">
                 <Gamepad2 className="h-8 w-8 text-blue-400 flex-shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-blue-400">В игре</h3>
+                  <h3 className="font-semibold text-blue-400">{t('roblox.inGame')}</h3>
                   <p className="text-sm text-muted-foreground">
-                    {user.lastLocation || 'Информация об игре скрыта настройками приватности'}
+                    {user.lastLocation || t('roblox.gameHidden')}
                   </p>
                 </div>
               </CardContent>
@@ -1048,8 +1049,8 @@ export default function RobloxTracker() {
               <CardContent className="flex items-center gap-4 py-6">
                 <Globe className="h-8 w-8 text-green-400 flex-shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-green-400">Сейчас онлайн</h3>
-                  <p className="text-sm text-muted-foreground">{user.lastLocation || 'На сайте Roblox'}</p>
+                  <h3 className="font-semibold text-green-400">{t('roblox.online')}</h3>
+                  <p className="text-sm text-muted-foreground">{user.lastLocation || t('roblox.onRoblox')}</p>
                 </div>
               </CardContent>
             </Card>
@@ -1061,11 +1062,11 @@ export default function RobloxTracker() {
               <CardContent className="flex items-center gap-4 py-6">
                 <Clock className="h-8 w-8 text-gray-400 flex-shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-gray-400">Оффлайн</h3>
+                  <h3 className="font-semibold text-gray-400">{t('roblox.offline')}</h3>
                   <p className="text-sm text-muted-foreground">
                     {user.lastOnline 
-                      ? `Последний раз в сети: ${formatRelativeTime(user.lastOnline)}`
-                      : 'Время последнего входа неизвестно'
+                      ? `${t('roblox.lastOnline')}: ${formatRelativeTime(user.lastOnline, t)}`
+                      : t('roblox.unknownTime')
                     }
                   </p>
                 </div>
@@ -1078,8 +1079,8 @@ export default function RobloxTracker() {
               <CardContent className="flex items-center gap-4 py-6">
                 <Gamepad2 className="h-8 w-8 text-orange-400 flex-shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-orange-400">В Roblox Studio</h3>
-                  <p className="text-sm text-muted-foreground">Занимается разработкой игры</p>
+                  <h3 className="font-semibold text-orange-400">{t('roblox.inStudio')}</h3>
+                  <p className="text-sm text-muted-foreground">{t('roblox.developing')}</p>
                 </div>
               </CardContent>
             </Card>
@@ -1089,7 +1090,7 @@ export default function RobloxTracker() {
           {autoRefresh && (
             <div className="text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              Авто-обновление каждые 30 секунд
+              {t('roblox.autoRefresh')}
             </div>
           )}
         </div>
@@ -1101,9 +1102,9 @@ export default function RobloxTracker() {
           <div className="p-6 rounded-3xl bg-gradient-to-br from-red-500/10 to-orange-500/10 mb-6">
             <Gamepad2 className="h-16 w-16 text-red-400/50" />
           </div>
-          <h3 className="text-xl font-semibold mb-2">Начните поиск</h3>
+          <h3 className="text-xl font-semibold mb-2">{t('roblox.startSearch')}</h3>
           <p className="text-muted-foreground max-w-md">
-            Введите никнейм любого игрока Roblox, чтобы увидеть его профиль, статус и текущую игру
+            {t('roblox.startSearchDesc')}
           </p>
         </div>
       )}
