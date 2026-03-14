@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Home, Trophy, Newspaper, Users, Info, BarChart3, MessageSquarePlus, MessagesSquare, ShoppingBag, Package, Coins, Menu, LogOut, LogIn, User as UserIcon, Video } from "lucide-react";
+import { Home, Trophy, Newspaper, Users, Info, BarChart3, MessageSquarePlus, MessagesSquare, ShoppingBag, Package, Coins, Menu, LogOut, LogIn, User as UserIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { CoinBalance } from "@/components/coin-balance";
 import { DiscordFlowerButton } from "@/components/discord-flower-button";
@@ -83,11 +83,6 @@ const menuItemsConfig = [
     key: "nav.forum",
     url: "/forum",
     icon: MessagesSquare,
-  },
-  {
-    key: "nav.videos",
-    url: "/video-platform",
-    icon: Video,
   },
 ];
 

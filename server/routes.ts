@@ -37,7 +37,10 @@ import {
   insertVideoSchema,
   insertVideoLikeSchema,
   insertVideoCommentSchema,
-  insertChannelSchema
+  insertChannelSchema,
+  insertProfileDecorationSchema,
+  profileDecorations,
+  memberDecorations,
 } from "@shared/schema";
 import { videoUpload } from "./upload";
 import {
@@ -1994,6 +1997,183 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .returning();
       
       res.json(updated[0]);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===== Profile Decorations (Декорации профиля) =====
+
+  // PUBLIC: Получить все доступные декорации
+  app.get("/api/decorations", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+      const decorations = await db.select().from(profileDecorations)
+        .where(eq(profileDecorations.isAvailable, true))
+        .orderBy(profileDecorations.createdAt);
+      res.json(decorations);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PUBLIC: Получить декорации конкретного участника
+  app.get("/api/decorations/member/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+      const decorations = await db.select({
+        decoration: profileDecorations,
+        memberDecoration: memberDecorations,
+      })
+        .from(memberDecorations)
+        .innerJoin(profileDecorations, eq(memberDecorations.decorationId, profileDecorations.id))
+        .where(eq(memberDecorations.discordId, req.params.discordId));
+      res.json(decorations);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ADMIN: Получить все декорации (включая недоступные)
+  app.get("/api/admin/decorations", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { desc } = await import("drizzle-orm");
+      const decorations = await db.select().from(profileDecorations)
+        .orderBy(desc(profileDecorations.createdAt));
+      res.json(decorations);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ADMIN: Создать декорацию
+  app.post("/api/admin/decorations", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const validatedData = insertProfileDecorationSchema.parse(req.body);
+      const [decoration] = await db.insert(profileDecorations).values(validatedData).returning();
+      res.status(201).json(decoration);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // ADMIN: Обновить декорацию
+  app.patch("/api/admin/decorations/:id", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+      const [updated] = await db.update(profileDecorations)
+        .set({ ...req.body, updatedAt: new Date() })
+        .where(eq(profileDecorations.id, req.params.id))
+        .returning();
+      if (!updated) return res.status(404).json({ error: "Декорация не найдена" });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // ADMIN: Удалить декорацию
+  app.delete("/api/admin/decorations/:id", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+      const [deleted] = await db.delete(profileDecorations)
+        .where(eq(profileDecorations.id, req.params.id))
+        .returning();
+      if (!deleted) return res.status(404).json({ error: "Декорация не найдена" });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ADMIN: Выдать декорацию участнику
+  app.post("/api/admin/decorations/assign", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq, and } = await import("drizzle-orm");
+      const { clanMembers } = await import("@shared/schema");
+      const { decorationId, discordId } = req.body;
+
+      // Проверяем существование участника
+      const [member] = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId));
+      if (!member) return res.status(404).json({ error: "Участник не найден" });
+
+      // Проверяем существование декорации
+      const [decoration] = await db.select().from(profileDecorations).where(eq(profileDecorations.id, decorationId));
+      if (!decoration) return res.status(404).json({ error: "Декорация не найдена" });
+
+      // Проверяем, что участник ещё не имеет эту декорацию
+      const [existing] = await db.select().from(memberDecorations)
+        .where(and(
+          eq(memberDecorations.discordId, discordId),
+          eq(memberDecorations.decorationId, decorationId)
+        ));
+      if (existing) return res.status(400).json({ error: "Участник уже имеет эту декорацию" });
+
+      // Выдаём декорацию
+      const [assigned] = await db.insert(memberDecorations).values({
+        memberId: member.id,
+        decorationId,
+        discordId,
+        isEquipped: false,
+      }).returning();
+
+      // Обновляем счётчик владельцев
+      await db.update(profileDecorations)
+        .set({ currentOwners: decoration.currentOwners + 1 })
+        .where(eq(profileDecorations.id, decorationId));
+
+      res.status(201).json(assigned);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ADMIN: Забрать декорацию у участника
+  app.delete("/api/admin/decorations/revoke/:id", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+      const [revoked] = await db.delete(memberDecorations)
+        .where(eq(memberDecorations.id, req.params.id))
+        .returning();
+      if (!revoked) return res.status(404).json({ error: "Запись не найдена" });
+
+      // Уменьшаем счётчик владельцев
+      const [decoration] = await db.select().from(profileDecorations)
+        .where(eq(profileDecorations.id, revoked.decorationId));
+      if (decoration && decoration.currentOwners > 0) {
+        await db.update(profileDecorations)
+          .set({ currentOwners: decoration.currentOwners - 1 })
+          .where(eq(profileDecorations.id, revoked.decorationId));
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ADMIN: Получить владельцев конкретной декорации
+  app.get("/api/admin/decorations/:id/owners", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+      const { clanMembers } = await import("@shared/schema");
+      const owners = await db.select({
+        memberDecoration: memberDecorations,
+        member: clanMembers,
+      })
+        .from(memberDecorations)
+        .innerJoin(clanMembers, eq(memberDecorations.memberId, clanMembers.id))
+        .where(eq(memberDecorations.decorationId, req.params.id));
+      res.json(owners);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

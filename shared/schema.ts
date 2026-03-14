@@ -720,3 +720,50 @@ export const insertVideoPlatformAdminSchema = createInsertSchema(videoPlatformAd
 
 export type VideoPlatformAdmin = typeof videoPlatformAdmins.$inferSelect;
 export type InsertVideoPlatformAdmin = z.infer<typeof insertVideoPlatformAdminSchema>;
+
+// Discord Profile Decorations (значки, рамки аватаров, эффекты профиля, баннеры)
+export const profileDecorations = pgTable("profile_decorations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  type: text("type").notNull().default("badge"), // badge, avatar_frame, profile_effect, banner, name_color
+  emoji: text("emoji"), // эмодзи/символ для отображения рядом с ником
+  imageUrl: text("image_url"), // URL картинки декорации
+  cssEffect: text("css_effect"), // CSS для анимаций/эффектов
+  color: text("color"), // Цвет для name_color типа
+  rarity: text("rarity").notNull().default("common"), // common, uncommon, rare, epic, legendary
+  price: integer("price").notNull().default(100), // Цена в LumiCoin
+  category: text("category").notNull().default("general"), // general, seasonal, limited, exclusive
+  isAvailable: boolean("is_available").default(true).notNull(),
+  maxOwners: integer("max_owners").default(-1), // -1 = неограничено
+  currentOwners: integer("current_owners").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Купленные/назначенные декорации участников
+export const memberDecorations = pgTable("member_decorations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  memberId: varchar("member_id").notNull().references(() => clanMembers.id, { onDelete: "cascade" }),
+  decorationId: varchar("decoration_id").notNull().references(() => profileDecorations.id, { onDelete: "cascade" }),
+  discordId: text("discord_id").notNull(),
+  isEquipped: boolean("is_equipped").default(false).notNull(),
+  acquiredAt: timestamp("acquired_at").defaultNow().notNull(),
+});
+
+export const insertProfileDecorationSchema = createInsertSchema(profileDecorations).omit({
+  id: true,
+  currentOwners: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertMemberDecorationSchema = createInsertSchema(memberDecorations).omit({
+  id: true,
+  acquiredAt: true,
+});
+
+export type ProfileDecoration = typeof profileDecorations.$inferSelect;
+export type InsertProfileDecoration = z.infer<typeof insertProfileDecorationSchema>;
+export type MemberDecoration = typeof memberDecorations.$inferSelect;
+export type InsertMemberDecoration = z.infer<typeof insertMemberDecorationSchema>;
