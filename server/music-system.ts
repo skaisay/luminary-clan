@@ -1,6 +1,7 @@
 import { Client, TextChannel, VoiceBasedChannel, Guild } from 'discord.js';
 import { DisTube, Queue, Song as DisTubeSong } from 'distube';
 import { YtDlpPlugin } from '@distube/yt-dlp';
+import { getVoiceConnection } from '@discordjs/voice';
 
 // Подключаем ffmpeg-static если доступен
 try {
@@ -47,7 +48,6 @@ export function initializeMusicSystem(client: Client) {
     // Workaround для cloud-хостингов (Render, Railway, Heroku)
     // UDP keepAlive packets вызывают таймаут на платформах с ограниченным UDP.
     // Патчим КАЖДОЕ voice-соединение, которое создаёт DisTube, через voiceStateUpdate.
-    const { getVoiceConnection } = await import('@discordjs/voice');
     const patchedGuilds = new Set<string>();
     
     client.on('voiceStateUpdate', (_oldState, newState) => {
