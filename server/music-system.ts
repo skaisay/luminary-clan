@@ -43,7 +43,58 @@ export function initializeMusicSystem(client: Client) {
       }
     });
 
-    console.log('✅ DisTube музыкальная система инициализирована');
+    // ===== GLOBAL VOICE CONNECTION FIX =====
+    // Workaround для cloud-хостингов (Render, Railway, Heroku)
+    // UDP keepAlive packets вызывают таймаут на платформах с ограниченным UDP.
+    // Патчим КАЖДОЕ voice-соединение, которое создаёт DisTube, через voiceStateUpdate.
+    const { getVoiceConnection } = await import('@discordjs/voice');
+    const patchedGuilds = new Set<string>();
+    
+    client.on('voiceStateUpdate', (_oldState, newState) => {
+      // Только наш бот
+      if (newState.member?.id !== client.user?.id) return;
+      if (!newState.channelId) return; // disconnect — игнорируем
+      
+      const guildId = newState.guild.id;
+      if (patchedGuilds.has(guildId)) return; // уже пропатчено
+      patchedGuilds.add(guildId);
+      
+      // Небольшая задержка, чтобы VoiceConnection объект был создан
+      setTimeout(() => {
+        try {
+          const connection = getVoiceConnection(guildId);
+          if (!connection) { patchedGuilds.delete(guildId); return; }
+          
+          // Патчим networking: отключаем UDP keepAlive
+          connection.on('stateChange', (_old: any, newS: any) => {
+            const networking = Reflect.get(newS, 'networking');
+            networking?.on('stateChange', (_: any, ns: any) => {
+              const udp = Reflect.get(ns, 'udp');
+              clearInterval(udp?.keepAliveInterval);
+            });
+          });
+          
+          // Также проверяем текущее состояние
+          const curNet = Reflect.get(connection.state, 'networking');
+          curNet?.on('stateChange', (_: any, ns: any) => {
+            const udp = Reflect.get(ns, 'udp');
+            clearInterval(udp?.keepAliveInterval);
+          });
+          
+          // Убираем из set при disconnect, чтобы можно было пропатчить заново
+          connection.on('stateChange' as any, (oldS: any, newS: any) => {
+            if (newS.status === 'destroyed') patchedGuilds.delete(guildId);
+          });
+          
+          console.log(`✅ Voice UDP keepAlive workaround applied for guild ${guildId}`);
+        } catch (e: any) {
+          patchedGuilds.delete(guildId);
+          console.log('⚠️ Voice fix error:', e.message);
+        }
+      }, 200);
+    });
+
+    console.log('✅ DisTube музыкальная система инициализирована (с UDP workaround)');
   } catch (err: any) {
     console.error('❌ Ошибка инициализации DisTube:', err.message);
     distube = null;
@@ -69,59 +120,8 @@ export async function addSong(
       throw new Error('DisTube не инициализирован');
     }
 
-    // Предварительное подключение к голосовому каналу с networking workaround для cloud-хостинга
-    try {
-      const { joinVoiceChannel, VoiceConnectionStatus, entersState, getVoiceConnection } = await import('@discordjs/voice');
-      let connection = getVoiceConnection(guild.id);
-      
-      if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) {
-        connection = joinVoiceChannel({
-          channelId: voiceChannel.id,
-          guildId: guild.id,
-          adapterCreator: guild.voiceAdapterCreator as any,
-          selfDeaf: true,
-        });
-        
-        // CRITICAL: Networking workaround для cloud platforms (Render, Railway, Heroku)
-        // Предотвращает проблемы с UDP keepAlive, которые мешают установить соединение
-        connection.on('stateChange', (oldState: any, newState: any) => {
-          const oldNetworking = Reflect.get(oldState, 'networking');
-          const newNetworking = Reflect.get(newState, 'networking');
-          
-          newNetworking?.on('stateChange', (oldNetworkState: any, newNetworkState: any) => {
-            const newUdp = Reflect.get(newNetworkState, 'udp');
-            clearInterval(newUdp?.keepAliveInterval);
-          });
-        });
-        
-        // Обработка разрыва соединения — пытаемся переподключиться
-        connection.on(VoiceConnectionStatus.Disconnected, async () => {
-          try {
-            await Promise.race([
-              entersState(connection!, VoiceConnectionStatus.Signalling, 5_000),
-              entersState(connection!, VoiceConnectionStatus.Connecting, 5_000),
-            ]);
-            // Переподключение
-          } catch {
-            connection?.destroy();
-          }
-        });
-        
-        // Ждём подключения до 60 секунд
-        await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
-        console.log(`✅ Предварительное подключение к voice каналу успешно (networking workaround)`);
-      } else if (connection.state.status !== VoiceConnectionStatus.Ready) {
-        // Если соединение есть, но не Ready — ждём
-        await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
-        console.log(`✅ Существующее voice соединение перешло в Ready`);
-      } else {
-        console.log(`✅ Voice соединение уже активно`);
-      }
-    } catch (preConnErr: any) {
-      console.log('⚠️ Предварительное подключение не удалось:', preConnErr.message);
-      // Не выбрасываем ошибку — пусть DisTube попробует сам
-    }
-
+    // DisTube сам управляет voice-подключениями.
+    // UDP keepAlive workaround применяется глобально через voiceStateUpdate в initializeMusicSystem.
     const result = await distube.play(voiceChannel, query, {
       textChannel: textChannel,
       member: guild.members.cache.find(m => m.user.tag === requestedBy),
@@ -155,11 +155,12 @@ export async function addSong(
     // Улучшенные сообщения об ошибках
     let message = `❌ Ошибка: ${error.message || 'Не удалось добавить трек'}`;
     
-    if (error.message?.includes('Cannot connect to the voice channel') || error.message?.includes('30 seconds')) {
+    if (error.message?.includes('Cannot connect to the voice channel') || error.message?.includes('30 seconds') || error.message?.includes('not managed by DisTube')) {
       message = '❌ Не удалось подключиться к голосовому каналу. Возможные причины:\n' +
         '• Бот не имеет прав на подключение к каналу\n' +
         '• Сервер хостинга не поддерживает UDP-соединения для голоса\n' +
-        '• Попробуйте перезайти в голосовой канал';
+        '• Попробуйте перезайти в голосовой канал\n' +
+        '• Попробуйте команду /стоп перед повторной попыткой';
     } else if (error.message?.includes('Sign in') || error.message?.includes('confirm your age') || error.message?.includes('bot')) {
       message = '❌ YouTube заблокировал запрос. Попробуйте:\n• Использовать прямую ссылку\n• Попробовать другой трек';
     } else if (error.message?.includes('No result') || error.message?.includes('not found')) {
@@ -346,28 +347,6 @@ export async function addPlaylist(
 ): Promise<{ success: boolean; message: string; count?: number }> {
   try {
     if (!distube) throw new Error('DisTube не инициализирован');
-
-    // Предварительное подключение с networking workaround
-    try {
-      const { joinVoiceChannel, VoiceConnectionStatus, entersState, getVoiceConnection } = await import('@discordjs/voice');
-      let connection = getVoiceConnection(guild.id);
-      if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) {
-        connection = joinVoiceChannel({
-          channelId: voiceChannel.id,
-          guildId: guild.id,
-          adapterCreator: guild.voiceAdapterCreator as any,
-          selfDeaf: true,
-        });
-        connection.on('stateChange', (oldState: any, newState: any) => {
-          const newNetworking = Reflect.get(newState, 'networking');
-          newNetworking?.on('stateChange', (_: any, ns: any) => {
-            const newUdp = Reflect.get(ns, 'udp');
-            clearInterval(newUdp?.keepAliveInterval);
-          });
-        });
-        await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
-      }
-    } catch {}
 
     const result = await distube.play(voiceChannel, playlistUrl, {
       textChannel: textChannel,
