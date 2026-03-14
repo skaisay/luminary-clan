@@ -22,8 +22,6 @@ export function initializeMusicSystem(client: Client) {
     emitAddListWhenCreatingQueue: false,
     nsfw: false,
     plugins: [new YtDlpPlugin({ update: true })],
-    // Увеличиваем таймаут подключения к голосовому каналу (по умолчанию 30с)
-    joinTimeout: 60000,
   });
 
   // Событие: начало воспроизведения
