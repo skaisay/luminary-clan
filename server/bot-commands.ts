@@ -413,8 +413,12 @@ export async function setupDiscordBot() {
     console.log(`🌍 Окружение: ${process.env.NODE_ENV || 'development'}`);
     
     // Инициализация музыкальной системы DisTube
-    if (music && music.initializeMusicSystem) {
-      music.initializeMusicSystem(client);
+    try {
+      if (music && music.initializeMusicSystem) {
+        music.initializeMusicSystem(client);
+      }
+    } catch (musicErr) {
+      console.error('⚠️ Ошибка инициализации музыкальной системы:', musicErr);
     }
     
     // Глобальная регистрация slash-команд через REST API
@@ -423,34 +427,23 @@ export async function setupDiscordBot() {
       const rest = new REST({ version: '10' }).setToken(botToken!);
       const commandData = commands.map(cmd => cmd.toJSON());
       
-      // 1. Очищаем глобальные команды (могут вызывать дубликаты)
-      try {
-        await rest.put(
-          Routes.applicationCommands(client.user!.id),
-          { body: [] }
-        );
-        console.log('🧹 Глобальные команды очищены');
-      } catch (clearErr) {
-        console.error('⚠️ Не удалось очистить глобальные команды:', clearErr);
-      }
+      // Регистрируем глобально (надёжный способ — работает даже если guild cache пуст)
+      await rest.put(
+        Routes.applicationCommands(client.user!.id),
+        { body: commandData }
+      );
+      console.log(`✅ ${commandData.length} slash-команд зарегистрировано глобально`);
       
-      // 2. Очищаем ВСЕ guild-команды, затем регистрируем заново
+      // Также регистрируем на каждый сервер для мгновенного обновления
       const guilds = client.guilds.cache;
+      console.log(`🔍 Серверов в кэше: ${guilds.size}`);
       for (const guild of guilds.values()) {
         try {
-          // Сначала полностью очищаем старые guild-команды
-          await rest.put(
-            Routes.applicationGuildCommands(client.user!.id, guild.id),
-            { body: [] }
-          );
-          console.log(`🧹 Старые команды очищены на ${guild.name}`);
-          
-          // Затем регистрируем актуальный набор
           await rest.put(
             Routes.applicationGuildCommands(client.user!.id, guild.id),
             { body: commandData }
           );
-          console.log(`✅ ${commandData.length} slash-команд зарегистрировано на: ${guild.name} (${guild.id})`);
+          console.log(`✅ Команды зарегистрированы на: ${guild.name} (${guild.id})`);
         } catch (guildErr) {
           console.error(`❌ Ошибка регистрации команд на ${guild.name}:`, guildErr);
         }
