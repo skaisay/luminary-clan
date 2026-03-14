@@ -1,13 +1,18 @@
 import OpenAI from "openai";
 
-// This is using Replit's AI Integrations service, which provides OpenAI-compatible API access without requiring your own OpenAI API key.
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-const openai = new OpenAI({
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY
-});
+// OpenAI client - optional, only works when API keys are provided
+const openai = (process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY)
+  ? new OpenAI({
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+    })
+  : null;
 
 export async function getChatCompletion(userMessage: string, systemPrompt?: string): Promise<string> {
+  if (!openai) {
+    return "AI функционал недоступен — ключ OpenAI не настроен.";
+  }
+
   const messages: any[] = [];
   
   if (systemPrompt) {
@@ -17,7 +22,7 @@ export async function getChatCompletion(userMessage: string, systemPrompt?: stri
   messages.push({ role: "user", content: userMessage });
 
   const response = await openai.chat.completions.create({
-    model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+    model: "gpt-5",
     messages,
     max_completion_tokens: 1024,
   });
