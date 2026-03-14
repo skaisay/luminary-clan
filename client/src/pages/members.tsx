@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import type { ClanMember } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
 
 interface DiscordInfo {
   memberCount: number;
@@ -21,6 +22,8 @@ export default function Members() {
   const { data: members, isLoading } = useQuery<ClanMember[]>({
     queryKey: ["/api/members"],
   });
+
+  const { data: decorations } = useAllDecorations();
 
   // Получаем реальное количество участников с Discord API
   const { data: discordInfo } = useQuery<DiscordInfo>({
@@ -108,7 +111,10 @@ export default function Members() {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <CardTitle className="text-base mb-0.5 truncate">{member.username}</CardTitle>
+                    <CardTitle className="text-base mb-0.5 truncate">
+                      {member.username}
+                      <MemberDecorations discordId={member.discordId} decorations={decorations} />
+                    </CardTitle>
                     <div className="flex items-center gap-1.5">
                       {getRoleIcon(member.role)}
                       <Badge variant="outline" className="text-xs py-0 px-1.5">{member.role}</Badge>

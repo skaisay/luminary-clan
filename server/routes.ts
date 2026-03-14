@@ -396,7 +396,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/admin/check", (req, res) => {
-    if (req.isAuthenticated()) {
+    if (req.isAuthenticated() && (req.user as any).type === 'admin') {
       res.json({ 
         authenticated: true, 
         admin: { 
@@ -2003,6 +2003,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ===== Profile Decorations (Декорации профиля) =====
+
+  // PUBLIC: Получить все назначенные декорации (для отображения возле ников)
+  app.get("/api/decorations/all-equipped", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+      const results = await db.select({
+        discordId: memberDecorations.discordId,
+        emoji: profileDecorations.emoji,
+        type: profileDecorations.type,
+        color: profileDecorations.color,
+        name: profileDecorations.name,
+        rarity: profileDecorations.rarity,
+        isEquipped: memberDecorations.isEquipped,
+      })
+        .from(memberDecorations)
+        .innerJoin(profileDecorations, eq(memberDecorations.decorationId, profileDecorations.id))
+        .where(eq(memberDecorations.isEquipped, true));
+      
+      // Группируем по discordId
+      const grouped: Record<string, Array<{emoji: string | null, type: string, color: string | null, name: string, rarity: string}>> = {};
+      for (const row of results) {
+        if (!grouped[row.discordId]) grouped[row.discordId] = [];
+        grouped[row.discordId].push({ emoji: row.emoji, type: row.type, color: row.color, name: row.name, rarity: row.rarity });
+      }
+      res.json(grouped);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // PUBLIC: Получить все доступные декорации
   app.get("/api/decorations", async (req, res) => {

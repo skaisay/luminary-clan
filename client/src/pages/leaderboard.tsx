@@ -5,12 +5,16 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ClanMember } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default function Leaderboard() {
   const { t } = useLanguage();
   const { data: members, isLoading } = useQuery<ClanMember[]>({
     queryKey: ["/api/members"],
   });
+
+  const { data: decorations } = useAllDecorations();
 
   const sortedMembers = members?.sort((a, b) => (b.lumiCoins ?? 0) - (a.lumiCoins ?? 0)) || [];
 
@@ -29,6 +33,7 @@ export default function Leaderboard() {
   };
 
   return (
+    <TooltipProvider>
     <div className="container mx-auto px-4 py-8 relative">
       <div className="mb-6 text-center">
         <h1 className="text-3xl md:text-4xl font-bold mb-2 text-primary tracking-wide">
@@ -80,6 +85,7 @@ export default function Leaderboard() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <h3 className="text-sm font-bold truncate">{member.username}</h3>
+                      <MemberDecorations discordId={member.discordId} decorations={decorations} />
                       <Badge className="text-[10px] px-1.5 py-0 h-5" variant="outline">
                         {getRankBadge(index)}
                       </Badge>
@@ -104,5 +110,6 @@ export default function Leaderboard() {
         </CardContent>
       </Card>
     </div>
+    </TooltipProvider>
   );
 }

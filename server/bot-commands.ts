@@ -361,6 +361,29 @@ export async function setupDiscordBot() {
           .setDescription('Варианты через запятую (например: вариант1, вариант2, вариант3)')
           .setRequired(true)
       ),
+
+    // Казино / Рулетка
+    new SlashCommandBuilder()
+      .setName('казино')
+      .setDescription('🎰 Крутить слоты казино! Ставка LumiCoin')
+      .addIntegerOption(option =>
+        option
+          .setName('ставка')
+          .setDescription('Сколько LumiCoin поставить (мин. 10)')
+          .setRequired(false)
+          .setMinValue(10)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('рулетка')
+      .setDescription('🎡 Рулетка удачи — крути и выиграй!')
+      .addIntegerOption(option =>
+        option
+          .setName('ставка')
+          .setDescription('Сколько LumiCoin поставить (мин. 5)')
+          .setRequired(false)
+          .setMinValue(5)
+      ),
   ];
 
   client.once('clientReady', async () => {
@@ -789,6 +812,12 @@ export async function setupDiscordBot() {
           break;
         case 'выбрать':
           await handleChooseCommand(interaction);
+          break;
+        case 'казино':
+          await handleCasinoCommand(interaction);
+          break;
+        case 'рулетка':
+          await handleRouletteCommand(interaction);
           break;
       }
     } catch (error) {
@@ -1653,6 +1682,184 @@ async function handleChooseCommand(interaction: ChatInputCommandInteraction) {
 
   const choice = choices[Math.floor(Math.random() * choices.length)];
   await interaction.reply(`🤔 Я выбираю: **${choice}**!`);
+}
+
+// ========== КАЗИНО ==========
+
+const slotSymbols = ['🍒', '🍋', '🍊', '🍇', '💎', '7️⃣', '🎰', '⭐', '🔔', '🍀'];
+const slotValues: Record<string, number> = {
+  '🍒': 2, '🍋': 2, '🍊': 3, '🍇': 3, '💎': 5, '7️⃣': 10, '🎰': 7, '⭐': 4, '🔔': 3, '🍀': 4
+};
+
+async function handleCasinoCommand(interaction: ChatInputCommandInteraction) {
+  const bet = interaction.options.getInteger('ставка') || 10;
+  const discordId = interaction.user.id;
+
+  try {
+    const [member] = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId));
+    if (!member) {
+      await interaction.reply({ content: '❌ Ты не зарегистрирован в клане!', ephemeral: true });
+      return;
+    }
+
+    if ((member.lumiCoins ?? 0) < bet) {
+      await interaction.reply({ content: `❌ Недостаточно LumiCoin! У тебя: **${member.lumiCoins ?? 0}** LC`, ephemeral: true });
+      return;
+    }
+
+    // Крутим слоты
+    const slot1 = slotSymbols[Math.floor(Math.random() * slotSymbols.length)];
+    const slot2 = slotSymbols[Math.floor(Math.random() * slotSymbols.length)];
+    const slot3 = slotSymbols[Math.floor(Math.random() * slotSymbols.length)];
+
+    let winMultiplier = 0;
+    let resultText = '';
+
+    if (slot1 === slot2 && slot2 === slot3) {
+      // Три одинаковых — джекпот!
+      winMultiplier = (slotValues[slot1] || 3) * 3;
+      resultText = `🎉 **ДЖЕКПОТ!** Три ${slot1}!`;
+    } else if (slot1 === slot2 || slot2 === slot3 || slot1 === slot3) {
+      // Два одинаковых
+      const matchedSymbol = slot1 === slot2 ? slot1 : slot2 === slot3 ? slot2 : slot1;
+      winMultiplier = slotValues[matchedSymbol] || 2;
+      resultText = `✨ Два ${matchedSymbol}! Выигрыш!`;
+    } else if (slot1 === '7️⃣' || slot2 === '7️⃣' || slot3 === '7️⃣') {
+      // Хотя бы одна семёрка
+      winMultiplier = 1;
+      resultText = '7️⃣ Семёрка! Ставка возвращена';
+    } else {
+      resultText = '💨 Не повезло... Попробуй ещё!';
+    }
+
+    const winnings = Math.floor(bet * winMultiplier);
+    const netChange = winnings - bet;
+
+    await db.update(clanMembers)
+      .set({ lumiCoins: (member.lumiCoins ?? 0) + netChange })
+      .where(eq(clanMembers.discordId, discordId));
+
+    const embed = new EmbedBuilder()
+      .setTitle('🎰 Казино Luminary')
+      .setDescription(
+        `╔══════════╗\n` +
+        `║  ${slot1}  ${slot2}  ${slot3}  ║\n` +
+        `╚══════════╝\n\n` +
+        `${resultText}`
+      )
+      .addFields(
+        { name: '💰 Ставка', value: `${bet} LC`, inline: true },
+        { name: winnings > 0 ? '🏆 Выигрыш' : '📉 Результат', value: winnings > 0 ? `+${winnings} LC` : `${netChange} LC`, inline: true },
+        { name: '💳 Баланс', value: `${(member.lumiCoins ?? 0) + netChange} LC`, inline: true },
+      )
+      .setColor(winnings > bet ? 0x00ff00 : winnings > 0 ? 0xffff00 : 0xff0000)
+      .setFooter({ text: `Игрок: ${interaction.user.username}` })
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('Casino error:', error);
+    await interaction.reply({ content: '❌ Ошибка казино!', ephemeral: true });
+  }
+}
+
+const rouletteSegments = [
+  { emoji: '🔴', label: 'Красное', mult: 0 },
+  { emoji: '⚫', label: 'Чёрное', mult: 0 },
+  { emoji: '🟢', label: 'Зеро', mult: 0 },
+  { emoji: '💎', label: 'Алмаз', mult: 5 },
+  { emoji: '🔴', label: 'Красное', mult: 0 },
+  { emoji: '⚫', label: 'Чёрное', mult: 0 },
+  { emoji: '⭐', label: 'Звезда', mult: 3 },
+  { emoji: '🔴', label: 'Красное', mult: 0 },
+  { emoji: '⚫', label: 'Чёрное', mult: 0 },
+  { emoji: '7️⃣', label: 'Семёрки', mult: 7 },
+  { emoji: '🔴', label: 'Красное', mult: 0 },
+  { emoji: '⚫', label: 'Чёрное', mult: 0 },
+  { emoji: '🍀', label: 'Удача', mult: 2 },
+  { emoji: '🔴', label: 'Красное', mult: 0 },
+  { emoji: '⚫', label: 'Чёрное', mult: 0 },
+  { emoji: '🔴', label: 'Красное', mult: 0 },
+  { emoji: '👑', label: 'Корона', mult: 10 },
+  { emoji: '⚫', label: 'Чёрное', mult: 0 },
+  { emoji: '🔴', label: 'Красное', mult: 0 },
+  { emoji: '⚫', label: 'Чёрное', mult: 0 },
+];
+
+async function handleRouletteCommand(interaction: ChatInputCommandInteraction) {
+  const bet = interaction.options.getInteger('ставка') || 5;
+  const discordId = interaction.user.id;
+
+  try {
+    const [member] = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId));
+    if (!member) {
+      await interaction.reply({ content: '❌ Ты не зарегистрирован в клане!', ephemeral: true });
+      return;
+    }
+
+    if ((member.lumiCoins ?? 0) < bet) {
+      await interaction.reply({ content: `❌ Недостаточно LumiCoin! У тебя: **${member.lumiCoins ?? 0}** LC`, ephemeral: true });
+      return;
+    }
+
+    // Крутим рулетку
+    const segmentIndex = Math.floor(Math.random() * rouletteSegments.length);
+    const result = rouletteSegments[segmentIndex];
+    
+    let winMultiplier = result.mult;
+    let resultText = '';
+    
+    // Красное/Чёрное — 50% шанс удвоить
+    if (result.mult === 0) {
+      const isWin = Math.random() < 0.45; // Чуть ниже 50% для дома
+      winMultiplier = isWin ? 2 : 0;
+      resultText = isWin
+        ? `${result.emoji} **${result.label}** — Выигрыш! x2`
+        : `${result.emoji} **${result.label}** — Не повезло!`;
+    } else {
+      resultText = `${result.emoji} **${result.label}** — Выигрыш x${result.mult}! 🎉`;
+    }
+    
+    if (result.emoji === '🟢') {
+      resultText = '🟢 **ЗЕРО!** Ставка сгорает! 💀';
+      winMultiplier = 0;
+    }
+
+    const winnings = Math.floor(bet * winMultiplier);
+    const netChange = winnings - bet;
+
+    await db.update(clanMembers)
+      .set({ lumiCoins: (member.lumiCoins ?? 0) + netChange })
+      .where(eq(clanMembers.discordId, discordId));
+
+    // Визуальная рулетка
+    const visibleSegments = [];
+    for (let i = -2; i <= 2; i++) {
+      const idx = (segmentIndex + i + rouletteSegments.length) % rouletteSegments.length;
+      visibleSegments.push(rouletteSegments[idx].emoji);
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle('🎡 Рулетка Luminary')
+      .setDescription(
+        `${visibleSegments[0]} ${visibleSegments[1]} [ ${visibleSegments[2]} ] ${visibleSegments[3]} ${visibleSegments[4]}\n` +
+        `${'‎ '.repeat(8)}⬆️\n\n` +
+        resultText
+      )
+      .addFields(
+        { name: '💰 Ставка', value: `${bet} LC`, inline: true },
+        { name: winnings > 0 ? '🏆 Выигрыш' : '📉 Результат', value: winnings > 0 ? `+${winnings} LC` : `${netChange} LC`, inline: true },
+        { name: '💳 Баланс', value: `${(member.lumiCoins ?? 0) + netChange} LC`, inline: true },
+      )
+      .setColor(winnings > bet ? 0x00ff00 : winnings > 0 ? 0xffff00 : 0xff0000)
+      .setFooter({ text: `Игрок: ${interaction.user.username}` })
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('Roulette error:', error);
+    await interaction.reply({ content: '❌ Ошибка рулетки!', ephemeral: true });
+  }
 }
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
