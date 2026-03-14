@@ -16,30 +16,38 @@ try {
 let distube: DisTube | null = null;
 
 export function initializeMusicSystem(client: Client) {
-  distube = new DisTube(client, {
-    emitNewSongOnly: true,
-    emitAddSongWhenCreatingQueue: false,
-    emitAddListWhenCreatingQueue: false,
-    nsfw: false,
-    plugins: [new YtDlpPlugin({ update: true })],
-  });
+  try {
+    distube = new DisTube(client, {
+      emitNewSongOnly: true,
+      emitAddSongWhenCreatingQueue: false,
+      emitAddListWhenCreatingQueue: false,
+      nsfw: false,
+      plugins: [new YtDlpPlugin({ update: true })],
+    });
 
-  // Событие: начало воспроизведения
-  distube.on('playSong', (queue: Queue, song: DisTubeSong) => {
-    queue.textChannel?.send(`🎵 **Играет:** ${song.name} - \`${song.formattedDuration}\``);
-  });
+    // Событие: начало воспроизведения
+    distube.on('playSong', (queue: Queue, song: DisTubeSong) => {
+      queue.textChannel?.send(`🎵 **Играет:** ${song.name} - \`${song.formattedDuration}\``);
+    });
 
-  // Событие: очередь закончилась
-  distube.on('finishQueue', (queue: Queue) => {
-    queue.textChannel?.send('✅ Очередь завершена!');
-  });
+    // Событие: очередь закончилась
+    distube.on('finishQueue', (queue: Queue) => {
+      queue.textChannel?.send('✅ Очередь завершена!');
+    });
 
-  // Событие: ошибка
-  distube.on('error', (error: Error) => {
-    console.error('DisTube ошибка:', error);
-  });
+    // Событие: ошибка (не даём crash процессу)
+    distube.on('error', (channel: any, error: Error) => {
+      console.error('DisTube ошибка:', error.message);
+      if (channel?.send) {
+        channel.send(`❌ Музыкальная ошибка: ${error.message.substring(0, 200)}`);
+      }
+    });
 
-  console.log('✅ DisTube музыкальная система инициализирована');
+    console.log('✅ DisTube музыкальная система инициализирована');
+  } catch (err: any) {
+    console.error('❌ Ошибка инициализации DisTube:', err.message);
+    distube = null;
+  }
 }
 
 export function getDistube(): DisTube {
@@ -59,6 +67,25 @@ export async function addSong(
   try {
     if (!distube) {
       throw new Error('DisTube не инициализирован');
+    }
+
+    // Попытка предварительного подключения к голосовому каналу
+    try {
+      const { joinVoiceChannel, VoiceConnectionStatus, entersState } = await import('@discordjs/voice');
+      const existingConnection = distube.voices.get(guild.id);
+      if (!existingConnection) {
+        const connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId: guild.id,
+          adapterCreator: guild.voiceAdapterCreator as any,
+          selfDeaf: true,
+        });
+        // Ждём подключения до 60 секунд
+        await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
+        console.log(`✅ Предварительное подключение к voice каналу успешно`);
+      }
+    } catch (preConnErr: any) {
+      console.log('⚠️ Предварительное подключение не удалось:', preConnErr.message);
     }
 
     const result = await distube.play(voiceChannel, query, {

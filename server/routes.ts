@@ -194,6 +194,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Подробная информация об игре по universeId
+  app.get("/api/roblox/game/details/:universeId", async (req, res) => {
+    try {
+      const universeId = parseInt(req.params.universeId);
+      if (isNaN(universeId)) {
+        return res.status(400).json({ success: false, error: 'Неверный universeId' });
+      }
+      const details = await robloxApi.getGameDetails(universeId);
+      if (!details) {
+        return res.status(404).json({ success: false, error: 'Игра не найдена' });
+      }
+      res.json({ success: true, game: details });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Ошибка при загрузке деталей игры' });
+    }
+  });
+
   // Получить серверы игры
   app.get("/api/roblox/game/:placeId/servers", async (req, res) => {
     try {

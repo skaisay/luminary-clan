@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Gamepad2, Clock, Users, UserPlus, Eye, ExternalLink, User, Calendar, Shield, Loader2, History, XCircle, Globe, Star, Trash2, ThumbsUp, Server } from "lucide-react";
+import { Search, Gamepad2, Clock, Users, UserPlus, Eye, ExternalLink, User, Calendar, Shield, Loader2, History, XCircle, Globe, Star, Trash2, ThumbsUp, Server, Heart, BarChart3, ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -81,6 +81,38 @@ function saveToLocalHistory(username: string, userId: number, avatar: string | n
 
 function clearLocalHistory() {
   localStorage.removeItem(HISTORY_KEY);
+}
+
+// --- localStorage история поиска игр ---
+const GAME_HISTORY_KEY = 'roblox_game_history';
+
+interface GameHistoryItem {
+  name: string;
+  universeId: number;
+  placeId: number;
+  thumbnail: string | null;
+  timestamp: number;
+}
+
+function getGameHistory(): GameHistoryItem[] {
+  try {
+    const raw = localStorage.getItem(GAME_HISTORY_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch { return []; }
+}
+
+function saveToGameHistory(name: string, universeId: number, placeId: number, thumbnail: string | null) {
+  const history = getGameHistory();
+  const existing = history.findIndex(h => h.universeId === universeId);
+  if (existing !== -1) history.splice(existing, 1);
+  history.unshift({ name, universeId, placeId, thumbnail, timestamp: Date.now() });
+  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  localStorage.setItem(GAME_HISTORY_KEY, JSON.stringify(history));
+}
+
+function clearGameHistory() {
+  localStorage.removeItem(GAME_HISTORY_KEY);
 }
 
 // --- Компонент аватара с обработкой ошибок загрузки ---
@@ -195,6 +227,10 @@ export default function RobloxTracker() {
   // Game search state
   const [gameSearchInput, setGameSearchInput] = useState('');
   const [gameSearchQuery, setGameSearchQuery] = useState('');
+  const [gameHistory, setGameHistory] = useState<GameHistoryItem[]>(getGameHistory());
+  const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
+  const [playerSearchInput, setPlayerSearchInput] = useState('');
+  const [playerSearchQuery, setPlayerSearchQuery] = useState('');
 
   const { data: result, isLoading, isError, error } = useQuery<SearchResult>({
     queryKey: ['/api/roblox/lookup', searchQuery],
@@ -218,6 +254,28 @@ export default function RobloxTracker() {
     staleTime: 30000,
   });
 
+  // Game details query (when a game is selected)
+  const { data: gameDetails, isLoading: detailsLoading } = useQuery<{ success: boolean; game: any }>({
+    queryKey: ['/api/roblox/game/details', selectedGameId],
+    queryFn: async () => {
+      const res = await fetch(`/api/roblox/game/details/${selectedGameId}`);
+      return res.json();
+    },
+    enabled: !!selectedGameId && activeTab === 'games',
+    staleTime: 30000,
+  });
+
+  // Player lookup in games tab
+  const { data: playerInGameResult, isLoading: playerInGameLoading } = useQuery<SearchResult>({
+    queryKey: ['/api/roblox/lookup', playerSearchQuery, 'game-tab'],
+    queryFn: async () => {
+      const res = await fetch(`/api/roblox/lookup/${encodeURIComponent(playerSearchQuery)}`);
+      return res.json();
+    },
+    enabled: playerSearchQuery.length >= 3 && activeTab === 'games',
+    staleTime: 15000,
+  });
+
   // Сохраняем в локальную историю при успешном поиске
   useEffect(() => {
     if (result?.success && result.user) {
@@ -225,6 +283,15 @@ export default function RobloxTracker() {
       setHistory(getLocalHistory());
     }
   }, [result]);
+
+  // Сохраняем игры в историю
+  useEffect(() => {
+    if (gameResults?.success && gameResults.games?.length > 0) {
+      const g = gameResults.games[0];
+      saveToGameHistory(g.name, g.universeId, g.placeId || g.rootPlaceId, g.thumbnail || null);
+      setGameHistory(getGameHistory());
+    }
+  }, [gameResults]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -249,6 +316,31 @@ export default function RobloxTracker() {
     const trimmed = gameSearchInput.trim();
     if (trimmed.length >= 2) {
       setGameSearchQuery(trimmed);
+      setSelectedGameId(null);
+    }
+  };
+
+  const handleGameHistoryClick = (item: GameHistoryItem) => {
+    setGameSearchInput(item.name);
+    setSelectedGameId(item.universeId);
+  };
+
+  const handleClearGameHistory = () => {
+    clearGameHistory();
+    setGameHistory([]);
+  };
+
+  const handleSelectGame = (game: any) => {
+    setSelectedGameId(game.universeId);
+    saveToGameHistory(game.name, game.universeId, game.placeId || game.rootPlaceId, game.thumbnail || null);
+    setGameHistory(getGameHistory());
+  };
+
+  const handlePlayerInGameSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = playerSearchInput.trim();
+    if (trimmed.length >= 3) {
+      setPlayerSearchQuery(trimmed);
     }
   };
 
@@ -303,13 +395,14 @@ export default function RobloxTracker() {
       {/* Game Search Tab */}
       {activeTab === 'games' && (
         <>
-          <form onSubmit={handleGameSearch} className="max-w-2xl mx-auto mb-8">
+          {/* Game search form */}
+          <form onSubmit={handleGameSearch} className="max-w-2xl mx-auto mb-6">
             <div className="flex gap-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   type="text"
-                  placeholder="Название игры или ссылка на Roblox..."
+                  placeholder="Название игры или ссылка roblox.com/games/..."
                   value={gameSearchInput}
                   onChange={(e) => setGameSearchInput(e.target.value)}
                   className="pl-10 h-12 text-base glass glass-border"
@@ -327,6 +420,205 @@ export default function RobloxTracker() {
             </div>
           </form>
 
+          {/* Player search within games tab */}
+          <form onSubmit={handlePlayerInGameSearch} className="max-w-2xl mx-auto mb-8">
+            <div className="flex gap-3">
+              <div className="relative flex-1">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Никнейм игрока — узнать, во что играет..."
+                  value={playerSearchInput}
+                  onChange={(e) => setPlayerSearchInput(e.target.value)}
+                  className="pl-10 h-11 text-sm glass glass-border"
+                  maxLength={20}
+                />
+              </div>
+              <Button 
+                type="submit" 
+                disabled={playerInGameLoading || playerSearchInput.trim().length < 3} 
+                variant="outline"
+                className="h-11 px-4 glass glass-border"
+              >
+                {playerInGameLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              </Button>
+            </div>
+          </form>
+
+          {/* Player in-game result */}
+          {playerInGameResult?.success && playerInGameResult.user && (
+            <div className="max-w-2xl mx-auto mb-6">
+              <Card className="glass glass-border border-purple-500/30">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0">
+                      <RobloxAvatar src={playerInGameResult.user.avatar} name={playerInGameResult.user.name} size="sm" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{playerInGameResult.user.displayName}</span>
+                        <StatusIndicator status={playerInGameResult.user.status} color={playerInGameResult.user.statusColor} />
+                      </div>
+                      {playerInGameResult.user.currentGame ? (
+                        <p className="text-xs text-blue-400">
+                          🎮 Играет в: <strong>{playerInGameResult.user.currentGame.name}</strong>
+                          {playerInGameResult.user.currentGame.placeId > 0 && (
+                            <a href={`https://www.roblox.com/games/${playerInGameResult.user.currentGame.placeId}`} target="_blank" rel="noopener noreferrer" className="ml-2 underline">Открыть</a>
+                          )}
+                        </p>
+                      ) : playerInGameResult.user.presence?.type === 2 ? (
+                        <p className="text-xs text-muted-foreground">🎮 В игре (информация скрыта)</p>
+                      ) : playerInGameResult.user.presence?.type === 1 ? (
+                        <p className="text-xs text-green-400">🟢 Онлайн на сайте Roblox</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">⚫ Оффлайн</p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Game search history */}
+          {gameHistory.length > 0 && !gameResults?.games?.length && !selectedGameId && (
+            <div className="max-w-2xl mx-auto mb-8">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <History className="h-4 w-4" />
+                  <span>Недавние игры</span>
+                </div>
+                <button onClick={handleClearGameHistory} className="text-xs text-muted-foreground hover:text-red-400 transition-colors flex items-center gap-1">
+                  <Trash2 className="h-3 w-3" />
+                  Очистить
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {gameHistory.map((item) => (
+                  <button
+                    key={item.universeId}
+                    onClick={() => handleGameHistoryClick(item)}
+                    className="glass glass-border rounded-lg px-3 py-1.5 text-sm hover:bg-primary/10 transition-colors flex items-center gap-2"
+                  >
+                    {item.thumbnail ? (
+                      <div className="w-5 h-5 rounded overflow-hidden flex-shrink-0">
+                        <img src={item.thumbnail} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      </div>
+                    ) : (
+                      <Gamepad2 className="h-4 w-4 text-blue-400" />
+                    )}
+                    {item.name.length > 25 ? item.name.substring(0, 25) + '...' : item.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Game details view */}
+          {selectedGameId && (
+            <div className="max-w-4xl mx-auto mb-6">
+              <Button variant="ghost" size="sm" className="mb-4 gap-1" onClick={() => setSelectedGameId(null)}>
+                <ArrowLeft className="h-4 w-4" /> Назад к результатам
+              </Button>
+              
+              {detailsLoading && (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+                </div>
+              )}
+              
+              {gameDetails?.success && gameDetails.game && (
+                <Card className="glass glass-border overflow-hidden">
+                  <div className="relative">
+                    <div className="absolute inset-0 h-24 bg-gradient-to-br from-blue-600/20 via-cyan-500/10 to-purple-600/20" />
+                    <CardContent className="relative pt-6 pb-6">
+                      <div className="flex flex-col sm:flex-row gap-5">
+                        {/* Game thumbnail */}
+                        <div className="flex-shrink-0 w-32 h-32 rounded-xl overflow-hidden ring-2 ring-blue-500/30 shadow-xl bg-gray-900">
+                          {gameDetails.game.thumbnail ? (
+                            <img src={gameDetails.game.thumbnail} alt={gameDetails.game.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Gamepad2 className="h-12 w-12 text-blue-400/50" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h2 className="text-2xl font-bold mb-1">{gameDetails.game.name}</h2>
+                          <p className="text-sm text-muted-foreground mb-1">от {gameDetails.game.creator}</p>
+                          {gameDetails.game.genre && (
+                            <Badge variant="secondary" className="text-xs mb-2">{gameDetails.game.genre}</Badge>
+                          )}
+                          {gameDetails.game.description && (
+                            <p className="text-sm text-muted-foreground mb-3 line-clamp-3">{gameDetails.game.description}</p>
+                          )}
+                          <div className="flex gap-2 mt-2">
+                            <a href={`roblox://experiences/start?placeId=${gameDetails.game.placeId}`}>
+                              <Button size="sm" className="gap-1.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500">
+                                <Gamepad2 className="h-4 w-4" /> Играть
+                              </Button>
+                            </a>
+                            <a href={`https://www.roblox.com/games/${gameDetails.game.placeId}`} target="_blank" rel="noopener noreferrer">
+                              <Button size="sm" variant="outline" className="gap-1.5 glass glass-border">
+                                <ExternalLink className="h-4 w-4" /> Roblox
+                              </Button>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </div>
+                  
+                  {/* Stats grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 pt-0">
+                    <div className="glass glass-border rounded-lg p-3 text-center">
+                      <Users className="h-4 w-4 mx-auto text-green-400 mb-1" />
+                      <div className="text-lg font-bold">{formatNumber(gameDetails.game.playing)}</div>
+                      <div className="text-xs text-muted-foreground">Сейчас играют</div>
+                    </div>
+                    <div className="glass glass-border rounded-lg p-3 text-center">
+                      <Eye className="h-4 w-4 mx-auto text-blue-400 mb-1" />
+                      <div className="text-lg font-bold">{formatNumber(gameDetails.game.visits)}</div>
+                      <div className="text-xs text-muted-foreground">Посещений</div>
+                    </div>
+                    <div className="glass glass-border rounded-lg p-3 text-center">
+                      <Heart className="h-4 w-4 mx-auto text-red-400 mb-1" />
+                      <div className="text-lg font-bold">{formatNumber(gameDetails.game.favoritedCount)}</div>
+                      <div className="text-xs text-muted-foreground">В избранном</div>
+                    </div>
+                    <div className="glass glass-border rounded-lg p-3 text-center">
+                      <ThumbsUp className="h-4 w-4 mx-auto text-yellow-400 mb-1" />
+                      <div className="text-lg font-bold">
+                        {gameDetails.game.upVotes + gameDetails.game.downVotes > 0
+                          ? Math.round((gameDetails.game.upVotes / (gameDetails.game.upVotes + gameDetails.game.downVotes)) * 100) + '%'
+                          : '—'
+                        }
+                      </div>
+                      <div className="text-xs text-muted-foreground">Рейтинг</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 pt-0">
+                    <div className="glass glass-border rounded-lg p-3 text-center">
+                      <BarChart3 className="h-4 w-4 mx-auto text-purple-400 mb-1" />
+                      <div className="text-sm font-bold">👍 {formatNumber(gameDetails.game.upVotes)}</div>
+                      <div className="text-xs text-muted-foreground">Лайки</div>
+                    </div>
+                    <div className="glass glass-border rounded-lg p-3 text-center">
+                      <Users className="h-4 w-4 mx-auto text-orange-400 mb-1" />
+                      <div className="text-sm font-bold">{gameDetails.game.maxPlayers}</div>
+                      <div className="text-xs text-muted-foreground">Макс. игроков</div>
+                    </div>
+                    <div className="glass glass-border rounded-lg p-3 text-center">
+                      <Calendar className="h-4 w-4 mx-auto text-cyan-400 mb-1" />
+                      <div className="text-sm font-bold">{gameDetails.game.created ? formatDate(gameDetails.game.created) : '—'}</div>
+                      <div className="text-xs text-muted-foreground">Создана</div>
+                    </div>
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
+
           {/* Game search loading */}
           {gamesLoading && (
             <div className="flex flex-col items-center justify-center py-20">
@@ -336,16 +628,22 @@ export default function RobloxTracker() {
           )}
 
           {/* Game results */}
-          {gameResults?.success && gameResults.games && gameResults.games.length > 0 && (
+          {!selectedGameId && gameResults?.success && gameResults.games && gameResults.games.length > 0 && (
             <div className="max-w-4xl mx-auto">
               <p className="text-sm text-muted-foreground mb-4">Найдено: {gameResults.games.length} игр</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {gameResults.games.map((game: any, idx: number) => (
-                  <Card key={game.universeId || idx} className="glass glass-border hover:border-blue-500/40 transition-colors">
+                  <Card key={game.universeId || idx} className="glass glass-border hover:border-blue-500/40 transition-colors cursor-pointer" onClick={() => handleSelectGame(game)}>
                     <CardContent className="p-4">
                       <div className="flex items-start gap-3">
-                        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center">
-                          <Gamepad2 className="h-5 w-5 text-blue-400" />
+                        <div className="flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-gradient-to-br from-blue-500/20 to-cyan-500/20">
+                          {game.thumbnail ? (
+                            <img src={game.thumbnail} alt={game.name} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Gamepad2 className="h-6 w-6 text-blue-400" />
+                            </div>
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <h3 className="font-semibold text-sm truncate">{game.name}</h3>
@@ -356,6 +654,12 @@ export default function RobloxTracker() {
                               <Users className="h-3 w-3" />
                               {formatNumber(game.playerCount || 0)} в игре
                             </Badge>
+                            {game.visits > 0 && (
+                              <Badge variant="secondary" className="text-xs gap-1">
+                                <Eye className="h-3 w-3" />
+                                {formatNumber(game.visits)} визитов
+                              </Badge>
+                            )}
                             {game.totalUpVotes > 0 && (
                               <Badge variant="secondary" className="text-xs gap-1">
                                 <ThumbsUp className="h-3 w-3" />
@@ -368,19 +672,13 @@ export default function RobloxTracker() {
                           </div>
                           
                           <div className="flex gap-2 mt-3">
-                            <a
-                              href={`roblox://experiences/start?placeId=${game.placeId || game.rootPlaceId}`}
-                            >
+                            <a href={`roblox://experiences/start?placeId=${game.placeId || game.rootPlaceId}`} onClick={(e) => e.stopPropagation()}>
                               <Button size="sm" className="gap-1.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-xs h-7">
                                 <Gamepad2 className="h-3 w-3" />
                                 Играть
                               </Button>
                             </a>
-                            <a
-                              href={`https://www.roblox.com/games/${game.placeId || game.rootPlaceId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
+                            <a href={`https://www.roblox.com/games/${game.placeId || game.rootPlaceId}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
                               <Button size="sm" variant="outline" className="gap-1.5 glass glass-border text-xs h-7">
                                 <ExternalLink className="h-3 w-3" />
                                 Страница
@@ -397,15 +695,15 @@ export default function RobloxTracker() {
           )}
 
           {/* No game results */}
-          {gameResults?.success && gameResults.games && gameResults.games.length === 0 && (
+          {!selectedGameId && gameResults?.success && gameResults.games && gameResults.games.length === 0 && (
             <div className="max-w-2xl mx-auto text-center py-12">
               <XCircle className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-              <p className="text-muted-foreground">Игры не найдены. Попробуйте другой запрос.</p>
+              <p className="text-muted-foreground">Игры не найдены. Попробуйте другой запрос или вставьте ссылку.</p>
             </div>
           )}
 
           {/* Empty game search state */}
-          {!gamesLoading && !gameSearchQuery && (
+          {!gamesLoading && !gameSearchQuery && !selectedGameId && gameHistory.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="p-6 rounded-3xl bg-gradient-to-br from-blue-500/10 to-cyan-500/10 mb-6">
                 <Search className="h-16 w-16 text-blue-400/50" />

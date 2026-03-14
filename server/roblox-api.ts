@@ -234,175 +234,168 @@ export async function getGameThumbnail(universeId: number): Promise<string | nul
 
 /** Извлечь placeId из URL Roblox */
 export function extractPlaceIdFromUrl(input: string): number | null {
-  // Поддерживаемые форматы:
-  // https://www.roblox.com/games/12345678/Game-Name
-  // https://www.roblox.com/games/12345678
-  // https://ro.blox.com/Ebh5?pid=share&is_retargeting=true&af_dp=roblox%3A%2F%2FplaceId%3D12345678
-  // roblox://placeId=12345678
   const urlMatch = input.match(/roblox\.com\/games\/(\d+)/i);
   if (urlMatch) return parseInt(urlMatch[1]);
-  
   const placeIdMatch = input.match(/placeId[=:](\d+)/i);
   if (placeIdMatch) return parseInt(placeIdMatch[1]);
-  
-  // Просто число
   if (/^\d+$/.test(input.trim())) return parseInt(input.trim());
-  
   return null;
 }
 
-/** Поиск игр по названию (через Roblox catalog/discovery) */
+/** Получить подробную информацию об игре (для карточки игры) */
+export async function getGameDetails(universeId: number) {
+  try {
+    const [gameData, votesData, iconData] = await Promise.all([
+      fetchJson(`https://games.roblox.com/v1/games?universeIds=${universeId}`).catch(() => null),
+      fetchJson(`https://games.roblox.com/v1/games/votes?universeIds=${universeId}`).catch(() => null),
+      getGameThumbnail(universeId),
+    ]);
+    
+    const game = gameData?.data?.[0];
+    if (!game) return null;
+    const votes = votesData?.data?.[0];
+    
+    return {
+      universeId: game.id,
+      name: game.name,
+      description: (game.description || '').substring(0, 300),
+      playing: game.playing || 0,
+      visits: game.visits || 0,
+      maxPlayers: game.maxPlayers || 0,
+      created: game.created,
+      updated: game.updated,
+      favoritedCount: game.favoritedCount || 0,
+      genre: game.genre || '',
+      placeId: game.rootPlaceId || 0,
+      rootPlaceId: game.rootPlaceId || 0,
+      creator: game.creator?.name || 'Unknown',
+      creatorType: game.creator?.type || '',
+      upVotes: votes?.upVotes || 0,
+      downVotes: votes?.downVotes || 0,
+      thumbnail: iconData,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Поиск игр по названию или ссылке */
 export async function searchGames(keyword: string, limit: number = 12) {
   // 1. Проверяем, является ли keyword ссылкой на игру
   const placeIdFromUrl = extractPlaceIdFromUrl(keyword);
   if (placeIdFromUrl) {
     const gameInfo = await getGameInfo(placeIdFromUrl);
     if (gameInfo) {
+      const thumbnail = await getGameThumbnail(gameInfo.id);
       return [{
         universeId: gameInfo.id,
         name: gameInfo.name,
+        description: (gameInfo.description || '').substring(0, 200),
         placeId: gameInfo.placeId || placeIdFromUrl,
         rootPlaceId: gameInfo.rootPlaceId || placeIdFromUrl,
         playerCount: gameInfo.playing || 0,
+        visits: gameInfo.visits || 0,
         totalUpVotes: 0,
         totalDownVotes: 0,
         creatorName: gameInfo.creator || 'Unknown',
         creatorType: '',
+        thumbnail,
       }];
     }
   }
   
-  const results: any[] = [];
+  // 2. Поиск по названию: используем catalog.roblox.com (search v1) — работает без авторизации
+  const universeIds: number[] = [];
   
-  // 2. Попробуем через games.roblox.com/v1/games/list (основной API)
   try {
     const data = await fetchJson(
-      `https://games.roblox.com/v1/games/list?model.keyword=${encodeURIComponent(keyword)}&model.startRows=0&model.maxRows=${limit}`
+      `https://www.roblox.com/games-autocomplete/v1/get-suggestion/${encodeURIComponent(keyword)}`
     );
-    if (data.games && data.games.length > 0) {
-      for (const game of data.games) {
-        results.push({
-          universeId: game.universeId,
-          name: game.name,
-          placeId: game.placeId,
-          rootPlaceId: game.rootPlaceId || game.placeId,
-          playerCount: game.playerCount || 0,
-          totalUpVotes: game.totalUpVotes || 0,
-          totalDownVotes: game.totalDownVotes || 0,
-          creatorName: game.creatorName || 'Unknown',
-          creatorType: game.creatorType || '',
-        });
+    if (data?.entries) {
+      for (const entry of data.entries) {
+        if (entry.universeId) universeIds.push(entry.universeId);
       }
-      return results;
     }
   } catch (e: any) {
-    console.log('Roblox games/list failed:', e.message);
-  }
-  
-  // 3. Fallback: через discover API (experiences catalog)
-  try {
-    const discoverData = await fetchJson(
-      `https://apis.roblox.com/discovery-api/omni-search?searchQuery=${encodeURIComponent(keyword)}&pageToken=&sessionId=&searchType=1`
-    );
-    if (discoverData?.contents) {
-      for (const item of discoverData.contents) {
-        if (item.contentType === 'Game' || item.universeId) {
-          results.push({
-            universeId: item.universeId || 0,
-            name: item.name || item.title || 'Unknown',
-            placeId: item.rootPlaceId || 0,
-            rootPlaceId: item.rootPlaceId || 0,
-            playerCount: item.playerCount || 0,
-            totalUpVotes: item.totalUpVotes || 0,
-            totalDownVotes: item.totalDownVotes || 0,
-            creatorName: item.creatorName || 'Unknown',
-            creatorType: '',
-          });
-        }
-      }
-      if (results.length > 0) return results.slice(0, limit);
-    }
-  } catch (e: any) {
-    console.log('Roblox discovery-api failed:', e.message);
+    console.log('Roblox autocomplete failed:', e.message);
   }
 
-  // 4. Fallback: search autocomplete + multiget universe details
-  try {
-    const autoData = await fetchJson(
-      `https://apis.roblox.com/search-api/omni-search-stricter?searchQuery=${encodeURIComponent(keyword)}&pageToken=&pageType=games&sessionId=`
-    );
-    const universeIds: number[] = [];
-    if (autoData?.searchResults) {
-      for (const r of autoData.searchResults) {
-        if (r.contentId?.universeId) universeIds.push(r.contentId.universeId);
-        else if (r.universeId) universeIds.push(r.universeId);
-      }
-    }
-    if (universeIds.length > 0) {
-      const gamesData = await fetchJson(
-        `https://games.roblox.com/v1/games?universeIds=${universeIds.slice(0, limit).join(',')}`
+  // 3. Fallback: games.roblox.com/v1/games/list
+  if (universeIds.length === 0) {
+    try {
+      const data = await fetchJson(
+        `https://games.roblox.com/v1/games/list?model.keyword=${encodeURIComponent(keyword)}&model.startRows=0&model.maxRows=${limit}`
       );
-      if (gamesData?.data) {
-        for (const game of gamesData.data) {
-          results.push({
-            universeId: game.id,
-            name: game.name,
-            placeId: game.rootPlaceId || 0,
-            rootPlaceId: game.rootPlaceId || 0,
-            playerCount: game.playing || 0,
-            totalUpVotes: game.votes?.upVotes || 0,
-            totalDownVotes: game.votes?.downVotes || 0,
-            creatorName: game.creator?.name || 'Unknown',
-            creatorType: game.creator?.type || '',
-          });
+      if (data?.games) {
+        for (const g of data.games) {
+          if (g.universeId) universeIds.push(g.universeId);
         }
-        if (results.length > 0) return results;
       }
+    } catch (e: any) {
+      console.log('Roblox games/list failed:', e.message);
     }
-  } catch (e: any) {
-    console.log('Roblox omni-search-stricter failed:', e.message);
   }
   
-  // 5. Последний fallback: search-api omni-search
-  try {
-    const searchData = await fetchJson(
-      `https://apis.roblox.com/search-api/omni-search?searchQuery=${encodeURIComponent(keyword)}&searchType=games&pageToken=&sessionId=`
-    );
-    if (searchData?.searchResults) {
-      const universeIds: number[] = [];
-      for (const r of searchData.searchResults) {
-        if (r.contentType === 'Game') {
-          if (r.contentId?.universeId) universeIds.push(r.contentId.universeId);
-          else if (r.universeId) universeIds.push(r.universeId);
+  // 4. Fallback: search API
+  if (universeIds.length === 0) {
+    try {
+      const data = await fetchJson(
+        `https://apis.roblox.com/search-api/omni-search?searchQuery=${encodeURIComponent(keyword)}&searchType=games&pageToken=&sessionId=`
+      );
+      if (data?.searchResults) {
+        for (const r of data.searchResults) {
+          const uid = r?.contentId?.universeId || r?.universeId;
+          if (uid) universeIds.push(uid);
         }
       }
-      if (universeIds.length > 0) {
-        const gamesData = await fetchJson(
-          `https://games.roblox.com/v1/games?universeIds=${universeIds.slice(0, limit).join(',')}`
-        );
-        if (gamesData?.data) {
-          for (const game of gamesData.data) {
-            results.push({
-              universeId: game.id,
-              name: game.name,
-              placeId: game.rootPlaceId || 0,
-              rootPlaceId: game.rootPlaceId || 0,
-              playerCount: game.playing || 0,
-              totalUpVotes: game.votes?.upVotes || 0,
-              totalDownVotes: game.votes?.downVotes || 0,
-              creatorName: game.creator?.name || 'Unknown',
-              creatorType: game.creator?.type || '',
-            });
-          }
-          return results;
-        }
-      }
+    } catch (e: any) {
+      console.log('Roblox omni-search failed:', e.message);
     }
-  } catch (e: any) {
-    console.log('Roblox omni-search failed:', e.message);
   }
 
-  return results;
+  if (universeIds.length === 0) return [];
+
+  // 5. Получаем подробную информацию по universeId через multiget
+  try {
+    const ids = universeIds.slice(0, limit);
+    const [gamesData, thumbnailsData, votesData] = await Promise.all([
+      fetchJson(`https://games.roblox.com/v1/games?universeIds=${ids.join(',')}`),
+      fetchJson(`https://thumbnails.roblox.com/v1/games/icons?universeIds=${ids.join(',')}&size=150x150&format=Png&isCircular=false`).catch(() => ({ data: [] })),
+      fetchJson(`https://games.roblox.com/v1/games/votes?universeIds=${ids.join(',')}`).catch(() => ({ data: [] })),
+    ]);
+
+    const thumbMap = new Map<number, string>();
+    for (const t of (thumbnailsData?.data || [])) {
+      if (t.imageUrl) thumbMap.set(t.targetId, t.imageUrl);
+    }
+    const votesMap = new Map<number, { up: number; down: number }>();
+    for (const v of (votesData?.data || [])) {
+      votesMap.set(v.id, { up: v.upVotes || 0, down: v.downVotes || 0 });
+    }
+
+    const results: any[] = [];
+    for (const game of (gamesData?.data || [])) {
+      const v = votesMap.get(game.id);
+      results.push({
+        universeId: game.id,
+        name: game.name,
+        description: (game.description || '').substring(0, 200),
+        placeId: game.rootPlaceId || 0,
+        rootPlaceId: game.rootPlaceId || 0,
+        playerCount: game.playing || 0,
+        visits: game.visits || 0,
+        totalUpVotes: v?.up || 0,
+        totalDownVotes: v?.down || 0,
+        creatorName: game.creator?.name || 'Unknown',
+        creatorType: game.creator?.type || '',
+        thumbnail: thumbMap.get(game.id) || null,
+      });
+    }
+    return results;
+  } catch (e: any) {
+    console.log('Roblox multiget failed:', e.message);
+    return [];
+  }
 }
 
 /** Получить серверы (instances) игры и проверить наличие игрока */
