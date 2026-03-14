@@ -71,7 +71,7 @@ const execAsync = promisify(exec);
 function validateReturnTo(returnTo: string | undefined): string {
   // Если returnTo не указан или невалиден, возвращаем дефолтный путь
   if (!returnTo || typeof returnTo !== 'string') {
-    return '/video-platform';
+    return '/';
   }
 
   // Декодируем URL с обработкой ошибок
@@ -80,23 +80,23 @@ function validateReturnTo(returnTo: string | undefined): string {
     decoded = decodeURIComponent(returnTo);
   } catch (error) {
     console.warn(`Failed to decode returnTo parameter: ${returnTo}`);
-    return '/video-platform';
+    return '/';
   }
 
   // Проверяем что это относительный путь (начинается с "/")
   // и не содержит абсолютный URL или протокол
   if (!decoded.startsWith('/') || decoded.startsWith('//') || decoded.includes('://')) {
     console.warn(`Invalid returnTo parameter blocked: ${decoded}`);
-    return '/video-platform';
+    return '/';
   }
 
   // Дополнительная проверка: разрешаем только пути видео платформы или основного сайта
-  const allowedPrefixes = ['/video-platform', '/v/', '/shop', '/dashboard', '/news', '/forum', '/members', '/requests'];
-  const isAllowed = allowedPrefixes.some(prefix => decoded.startsWith(prefix));
+  const allowedPrefixes = ['/', '/shop', '/dashboard', '/news', '/forum', '/members', '/requests', '/leaderboard', '/statistics', '/about', '/inventory', '/convert'];
+  const isAllowed = allowedPrefixes.some(prefix => decoded === prefix || decoded.startsWith(prefix + '/'));
   
   if (!isAllowed) {
     console.warn(`returnTo path not in allowed list: ${decoded}`);
-    return '/video-platform';
+    return '/';
   }
 
   return decoded;
@@ -159,7 +159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }),
     (req, res) => {
       // Получаем сохраненный returnTo (уже валидированный) или используем дефолтный
-      const returnTo = req.session.returnTo || "/video-platform";
+      const returnTo = req.session.returnTo || "/";
       delete req.session.returnTo; // Очищаем после использования
       res.redirect(returnTo);
     }

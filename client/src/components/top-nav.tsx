@@ -100,8 +100,8 @@ export function TopNav() {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
   
   const scrollDirection = useScrollDirection({ 
-    threshold: isMobile ? 80 : 10,
-    hysteresis: isMobile ? 100 : 40
+    threshold: isMobile ? 80 : 5,
+    hysteresis: isMobile ? 100 : 15
   });
 
   useEffect(() => {

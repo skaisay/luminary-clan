@@ -715,7 +715,7 @@ textarea,
     cursor: pointer;
     will-change: transform, border-radius;
     position: relative;
-    overflow: visible;
+    overflow: hidden;
     flex-shrink: 0;
   }
 
