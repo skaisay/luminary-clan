@@ -162,11 +162,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // История поисков (in-memory)
-  app.get("/api/roblox/history", (_req, res) => {
-    res.json({ history: robloxApi.getSearchHistory() });
-  });
-
   // Информация об игре по placeId
   app.get("/api/roblox/game/:placeId", async (req, res) => {
     try {

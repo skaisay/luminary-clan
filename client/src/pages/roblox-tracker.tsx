@@ -1,12 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Gamepad2, Clock, Users, UserPlus, Eye, ExternalLink, User, Calendar, Shield, Loader2, History, XCircle, Globe, Star } from "lucide-react";
+import { Search, Gamepad2, Clock, Users, UserPlus, Eye, ExternalLink, User, Calendar, Shield, Loader2, History, XCircle, Globe, Star, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { queryClient } from "@/lib/queryClient";
 
 interface RobloxUser {
   id: number;
@@ -52,10 +51,72 @@ interface SearchResult {
   user?: RobloxUser;
 }
 
+// --- localStorage история поиска (индивидуальная для каждого браузера) ---
+const HISTORY_KEY = 'roblox_tracker_history';
+const MAX_HISTORY = 20;
+
 interface HistoryItem {
   username: string;
-  userId: number;
+  odId: number;
+  avatar: string | null;
   timestamp: number;
+}
+
+function getLocalHistory(): HistoryItem[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch { return []; }
+}
+
+function saveToLocalHistory(username: string, userId: number, avatar: string | null) {
+  const history = getLocalHistory();
+  const existing = history.findIndex(h => h.odId === userId);
+  if (existing !== -1) history.splice(existing, 1);
+  history.unshift({ username, odId: userId, avatar, timestamp: Date.now() });
+  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+}
+
+function clearLocalHistory() {
+  localStorage.removeItem(HISTORY_KEY);
+}
+
+// --- Компонент аватара с обработкой ошибок загрузки ---
+function RobloxAvatar({ src, name, size = 'lg' }: { src: string | null; name: string; size?: 'sm' | 'lg' }) {
+  const [imgError, setImgError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  
+  useEffect(() => { setImgError(false); setLoaded(false); }, [src]);
+  
+  const iconSize = size === 'sm' ? 'h-4 w-4' : 'h-12 w-12';
+  
+  if (!src || imgError) {
+    return (
+      <div className="w-full h-full bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center">
+        <User className={`${iconSize} text-white`} />
+      </div>
+    );
+  }
+  
+  return (
+    <>
+      {!loaded && (
+        <div className="absolute inset-0 bg-gradient-to-br from-red-500/30 to-orange-500/30 flex items-center justify-center">
+          <Loader2 className="h-6 w-6 text-white/50 animate-spin" />
+        </div>
+      )}
+      <img 
+        src={src} 
+        alt={name} 
+        className={`w-full h-full object-cover ${loaded ? 'opacity-100' : 'opacity-0'} transition-opacity`}
+        onError={() => setImgError(true)}
+        onLoad={() => setLoaded(true)}
+        loading="eager"
+      />
+    </>
+  );
 }
 
 function formatDate(dateStr: string) {
@@ -128,6 +189,7 @@ export default function RobloxTracker() {
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>(getLocalHistory());
 
   const { data: result, isLoading, isError, error } = useQuery<SearchResult>({
     queryKey: ['/api/roblox/lookup', searchQuery],
@@ -140,10 +202,13 @@ export default function RobloxTracker() {
     staleTime: 15000,
   });
 
-  const { data: historyData } = useQuery<{ history: HistoryItem[] }>({
-    queryKey: ['/api/roblox/history'],
-    staleTime: 10000,
-  });
+  // Сохраняем в локальную историю при успешном поиске
+  useEffect(() => {
+    if (result?.success && result.user) {
+      saveToLocalHistory(result.user.name, result.user.id, result.user.avatar);
+      setHistory(getLocalHistory());
+    }
+  }, [result]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,6 +221,11 @@ export default function RobloxTracker() {
   const handleHistoryClick = (username: string) => {
     setSearchInput(username);
     setSearchQuery(username);
+  };
+
+  const handleClearHistory = () => {
+    clearLocalHistory();
+    setHistory([]);
   };
 
   const user = result?.user;
@@ -211,20 +281,34 @@ export default function RobloxTracker() {
         </div>
       </form>
 
-      {/* Search History */}
-      {historyData?.history && historyData.history.length > 0 && !user && (
+      {/* Search History (локальная) */}
+      {history.length > 0 && !user && (
         <div className="max-w-2xl mx-auto mb-8">
-          <div className="flex items-center gap-2 mb-3 text-sm text-muted-foreground">
-            <History className="h-4 w-4" />
-            <span>Недавние поиски</span>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <History className="h-4 w-4" />
+              <span>Недавние поиски</span>
+            </div>
+            <button 
+              onClick={handleClearHistory}
+              className="text-xs text-muted-foreground hover:text-red-400 transition-colors flex items-center gap-1"
+            >
+              <Trash2 className="h-3 w-3" />
+              Очистить
+            </button>
           </div>
           <div className="flex flex-wrap gap-2">
-            {historyData.history.map((item) => (
+            {history.map((item) => (
               <button
-                key={item.userId}
+                key={item.odId}
                 onClick={() => handleHistoryClick(item.username)}
-                className="glass glass-border rounded-lg px-3 py-1.5 text-sm hover:bg-primary/10 transition-colors"
+                className="glass glass-border rounded-lg px-3 py-1.5 text-sm hover:bg-primary/10 transition-colors flex items-center gap-2"
               >
+                {item.avatar && (
+                  <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0">
+                    <img src={item.avatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  </div>
+                )}
                 {item.username}
               </button>
             ))}
@@ -269,14 +353,8 @@ export default function RobloxTracker() {
                 <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
                   {/* Avatar */}
                   <div className="relative">
-                    <div className="w-28 h-28 rounded-2xl overflow-hidden ring-4 ring-background shadow-2xl">
-                      {user.avatar ? (
-                        <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center">
-                          <User className="h-12 w-12 text-white" />
-                        </div>
-                      )}
+                    <div className="w-28 h-28 rounded-2xl overflow-hidden ring-4 ring-background shadow-2xl relative">
+                      <RobloxAvatar src={user.avatar} name={user.name} size="lg" />
                     </div>
                     {/* Status dot */}
                     <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-3 border-background
@@ -385,42 +463,66 @@ export default function RobloxTracker() {
                       <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{user.currentGame.description}</p>
                     )}
                     <div className="flex flex-wrap gap-3 text-sm">
-                      <Badge variant="secondary" className="gap-1">
-                        <Users className="h-3 w-3" />
-                        {formatNumber(user.currentGame.playing)} играют
-                      </Badge>
-                      <Badge variant="secondary" className="gap-1">
-                        <Eye className="h-3 w-3" />
-                        {formatNumber(user.currentGame.visits)} посещений
-                      </Badge>
-                      <Badge variant="secondary" className="gap-1">
-                        <Star className="h-3 w-3" />
-                        {user.currentGame.creator}
-                      </Badge>
+                      {user.currentGame.playing > 0 && (
+                        <Badge variant="secondary" className="gap-1">
+                          <Users className="h-3 w-3" />
+                          {formatNumber(user.currentGame.playing)} играют
+                        </Badge>
+                      )}
+                      {user.currentGame.visits > 0 && (
+                        <Badge variant="secondary" className="gap-1">
+                          <Eye className="h-3 w-3" />
+                          {formatNumber(user.currentGame.visits)} посещений
+                        </Badge>
+                      )}
+                      {user.currentGame.creator && (
+                        <Badge variant="secondary" className="gap-1">
+                          <Star className="h-3 w-3" />
+                          {user.currentGame.creator}
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col gap-2">
-                    <a
-                      href={`https://www.roblox.com/games/${user.currentGame.placeId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <Button className="w-full gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500">
-                        <Gamepad2 className="h-4 w-4" />
-                        Присоединиться
-                      </Button>
-                    </a>
-                    <a
-                      href={`https://www.roblox.com/games/${user.currentGame.placeId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <Button variant="outline" className="w-full gap-2 glass glass-border">
-                        <ExternalLink className="h-4 w-4" />
-                        Страница игры
-                      </Button>
-                    </a>
+                    {/* Протокольная ссылка для открытия Roblox и присоединения */}
+                    {(user.currentGame.placeId > 0) && (
+                      <a
+                        href={`roblox://experiences/start?placeId=${user.currentGame.rootPlaceId || user.currentGame.placeId}${user.presence?.gameId ? `&gameInstanceId=${user.presence.gameId}` : ''}`}
+                      >
+                        <Button className="w-full gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500">
+                          <Gamepad2 className="h-4 w-4" />
+                          Присоединиться
+                        </Button>
+                      </a>
+                    )}
+                    {(user.currentGame.placeId > 0) && (
+                      <a
+                        href={`https://www.roblox.com/games/${user.currentGame.rootPlaceId || user.currentGame.placeId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Button variant="outline" className="w-full gap-2 glass glass-border">
+                          <ExternalLink className="h-4 w-4" />
+                          Страница игры
+                        </Button>
+                      </a>
+                    )}
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* В игре, но нет данных */}
+          {user.presence?.type === 2 && !user.currentGame && (
+            <Card className="glass glass-border border-blue-500/30">
+              <CardContent className="flex items-center gap-4 py-6">
+                <Gamepad2 className="h-8 w-8 text-blue-400 flex-shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-blue-400">В игре</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {user.lastLocation || 'Информация об игре скрыта настройками приватности'}
+                  </p>
                 </div>
               </CardContent>
             </Card>

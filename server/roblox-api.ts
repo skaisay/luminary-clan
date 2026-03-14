@@ -1,27 +1,7 @@
 /**
  * Roblox API — серверная обёртка для публичных Roblox API.
- * Хранит последние поиски в памяти (без БД).
+ * История поиска хранится на клиенте (localStorage).
  */
-
-// In-memory кэш последних поисков (макс 50)
-interface CachedSearch {
-  username: string;
-  userId: number;
-  timestamp: number;
-}
-const searchHistory: CachedSearch[] = [];
-const MAX_HISTORY = 50;
-
-function addToHistory(username: string, userId: number) {
-  const existing = searchHistory.findIndex(s => s.userId === userId);
-  if (existing !== -1) searchHistory.splice(existing, 1);
-  searchHistory.unshift({ username, userId, timestamp: Date.now() });
-  if (searchHistory.length > MAX_HISTORY) searchHistory.pop();
-}
-
-export function getSearchHistory() {
-  return searchHistory.slice(0, 20);
-}
 
 // --- Roblox Public API helpers ---
 
@@ -72,19 +52,48 @@ export async function getUserProfile(userId: number) {
   }
 }
 
-/** Аватар (headshot) */
+/** Аватар (headshot) — с retry при Pending */
 export async function getUserAvatar(userId: number): Promise<string | null> {
+  const sizes = ['420x420', '352x352', '150x150'];
+  
+  for (const size of sizes) {
+    try {
+      const data = await fetchJson(
+        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=${size}&format=Png&isCircular=false`
+      );
+      if (data.data && data.data.length > 0) {
+        const thumb = data.data[0];
+        // Если state=Completed и есть imageUrl — возвращаем
+        if (thumb.imageUrl && thumb.state === 'Completed') {
+          return thumb.imageUrl;
+        }
+        // Если Pending — подождём и повторим один раз
+        if (thumb.state === 'Pending') {
+          await new Promise(r => setTimeout(r, 1500));
+          const retry = await fetchJson(
+            `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=${size}&format=Png&isCircular=false`
+          );
+          if (retry.data?.[0]?.imageUrl && retry.data[0].state === 'Completed') {
+            return retry.data[0].imageUrl;
+          }
+        }
+        // Если imageUrl есть, но state не Completed — всё равно попробуем
+        if (thumb.imageUrl) return thumb.imageUrl;
+      }
+    } catch {
+      continue;
+    }
+  }
+  
+  // Fallback: прямой URL Roblox avatar API
   try {
     const data = await fetchJson(
-      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=420x420&format=Png&isCircular=false`
+      `https://thumbnails.roblox.com/v1/users/avatar?userIds=${userId}&size=352x352&format=Png&isCircular=false`
     );
-    if (data.data && data.data.length > 0) {
-      return data.data[0].imageUrl;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+    if (data.data?.[0]?.imageUrl) return data.data[0].imageUrl;
+  } catch {}
+  
+  return null;
 }
 
 /** Статус онлайн / в игре */
@@ -174,6 +183,15 @@ export async function getGameInfo(placeId: number) {
     const universeId = universeData.universeId;
     if (!universeId) return null;
 
+    return await getGameInfoByUniverse(universeId, placeId);
+  } catch {
+    return null;
+  }
+}
+
+/** Инфо об игре по universeId */
+export async function getGameInfoByUniverse(universeId: number, placeId?: number) {
+  try {
     const data = await fetchJson(
       `https://games.roblox.com/v1/games?universeIds=${universeId}`
     );
@@ -188,7 +206,7 @@ export async function getGameInfo(placeId: number) {
         maxPlayers: game.maxPlayers || 0,
         created: game.created,
         updated: game.updated,
-        placeId: placeId,
+        placeId: placeId || game.rootPlaceId,
         rootPlaceId: game.rootPlaceId,
         creator: game.creator?.name || 'Unknown',
       };
@@ -238,14 +256,38 @@ export async function lookupUser(username: string) {
     return { success: false, error: 'Не удалось загрузить профиль' };
   }
 
-  // 3. Если в игре — получаем инфо о ней
+  // 3. Если в игре — пробуем получить инфо об игре разными способами
   let currentGame = null;
-  if (presence && presence.userPresenceType === 2 && presence.placeId) {
-    currentGame = await getGameInfo(presence.placeId);
+  if (presence && presence.userPresenceType === 2) {
+    // Способ 1: По placeId
+    if (presence.placeId) {
+      currentGame = await getGameInfo(presence.placeId);
+    }
+    // Способ 2: По rootPlaceId (если placeId не дал результат)
+    if (!currentGame && presence.rootPlaceId && presence.rootPlaceId !== presence.placeId) {
+      currentGame = await getGameInfo(presence.rootPlaceId);
+    }
+    // Способ 3: По universeId напрямую
+    if (!currentGame && presence.universeId) {
+      currentGame = await getGameInfoByUniverse(presence.universeId, presence.placeId || undefined);
+    }
+    // Способ 4: Фолбек — используем lastLocation как название игры
+    if (!currentGame && presence.lastLocation) {
+      currentGame = {
+        id: 0,
+        name: presence.lastLocation,
+        description: '',
+        playing: 0,
+        visits: 0,
+        maxPlayers: 0,
+        created: '',
+        updated: '',
+        placeId: presence.placeId || presence.rootPlaceId || 0,
+        rootPlaceId: presence.rootPlaceId || 0,
+        creator: '',
+      };
+    }
   }
-
-  // Сохраняем в историю
-  addToHistory(profile.name, userId);
 
   // Определяем статус
   let status = 'Оффлайн';
