@@ -120,5 +120,23 @@ app.use((req, res, next) => {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
+
+    // Keep-alive: ping ourselves every 14 minutes to prevent Render free tier from sleeping
+    if (process.env.NODE_ENV === "production") {
+      const KEEP_ALIVE_URL = process.env.CALLBACK_URL
+        ? process.env.CALLBACK_URL.replace('/auth/discord/callback', '/api/health')
+        : `https://luminary-clan.onrender.com/api/health`;
+      
+      setInterval(async () => {
+        try {
+          const res = await fetch(KEEP_ALIVE_URL);
+          log(`Keep-alive ping: ${res.status}`);
+        } catch (err) {
+          log(`Keep-alive ping failed: ${err}`);
+        }
+      }, 14 * 60 * 1000); // Every 14 minutes
+      
+      log(`Keep-alive enabled: pinging ${KEEP_ALIVE_URL} every 14 min`);
+    }
   });
 })();

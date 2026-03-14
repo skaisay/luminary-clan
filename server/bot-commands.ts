@@ -373,8 +373,29 @@ export async function setupDiscordBot() {
       music.initializeMusicSystem(client);
     }
     
-    // Глобальная регистрация команд через REST API (ОТКЛЮЧЕНО)
-    // console.log(`📝 Пропуск регистрации slash-команд...`);
+    // Глобальная регистрация slash-команд через REST API
+    try {
+      console.log(`📝 Регистрация ${commands.length} slash-команд...`);
+      const rest = new REST({ version: '10' }).setToken(botToken!);
+      const commandData = commands.map(cmd => cmd.toJSON());
+      
+      // Регистрируем глобально (доступно на всех серверах через ~1 час)
+      // Или для конкретного сервера — моментально
+      const guilds = client.guilds.cache;
+      for (const guild of guilds.values()) {
+        try {
+          await rest.put(
+            Routes.applicationGuildCommands(client.user!.id, guild.id),
+            { body: commandData }
+          );
+          console.log(`✅ Slash-команды зарегистрированы на сервере: ${guild.name} (${guild.id})`);
+        } catch (guildErr) {
+          console.error(`❌ Ошибка регистрации команд на ${guild.name}:`, guildErr);
+        }
+      }
+    } catch (regError) {
+      console.error('❌ Ошибка регистрации slash-команд:', regError);
+    }
 
     // Синхронизация всех существующих участников Discord с базой данных
     try {

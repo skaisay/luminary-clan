@@ -136,6 +136,11 @@ async function generateVideoThumbnail(videoPath: string, outputPath: string, fil
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Health endpoint for keep-alive pings and monitoring
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date().toISOString() });
+  });
+
   app.get("/auth/discord", (req, res, next) => {
     // Валидируем и сохраняем returnTo параметр в session
     const returnTo = req.query.returnTo as string;
