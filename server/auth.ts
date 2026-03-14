@@ -5,8 +5,8 @@ import bcrypt from "bcrypt";
 import { storage } from "./storage";
 import type { Admin } from "@shared/schema";
 
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID!;
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET!;
+const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || '';
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
 
 const getCallbackURL = () => {
   if (process.env.CALLBACK_URL) {
@@ -46,43 +46,47 @@ passport.use(
   })
 );
 
-passport.use(
-  new DiscordStrategy(
-    {
-      clientID: DISCORD_CLIENT_ID,
-      clientSecret: DISCORD_CLIENT_SECRET,
-      callbackURL: CALLBACK_URL,
-      scope: ["identify"],
-    },
-    async (_accessToken, _refreshToken, profile, done) => {
-      try {
-        let member = await storage.getClanMemberByDiscordId(profile.id);
-        
-        if (!member) {
-          member = await storage.createClanMember({
-            discordId: profile.id,
-            username: profile.username,
-            avatar: profile.avatar 
-              ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
-              : undefined,
-            role: "Member",
-          });
-        } else {
-          await storage.updateClanMember(member.id, {
-            username: profile.username,
-            avatar: profile.avatar 
-              ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
-              : member.avatar,
-          });
-        }
+if (DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET) {
+  passport.use(
+    new DiscordStrategy(
+      {
+        clientID: DISCORD_CLIENT_ID,
+        clientSecret: DISCORD_CLIENT_SECRET,
+        callbackURL: CALLBACK_URL,
+        scope: ["identify"],
+      },
+      async (_accessToken, _refreshToken, profile, done) => {
+        try {
+          let member = await storage.getClanMemberByDiscordId(profile.id);
+          
+          if (!member) {
+            member = await storage.createClanMember({
+              discordId: profile.id,
+              username: profile.username,
+              avatar: profile.avatar 
+                ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+                : undefined,
+              role: "Member",
+            });
+          } else {
+            await storage.updateClanMember(member.id, {
+              username: profile.username,
+              avatar: profile.avatar 
+                ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+                : member.avatar,
+            });
+          }
 
-        return done(null, { type: 'discord', ...member });
-      } catch (error) {
-        return done(error as Error);
+          return done(null, { type: 'discord', ...member });
+        } catch (error) {
+          return done(error as Error);
+        }
       }
-    }
-  )
-);
+    )
+  );
+} else {
+  console.log('⚠️ DISCORD_CLIENT_ID/SECRET не установлены — авторизация через Discord отключена');
+}
 
 passport.serializeUser((user: any, done) => {
   done(null, { type: user.type, id: user.id });
