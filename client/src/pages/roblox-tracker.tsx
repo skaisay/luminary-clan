@@ -309,11 +309,11 @@ export default function RobloxTracker() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   type="text"
-                  placeholder="Введите название игры в Roblox..."
+                  placeholder="Название игры или ссылка на Roblox..."
                   value={gameSearchInput}
                   onChange={(e) => setGameSearchInput(e.target.value)}
                   className="pl-10 h-12 text-base glass glass-border"
-                  maxLength={100}
+                  maxLength={200}
                 />
               </div>
               <Button 
@@ -412,7 +412,7 @@ export default function RobloxTracker() {
               </div>
               <h3 className="text-xl font-semibold mb-2">Поиск игр Roblox</h3>
               <p className="text-muted-foreground max-w-md">
-                Введите название игры, чтобы найти её и увидеть информацию: онлайн, рейтинг, ссылку для запуска
+                Введите название игры или вставьте ссылку (roblox.com/games/...) чтобы найти информацию: онлайн, рейтинг, ссылку для запуска
               </p>
             </div>
           )}

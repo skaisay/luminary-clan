@@ -2,6 +2,17 @@ import { Client, TextChannel, VoiceBasedChannel, Guild } from 'discord.js';
 import { DisTube, Queue, Song as DisTubeSong } from 'distube';
 import { YtDlpPlugin } from '@distube/yt-dlp';
 
+// Подключаем ffmpeg-static если доступен
+try {
+  const ffmpegStatic = await import('ffmpeg-static');
+  if (ffmpegStatic.default) {
+    process.env.FFMPEG_PATH = ffmpegStatic.default;
+    console.log('✅ ffmpeg-static найден:', ffmpegStatic.default);
+  }
+} catch {
+  console.log('⚠️ ffmpeg-static не найден, используется системный ffmpeg');
+}
+
 let distube: DisTube | null = null;
 
 export function initializeMusicSystem(client: Client) {
@@ -10,7 +21,9 @@ export function initializeMusicSystem(client: Client) {
     emitAddSongWhenCreatingQueue: false,
     emitAddListWhenCreatingQueue: false,
     nsfw: false,
-    plugins: [new YtDlpPlugin()],
+    plugins: [new YtDlpPlugin({ update: true })],
+    // Увеличиваем таймаут подключения к голосовому каналу (по умолчанию 30с)
+    joinTimeout: 60000,
   });
 
   // Событие: начало воспроизведения
@@ -79,9 +92,24 @@ export async function addSong(
     };
   } catch (error: any) {
     console.error('Ошибка добавления песни:', error);
+    
+    // Улучшенные сообщения об ошибках
+    let message = `❌ Ошибка: ${error.message || 'Не удалось добавить трек'}`;
+    
+    if (error.message?.includes('Cannot connect to the voice channel') || error.message?.includes('30 seconds')) {
+      message = '❌ Не удалось подключиться к голосовому каналу. Возможные причины:\n' +
+        '• Бот не имеет прав на подключение к каналу\n' +
+        '• Сервер хостинга не поддерживает UDP-соединения для голоса\n' +
+        '• Попробуйте перезайти в голосовой канал';
+    } else if (error.message?.includes('Sign in') || error.message?.includes('confirm your age') || error.message?.includes('bot')) {
+      message = '❌ YouTube заблокировал запрос. Попробуйте:\n• Использовать прямую ссылку\n• Попробовать другой трек';
+    } else if (error.message?.includes('No result') || error.message?.includes('not found')) {
+      message = '❌ Трек не найден. Проверьте ссылку или название.';
+    }
+    
     return {
       success: false,
-      message: `❌ Ошибка: ${error.message || 'Не удалось добавить трек'}`,
+      message,
     };
   }
 }
