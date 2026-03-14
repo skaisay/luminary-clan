@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Gamepad2, Clock, Users, UserPlus, Eye, ExternalLink, User, Calendar, Shield, Loader2, History, XCircle, Globe, Star, Trash2 } from "lucide-react";
+import { Search, Gamepad2, Clock, Users, UserPlus, Eye, ExternalLink, User, Calendar, Shield, Loader2, History, XCircle, Globe, Star, Trash2, ThumbsUp, Server } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -186,10 +186,15 @@ function AccountAge(props: { created: string }) {
 
 export default function RobloxTracker() {
   const { t } = useLanguage();
+  const [activeTab, setActiveTab] = useState<'player' | 'games'>('player');
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>(getLocalHistory());
+  
+  // Game search state
+  const [gameSearchInput, setGameSearchInput] = useState('');
+  const [gameSearchQuery, setGameSearchQuery] = useState('');
 
   const { data: result, isLoading, isError, error } = useQuery<SearchResult>({
     queryKey: ['/api/roblox/lookup', searchQuery],
@@ -197,9 +202,20 @@ export default function RobloxTracker() {
       const res = await fetch(`/api/roblox/lookup/${encodeURIComponent(searchQuery)}`);
       return res.json();
     },
-    enabled: searchQuery.length >= 3,
+    enabled: searchQuery.length >= 3 && activeTab === 'player',
     refetchInterval: autoRefresh ? 30000 : false,
     staleTime: 15000,
+  });
+
+  // Game search query
+  const { data: gameResults, isLoading: gamesLoading } = useQuery<{ success: boolean; games: any[] }>({
+    queryKey: ['/api/roblox/games/search', gameSearchQuery],
+    queryFn: async () => {
+      const res = await fetch(`/api/roblox/games/search?keyword=${encodeURIComponent(gameSearchQuery)}`);
+      return res.json();
+    },
+    enabled: gameSearchQuery.length >= 2 && activeTab === 'games',
+    staleTime: 30000,
   });
 
   // Сохраняем в локальную историю при успешном поиске
@@ -226,6 +242,14 @@ export default function RobloxTracker() {
   const handleClearHistory = () => {
     clearLocalHistory();
     setHistory([]);
+  };
+
+  const handleGameSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = gameSearchInput.trim();
+    if (trimmed.length >= 2) {
+      setGameSearchQuery(trimmed);
+    }
   };
 
   const user = result?.user;
@@ -255,6 +279,148 @@ export default function RobloxTracker() {
           Отслеживайте активность любого игрока Roblox в реальном времени
         </p>
       </div>
+
+      {/* Tabs */}
+      <div className="flex justify-center gap-2 mb-8">
+        <Button
+          variant={activeTab === 'player' ? 'default' : 'outline'}
+          onClick={() => setActiveTab('player')}
+          className={`gap-2 ${activeTab === 'player' ? 'bg-gradient-to-r from-red-600 to-orange-600' : 'glass glass-border'}`}
+        >
+          <User className="h-4 w-4" />
+          Поиск игрока
+        </Button>
+        <Button
+          variant={activeTab === 'games' ? 'default' : 'outline'}
+          onClick={() => setActiveTab('games')}
+          className={`gap-2 ${activeTab === 'games' ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : 'glass glass-border'}`}
+        >
+          <Gamepad2 className="h-4 w-4" />
+          Поиск игр
+        </Button>
+      </div>
+
+      {/* Game Search Tab */}
+      {activeTab === 'games' && (
+        <>
+          <form onSubmit={handleGameSearch} className="max-w-2xl mx-auto mb-8">
+            <div className="flex gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Введите название игры в Roblox..."
+                  value={gameSearchInput}
+                  onChange={(e) => setGameSearchInput(e.target.value)}
+                  className="pl-10 h-12 text-base glass glass-border"
+                  maxLength={100}
+                />
+              </div>
+              <Button 
+                type="submit" 
+                disabled={gamesLoading || gameSearchInput.trim().length < 2} 
+                className="h-12 px-6 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500"
+              >
+                {gamesLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
+                <span className="ml-2 hidden sm:inline">Найти</span>
+              </Button>
+            </div>
+          </form>
+
+          {/* Game search loading */}
+          {gamesLoading && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Loader2 className="h-12 w-12 animate-spin text-blue-400 mb-4" />
+              <p className="text-muted-foreground">Поиск игр...</p>
+            </div>
+          )}
+
+          {/* Game results */}
+          {gameResults?.success && gameResults.games && gameResults.games.length > 0 && (
+            <div className="max-w-4xl mx-auto">
+              <p className="text-sm text-muted-foreground mb-4">Найдено: {gameResults.games.length} игр</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {gameResults.games.map((game: any, idx: number) => (
+                  <Card key={game.universeId || idx} className="glass glass-border hover:border-blue-500/40 transition-colors">
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center">
+                          <Gamepad2 className="h-5 w-5 text-blue-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-sm truncate">{game.name}</h3>
+                          <p className="text-xs text-muted-foreground">{game.creatorName}</p>
+                          
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            <Badge variant="secondary" className="text-xs gap-1">
+                              <Users className="h-3 w-3" />
+                              {formatNumber(game.playerCount || 0)} в игре
+                            </Badge>
+                            {game.totalUpVotes > 0 && (
+                              <Badge variant="secondary" className="text-xs gap-1">
+                                <ThumbsUp className="h-3 w-3" />
+                                {game.totalUpVotes && game.totalDownVotes 
+                                  ? Math.round((game.totalUpVotes / (game.totalUpVotes + game.totalDownVotes)) * 100) + '%'
+                                  : '?'
+                                }
+                              </Badge>
+                            )}
+                          </div>
+                          
+                          <div className="flex gap-2 mt-3">
+                            <a
+                              href={`roblox://experiences/start?placeId=${game.placeId || game.rootPlaceId}`}
+                            >
+                              <Button size="sm" className="gap-1.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-xs h-7">
+                                <Gamepad2 className="h-3 w-3" />
+                                Играть
+                              </Button>
+                            </a>
+                            <a
+                              href={`https://www.roblox.com/games/${game.placeId || game.rootPlaceId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <Button size="sm" variant="outline" className="gap-1.5 glass glass-border text-xs h-7">
+                                <ExternalLink className="h-3 w-3" />
+                                Страница
+                              </Button>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* No game results */}
+          {gameResults?.success && gameResults.games && gameResults.games.length === 0 && (
+            <div className="max-w-2xl mx-auto text-center py-12">
+              <XCircle className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+              <p className="text-muted-foreground">Игры не найдены. Попробуйте другой запрос.</p>
+            </div>
+          )}
+
+          {/* Empty game search state */}
+          {!gamesLoading && !gameSearchQuery && (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="p-6 rounded-3xl bg-gradient-to-br from-blue-500/10 to-cyan-500/10 mb-6">
+                <Search className="h-16 w-16 text-blue-400/50" />
+              </div>
+              <h3 className="text-xl font-semibold mb-2">Поиск игр Roblox</h3>
+              <p className="text-muted-foreground max-w-md">
+                Введите название игры, чтобы найти её и увидеть информацию: онлайн, рейтинг, ссылку для запуска
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Player Search Tab */}
+      {activeTab === 'player' && (<>
 
       {/* Search Bar */}
       <form onSubmit={handleSearch} className="max-w-2xl mx-auto mb-8">
@@ -582,7 +748,7 @@ export default function RobloxTracker() {
       )}
 
       {/* Empty State */}
-      {!isLoading && !result && !searchQuery && (
+      {!isLoading && !result && !searchQuery && activeTab === 'player' && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="p-6 rounded-3xl bg-gradient-to-br from-red-500/10 to-orange-500/10 mb-6">
             <Gamepad2 className="h-16 w-16 text-red-400/50" />
@@ -593,6 +759,8 @@ export default function RobloxTracker() {
           </p>
         </div>
       )}
+
+      </>)}
     </div>
   );
 }

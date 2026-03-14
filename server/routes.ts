@@ -179,6 +179,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Поиск игр по названию
+  app.get("/api/roblox/games/search", async (req, res) => {
+    try {
+      const keyword = req.query.keyword as string;
+      if (!keyword || keyword.length < 2) {
+        return res.status(400).json({ success: false, error: 'Запрос должен быть не менее 2 символов' });
+      }
+      const games = await robloxApi.searchGames(keyword, 12);
+      res.json({ success: true, games });
+    } catch (error: any) {
+      console.error('Roblox game search error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка при поиске игр' });
+    }
+  });
+
+  // Получить серверы игры
+  app.get("/api/roblox/game/:placeId/servers", async (req, res) => {
+    try {
+      const placeId = parseInt(req.params.placeId);
+      if (isNaN(placeId)) {
+        return res.status(400).json({ success: false, error: 'Неверный placeId' });
+      }
+      const servers = await robloxApi.getGameServers(placeId, 25);
+      res.json({ success: true, servers });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Ошибка при загрузке серверов' });
+    }
+  });
+
   app.get("/auth/discord", (req, res, next) => {
     // Валидируем и сохраняем returnTo параметр в session
     const returnTo = req.query.returnTo as string;

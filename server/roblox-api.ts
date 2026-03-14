@@ -232,6 +232,87 @@ export async function getGameThumbnail(universeId: number): Promise<string | nul
   }
 }
 
+/** Поиск игр по названию */
+export async function searchGames(keyword: string, limit: number = 10) {
+  try {
+    // Используем Roblox Games API для поиска
+    const data = await fetchJson(
+      `https://games.roblox.com/v1/games/list?model.keyword=${encodeURIComponent(keyword)}&model.startRows=0&model.maxRows=${limit}&model.sortToken=`
+    );
+    
+    if (data.games && data.games.length > 0) {
+      return data.games.map((game: any) => ({
+        universeId: game.universeId,
+        name: game.name,
+        placeId: game.placeId,
+        rootPlaceId: game.rootPlaceId || game.placeId,
+        playerCount: game.playerCount || 0,
+        totalUpVotes: game.totalUpVotes || 0,
+        totalDownVotes: game.totalDownVotes || 0,
+        creatorName: game.creatorName || 'Unknown',
+        creatorType: game.creatorType || '',
+        imageToken: game.imageToken || null,
+        minimumAge: game.minimumAge || 0,
+        isSponsored: game.isSponsored || false,
+        analyticsIdentifier: game.analyticsIdentifier || null,
+      }));
+    }
+    
+    // Fallback: попробуем через search API
+    const searchData = await fetchJson(
+      `https://apis.roblox.com/search-api/omni-search?searchQuery=${encodeURIComponent(keyword)}&searchType=games&pageToken=&sessionId=`
+    );
+    
+    if (searchData.searchResults) {
+      const gameResults = searchData.searchResults
+        .filter((r: any) => r.contentType === 'Game')
+        .slice(0, limit);
+      
+      return gameResults.map((r: any) => ({
+        universeId: r.universeId || 0,
+        name: r.name || r.title || 'Unknown',
+        placeId: r.rootPlaceId || 0,
+        rootPlaceId: r.rootPlaceId || 0,
+        playerCount: r.playerCount || 0,
+        totalUpVotes: r.totalUpVotes || 0,
+        totalDownVotes: r.totalDownVotes || 0,
+        creatorName: r.creatorName || 'Unknown',
+        creatorType: '',
+        imageToken: null,
+        minimumAge: 0,
+        isSponsored: false,
+      }));
+    }
+    
+    return [];
+  } catch (e) {
+    console.error('Roblox game search error:', e);
+    return [];
+  }
+}
+
+/** Получить серверы (instances) игры и проверить наличие игрока */
+export async function getGameServers(placeId: number, limit: number = 10) {
+  try {
+    const data = await fetchJson(
+      `https://games.roblox.com/v1/games/${placeId}/servers/0?sortOrder=Desc&excludeFullGames=false&limit=${limit}`
+    );
+    if (data.data) {
+      return data.data.map((server: any) => ({
+        id: server.id,
+        maxPlayers: server.maxPlayers || 0,
+        playing: server.playing || 0,
+        playerTokens: server.playerTokens || [],
+        fps: server.fps || 0,
+        ping: server.ping || 0,
+      }));
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 /** Полный поиск по username — агрегированные данные */
 export async function lookupUser(username: string) {
   // 1. Ищем userId

@@ -384,6 +384,27 @@ export async function setupDiscordBot() {
           .setRequired(false)
           .setMinValue(5)
       ),
+
+    // Roblox команды
+    new SlashCommandBuilder()
+      .setName('роблокс')
+      .setDescription('🎮 Поиск игрока Roblox по нику')
+      .addStringOption(option =>
+        option
+          .setName('ник')
+          .setDescription('Никнейм игрока в Roblox')
+          .setRequired(true)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('роблокс-игра')
+      .setDescription('🔍 Поиск игры в Roblox по названию')
+      .addStringOption(option =>
+        option
+          .setName('название')
+          .setDescription('Название игры для поиска')
+          .setRequired(true)
+      ),
   ];
 
   client.once('clientReady', async () => {
@@ -402,7 +423,7 @@ export async function setupDiscordBot() {
       const rest = new REST({ version: '10' }).setToken(botToken!);
       const commandData = commands.map(cmd => cmd.toJSON());
       
-      // Сначала очищаем глобальные команды (могут вызывать дубликаты)
+      // 1. Очищаем глобальные команды (могут вызывать дубликаты)
       try {
         await rest.put(
           Routes.applicationCommands(client.user!.id),
@@ -413,15 +434,23 @@ export async function setupDiscordBot() {
         console.error('⚠️ Не удалось очистить глобальные команды:', clearErr);
       }
       
-      // Регистрируем per-guild (моментально)
+      // 2. Очищаем ВСЕ guild-команды, затем регистрируем заново
       const guilds = client.guilds.cache;
       for (const guild of guilds.values()) {
         try {
+          // Сначала полностью очищаем старые guild-команды
+          await rest.put(
+            Routes.applicationGuildCommands(client.user!.id, guild.id),
+            { body: [] }
+          );
+          console.log(`🧹 Старые команды очищены на ${guild.name}`);
+          
+          // Затем регистрируем актуальный набор
           await rest.put(
             Routes.applicationGuildCommands(client.user!.id, guild.id),
             { body: commandData }
           );
-          console.log(`✅ Slash-команды зарегистрированы на сервере: ${guild.name} (${guild.id})`);
+          console.log(`✅ ${commandData.length} slash-команд зарегистрировано на: ${guild.name} (${guild.id})`);
         } catch (guildErr) {
           console.error(`❌ Ошибка регистрации команд на ${guild.name}:`, guildErr);
         }
@@ -829,6 +858,14 @@ export async function setupDiscordBot() {
           break;
         case 'рулетка':
           await handleRouletteCommand(interaction);
+          break;
+
+        // Roblox
+        case 'роблокс':
+          await handleRobloxCommand(interaction);
+          break;
+        case 'роблокс-игра':
+          await handleRobloxGameSearchCommand(interaction);
           break;
       }
     } catch (error) {
@@ -1875,6 +1912,154 @@ async function handleRouletteCommand(interaction: ChatInputCommandInteraction) {
   } catch (error) {
     console.error('Roulette error:', error);
     await interaction.reply({ content: '❌ Ошибка рулетки!', ephemeral: true });
+  }
+}
+
+// ========== ROBLOX КОМАНДЫ ==========
+
+let robloxApi: any = null;
+try {
+  robloxApi = await import('./roblox-api');
+} catch (e) {
+  console.log('⚠️ Roblox API модуль недоступен');
+}
+
+async function handleRobloxCommand(interaction: ChatInputCommandInteraction) {
+  const username = interaction.options.getString('ник', true);
+  
+  await interaction.deferReply();
+  
+  try {
+    if (!robloxApi) {
+      await interaction.editReply('❌ Roblox API недоступен');
+      return;
+    }
+    
+    const result = await robloxApi.lookupUser(username);
+    
+    if (!result.success || !result.user) {
+      await interaction.editReply(`❌ Игрок **${username}** не найден в Roblox`);
+      return;
+    }
+    
+    const user = result.user;
+    
+    // Статус
+    const statusEmojis: Record<string, string> = {
+      'Оффлайн': '⚫',
+      'Онлайн': '🟢',
+      'В игре': '🎮',
+      'В Roblox Studio': '🔧',
+    };
+    const statusEmoji = statusEmojis[user.status] || '⚫';
+    
+    const embed = new EmbedBuilder()
+      .setTitle(`🎮 ${user.displayName}`)
+      .setURL(user.profileUrl)
+      .setDescription(
+        `**Ник:** ${user.name}\n` +
+        `**Статус:** ${statusEmoji} ${user.status}\n` +
+        (user.description ? `**Описание:** ${user.description.substring(0, 200)}\n` : '') +
+        (user.isBanned ? '⛔ **Аккаунт заблокирован**\n' : '')
+      )
+      .addFields(
+        { name: '👥 Друзья', value: `${user.stats.friends}`, inline: true },
+        { name: '❤️ Подписчики', value: `${user.stats.followers}`, inline: true },
+        { name: '👁️ Подписки', value: `${user.stats.followings}`, inline: true },
+        { name: '📅 Создан', value: user.created ? `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:D>` : 'Неизвестно', inline: true },
+      )
+      .setColor(user.status === 'В игре' ? 0x00AAFF : user.status === 'Онлайн' ? 0x00FF00 : 0x808080)
+      .setFooter({ text: `Roblox ID: ${user.id}` })
+      .setTimestamp();
+    
+    // Если есть аватар
+    if (user.avatar) {
+      embed.setThumbnail(user.avatar);
+    }
+    
+    // Если в игре — добавляем инфо об игре
+    if (user.currentGame && user.currentGame.name) {
+      const gameField = user.currentGame.id > 0
+        ? `🎮 **${user.currentGame.name}**\n` +
+          `👥 Онлайн: ${user.currentGame.playing.toLocaleString()}\n` +
+          `👁️ Визиты: ${user.currentGame.visits.toLocaleString()}\n` +
+          (user.currentGame.placeId ? `🔗 [Присоединиться](https://www.roblox.com/games/${user.currentGame.placeId})` : '')
+        : `🎮 **${user.currentGame.name}**\n_(Информация скрыта настройками приватности)_`;
+      
+      embed.addFields({ name: '🕹️ Сейчас играет', value: gameField, inline: false });
+    }
+    
+    // Кнопка профиля
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setLabel('Профиль Roblox')
+        .setStyle(ButtonStyle.Link)
+        .setURL(user.profileUrl)
+        .setEmoji('🔗'),
+    );
+    
+    // Если в игре и есть placeId — кнопка присоединиться
+    if (user.currentGame && user.currentGame.placeId > 0) {
+      row.addComponents(
+        new ButtonBuilder()
+          .setLabel('Присоединиться к игре')
+          .setStyle(ButtonStyle.Link)
+          .setURL(`https://www.roblox.com/games/${user.currentGame.placeId}`)
+          .setEmoji('🎮'),
+      );
+    }
+    
+    await interaction.editReply({ embeds: [embed], components: [row] });
+  } catch (error) {
+    console.error('Roblox command error:', error);
+    await interaction.editReply('❌ Ошибка при поиске игрока Roblox');
+  }
+}
+
+async function handleRobloxGameSearchCommand(interaction: ChatInputCommandInteraction) {
+  const gameName = interaction.options.getString('название', true);
+  
+  await interaction.deferReply();
+  
+  try {
+    if (!robloxApi) {
+      await interaction.editReply('❌ Roblox API недоступен');
+      return;
+    }
+    
+    const results = await robloxApi.searchGames(gameName);
+    
+    if (!results || results.length === 0) {
+      await interaction.editReply(`❌ Игры по запросу **${gameName}** не найдены`);
+      return;
+    }
+    
+    const embed = new EmbedBuilder()
+      .setTitle(`🔍 Поиск: ${gameName}`)
+      .setColor(0x00AAFF)
+      .setTimestamp();
+    
+    // Показываем до 5 результатов
+    const top = results.slice(0, 5);
+    for (let i = 0; i < top.length; i++) {
+      const game = top[i];
+      embed.addFields({
+        name: `${i + 1}. ${game.name}`,
+        value: 
+          `👥 Онлайн: **${(game.playerCount || 0).toLocaleString()}**\n` +
+          `👁️ Визиты: **${(game.totalUpVotes || 0).toLocaleString()}** 👍\n` +
+          `⭐ Рейтинг: ${game.totalUpVotes && game.totalDownVotes ? Math.round((game.totalUpVotes / (game.totalUpVotes + game.totalDownVotes)) * 100) : '?'}%\n` +
+          `🔗 [Открыть](https://www.roblox.com/games/${game.placeId || game.rootPlaceId})`,
+        inline: false,
+      });
+    }
+    
+    embed.setFooter({ text: `Найдено результатов: ${results.length}` });
+    
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    console.error('Roblox game search error:', error);
+    await interaction.editReply('❌ Ошибка при поиске игры Roblox');
   }
 }
 
