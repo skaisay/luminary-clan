@@ -3,15 +3,31 @@ import { DisTube, Queue, Song as DisTubeSong } from 'distube';
 import { YouTubePlugin } from '@distube/youtube';
 import { getVoiceConnection } from '@discordjs/voice';
 
-// Подключаем ffmpeg-static если доступен
+// Проверяем наличие системного FFmpeg, затем ffmpeg-static как запасной вариант
+import { execSync } from 'child_process';
+
+let ffmpegFound = false;
 try {
-  const ffmpegStatic = await import('ffmpeg-static');
-  if (ffmpegStatic.default) {
-    process.env.FFMPEG_PATH = ffmpegStatic.default;
-    console.log('✅ ffmpeg-static найден:', ffmpegStatic.default);
+  const systemFfmpeg = execSync('which ffmpeg 2>/dev/null || where ffmpeg 2>nul', { encoding: 'utf8' }).trim();
+  if (systemFfmpeg) {
+    console.log('✅ Системный FFmpeg найден:', systemFfmpeg);
+    ffmpegFound = true;
   }
 } catch {
-  console.log('⚠️ ffmpeg-static не найден, используется системный ffmpeg');
+  // Системный FFmpeg не найден
+}
+
+if (!ffmpegFound) {
+  try {
+    const ffmpegStatic = await import('ffmpeg-static');
+    if (ffmpegStatic.default) {
+      process.env.FFMPEG_PATH = ffmpegStatic.default;
+      console.log('✅ ffmpeg-static найден:', ffmpegStatic.default);
+      ffmpegFound = true;
+    }
+  } catch {
+    console.log('⚠️ FFmpeg не найден! Музыка не будет работать.');
+  }
 }
 
 let distube: DisTube | null = null;
