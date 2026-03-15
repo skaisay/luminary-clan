@@ -366,7 +366,7 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       // Strategy 1: yt-dlp --get-url → ffmpeg
       if (!resource) {
         setLoadingStatus(guildId, 'streaming', 60 + attempt * 5, 'Получение ссылки на аудио (yt-dlp)...', { songTitle: song.title });
-        for (const fmt of ['bestaudio[ext=webm]/bestaudio/best', 'bestaudio']) {
+        for (const fmt of ['bestaudio/best', 'best*[acodec!=none]/best', '140/139/best']) {
           if (resource) break;
           try {
             musicLog(`S1: yt-dlp --get-url fmt=${fmt}...`);
@@ -498,7 +498,7 @@ function extractVideoId(url: string): string | null {
 }
 
 /** Use yt-dlp --get-url to quickly extract direct audio URL (no download, just URL extraction) */
-function getYtDlpDirectUrl(url: string, format: string = 'bestaudio[ext=webm]/bestaudio/best'): Promise<string> {
+function getYtDlpDirectUrl(url: string, format: string = 'bestaudio/best'): Promise<string> {
   return new Promise((resolve, reject) => {
     const ytdlp = spawn('yt-dlp', [
       '--get-url',
@@ -508,8 +508,8 @@ function getYtDlpDirectUrl(url: string, format: string = 'bestaudio[ext=webm]/be
       '--no-warnings',
       '--socket-timeout', '15',
       '--force-ipv4',
-      '--extractor-args', 'youtube:player_client=ios,mweb',
-      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '--extractor-args', 'youtube:player_client=web_creator,android_vr',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -602,13 +602,13 @@ function getYtDlpPipeResource(url: string): Promise<any> {
     const ffmpegCmd = ffmpegPath || 'ffmpeg';
     
     const ytdlp = spawn('yt-dlp', [
-      '-f', 'bestaudio[ext=webm]/bestaudio/best',
+      '-f', 'bestaudio/best',
       '-o', '-',
       '--no-playlist',
       '--no-check-certificates',
       '--force-ipv4',
       '--socket-timeout', '15',
-      '--extractor-args', 'youtube:player_client=ios,mweb',
+      '--extractor-args', 'youtube:player_client=web_creator,android_vr',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
