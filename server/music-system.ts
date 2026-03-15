@@ -236,129 +236,93 @@ async function handleNextSong(guildId: string) {
   }
 }
 
-// ========= Piped/Invidious Proxy Strategy =========
-// These use third-party public API proxies to bypass YouTube IP blocks on cloud hosting
+// ========= ytdl-core Strategy (pure Node.js, no external binary) =========
+let ytdlCore: any = null;
 
-const PIPED_INSTANCES = [
-  'https://pipedapi.kavin.rocks',
-  'https://pipedapi.r4fo.com',
-  'https://pipedapi.adminforge.de',
-  'https://api.piped.yt',
-];
-
-const INVIDIOUS_INSTANCES = [
-  'https://inv.nadeko.net',
-  'https://invidious.fdn.fr',
-  'https://vid.puffyan.us',
-  'https://invidious.nerdvpn.de',
-];
-
-/** Try to get audio URL from Piped API */
-async function getPipedAudioUrl(videoId: string): Promise<string> {
-  for (const instance of PIPED_INSTANCES) {
+async function getYtdlCoreStream(url: string): Promise<any> {
+  // Lazy-load ytdl-core
+  if (!ytdlCore) {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      
-      const res = await fetch(`${instance}/streams/${videoId}`, {
-        signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0' },
-      });
-      clearTimeout(timeout);
-      
-      if (!res.ok) {
-        musicLog(`Piped ${instance}: HTTP ${res.status}`);
-        continue;
+      ytdlCore = (await import('@distube/ytdl-core')).default;
+      musicLog('ytdl-core loaded (@distube/ytdl-core)');
+    } catch {
+      try {
+        ytdlCore = (await import('ytdl-core')).default;
+        musicLog('ytdl-core loaded (ytdl-core)');
+      } catch {
+        throw new Error('ytdl-core not available');
       }
-      
-      const data: any = await res.json();
-      
-      // Get audio streams, prefer opus/webm
-      const audioStreams = data.audioStreams || [];
-      if (audioStreams.length === 0) {
-        musicLog(`Piped ${instance}: no audio streams`);
-        continue;
-      }
-      
-      // Sort by quality (bitrate), prefer webm/opus
-      const sorted = audioStreams
-        .filter((s: any) => s.url)
-        .sort((a: any, b: any) => {
-          // Prefer webm/opus for better compatibility
-          const aWebm = a.mimeType?.includes('webm') ? 1 : 0;
-          const bWebm = b.mimeType?.includes('webm') ? 1 : 0;
-          if (aWebm !== bWebm) return bWebm - aWebm;
-          return (b.bitrate || 0) - (a.bitrate || 0);
-        });
-      
-      const bestAudio = sorted[0];
-      if (!bestAudio?.url) continue;
-      
-      musicLog(`✅ Piped ${instance}: got audio URL (${bestAudio.mimeType}, ${bestAudio.bitrate}bps)`);
-      return bestAudio.url;
-    } catch (err: any) {
-      musicLog(`Piped ${instance}: ${err.message}`);
     }
   }
-  throw new Error('All Piped instances failed');
-}
+  
+  return new Promise((resolve, reject) => {
+    const ffmpegCmd = ffmpegPath || 'ffmpeg';
 
-/** Try to get audio URL from Invidious API */
-async function getInvidiousAudioUrl(videoId: string): Promise<string> {
-  for (const instance of INVIDIOUS_INSTANCES) {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      
-      const res = await fetch(`${instance}/api/v1/videos/${videoId}`, {
-        signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0' },
+      const stream = ytdlCore(url, {
+        filter: 'audioonly',
+        quality: 'highestaudio',
+        highWaterMark: 1 << 25, // 32MB buffer
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+        },
       });
-      clearTimeout(timeout);
-      
-      if (!res.ok) {
-        musicLog(`Invidious ${instance}: HTTP ${res.status}`);
-        continue;
-      }
-      
-      const data: any = await res.json();
-      
-      // Get adaptive formats (audio only)
-      const adaptiveFormats = data.adaptiveFormats || [];
-      const audioFormats = adaptiveFormats
-        .filter((f: any) => f.type?.startsWith('audio/') && f.url)
-        .sort((a: any, b: any) => {
-          // Prefer webm/opus
-          const aWebm = a.type?.includes('webm') ? 1 : 0;
-          const bWebm = b.type?.includes('webm') ? 1 : 0;
-          if (aWebm !== bWebm) return bWebm - aWebm;
-          return (b.bitrate || 0) - (a.bitrate || 0);
-        });
-      
-      if (audioFormats.length === 0) {
-        musicLog(`Invidious ${instance}: no audio formats`);
-        continue;
-      }
-      
-      const bestAudio = audioFormats[0];
-      musicLog(`✅ Invidious ${instance}: got audio URL (${bestAudio.type}, ${bestAudio.bitrate}bps)`);
-      return bestAudio.url;
-    } catch (err: any) {
-      musicLog(`Invidious ${instance}: ${err.message}`);
-    }
-  }
-  throw new Error('All Invidious instances failed');
-}
 
-/** Get audio URL via proxy (Piped → Invidious fallback) */
-async function getProxyAudioUrl(videoId: string): Promise<string> {
-  // Try Piped first (usually faster)
-  try {
-    return await getPipedAudioUrl(videoId);
-  } catch {
-    // Fallback to Invidious
-    return await getInvidiousAudioUrl(videoId);
-  }
+      // Pipe through ffmpeg for consistent raw PCM output
+      const ffmpegProc = spawn(ffmpegCmd, [
+        '-i', 'pipe:0',
+        '-vn',
+        '-f', 's16le',
+        '-ar', '48000',
+        '-ac', '2',
+        'pipe:1',
+      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+      stream.pipe(ffmpegProc.stdin);
+
+      let ffmpegStderr = '';
+      ffmpegProc.stderr.on('data', (chunk: Buffer) => { ffmpegStderr += chunk.toString(); });
+
+      stream.on('error', (err: any) => {
+        ffmpegProc.kill();
+        reject(new Error(`ytdl-core stream error: ${err.message}`));
+      });
+
+      ffmpegProc.on('error', (err: any) => {
+        reject(new Error(`ffmpeg error: ${err.message}`));
+      });
+
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          stream.destroy();
+          ffmpegProc.kill();
+          reject(new Error('ytdl-core timeout (30s)'));
+        }
+      }, 30000);
+
+      let resolved = false;
+      ffmpegProc.stdout.once('data', () => {
+        resolved = true;
+        clearTimeout(timeout);
+        const resource = createAudioResource(ffmpegProc.stdout, {
+          inputType: StreamType.Raw,
+          inlineVolume: true,
+        });
+        resolve(resource);
+      });
+
+      ffmpegProc.on('close', (code: number) => {
+        clearTimeout(timeout);
+        if (!resolved) {
+          reject(new Error(`ffmpeg exited ${code} (ytdl-core): ${ffmpegStderr.substring(0, 200)}`));
+        }
+      });
+    } catch (err: any) {
+      reject(new Error(`ytdl-core init error: ${err.message}`));
+    }
+  });
 }
 
 async function playSong(guildId: string): Promise<{ success: boolean; error?: string }> {
@@ -384,19 +348,16 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       // Extract video ID for proxy strategies
       const videoId = extractVideoId(song.url);
       
-      // Strategy 0: Piped/Invidious proxy → ffmpeg (bypasses YouTube IP blocks)
-      if (videoId && !resource) {
-        setLoadingStatus(guildId, 'streaming', 58 + attempt * 3, 'Получение аудио через прокси...', { songTitle: song.title });
+      // Strategy 0: @distube/ytdl-core (pure Node.js, bypasses cloud IP blocks)
+      if (!resource) {
+        setLoadingStatus(guildId, 'streaming', 58 + attempt * 3, 'Получение аудио (ytdl-core)...', { songTitle: song.title });
         try {
-          musicLog(`S0: proxy (Piped/Invidious) for videoId=${videoId}...`);
-          const proxyUrl = await getProxyAudioUrl(videoId);
-          musicLog(`S0: got proxy URL (${proxyUrl.length} chars), starting ffmpeg...`);
-          setLoadingStatus(guildId, 'streaming', 72, 'Запуск аудиопотока (ffmpeg через прокси)...', { songTitle: song.title });
-          resource = await streamViaFfmpeg(proxyUrl);
-          strategyUsed = 'Piped/Invidious proxy + ffmpeg';
-          musicLog(`✅ S0 OK (proxy)`);
+          musicLog(`S0: ytdl-core for "${song.title}"...`);
+          resource = await getYtdlCoreStream(song.url);
+          strategyUsed = 'ytdl-core + ffmpeg';
+          musicLog(`✅ S0 OK (ytdl-core)`);
         } catch (s0Err: any) {
-          const msg = `S0(proxy): ${s0Err.message}`;
+          const msg = `S0(ytdl-core): ${s0Err.message}`;
           errors.push(msg);
           musicLog(msg);
         }
@@ -547,6 +508,7 @@ function getYtDlpDirectUrl(url: string, format: string = 'bestaudio[ext=webm]/be
       '--no-warnings',
       '--socket-timeout', '15',
       '--force-ipv4',
+      '--extractor-args', 'youtube:player_client=ios,mweb',
       '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -646,6 +608,7 @@ function getYtDlpPipeResource(url: string): Promise<any> {
       '--no-check-certificates',
       '--force-ipv4',
       '--socket-timeout', '15',
+      '--extractor-args', 'youtube:player_client=ios,mweb',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
