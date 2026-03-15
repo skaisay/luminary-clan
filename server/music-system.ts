@@ -68,6 +68,16 @@ let botClient: Client | null = null;
 
 // ========= Helpers =========
 
+/** Wraps a promise with a timeout */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Таймаут ${label} (${ms / 1000}с)`)), ms)
+    ),
+  ]);
+}
+
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -159,7 +169,7 @@ async function playSong(guildId: string) {
 
   try {
     // Get stream from play-dl
-    const stream = await play.stream(song.url);
+    const stream = await withTimeout(play.stream(song.url), 20000, 'stream');
     const resource = createAudioResource(stream.stream, {
       inputType: stream.type,
       inlineVolume: true,
@@ -277,7 +287,7 @@ export async function addSong(
 
     if (validated === 'video') {
       // Direct YouTube URL
-      const info = await play.video_info(query);
+      const info = await withTimeout(play.video_info(query), 15000, 'video_info');
       const details = info.video_details;
       songInfo = {
         title: details.title || 'Неизвестно',
@@ -292,7 +302,10 @@ export async function addSong(
       return addPlaylist(guild, voiceChannel, textChannel, query, requestedBy) as any;
     } else {
       // Search YouTube
-      const results = await play.search(query, { limit: 1, source: { youtube: 'video' } });
+      const results = await withTimeout(
+        play.search(query, { limit: 1, source: { youtube: 'video' } }),
+        15000, 'search'
+      );
       if (!results || results.length === 0) {
         return { success: false, message: '❌ Ничего не найдено по запросу' };
       }
@@ -500,7 +513,10 @@ export async function setVolume(guildId: string, volume: number): Promise<{ succ
 
 export async function searchSongs(query: string, limit: number = 5): Promise<{ success: boolean; message?: string; results?: any[] }> {
   try {
-    const results = await play.search(query, { limit, source: { youtube: 'video' } });
+    const results = await withTimeout(
+      play.search(query, { limit, source: { youtube: 'video' } }),
+      15000, 'search'
+    );
 
     if (!results || results.length === 0) {
       return { success: false, message: '❌ Ничего не найдено' };
@@ -531,7 +547,10 @@ export async function addPlaylist(
   try {
     if (!botClient) throw new Error('Music system не инициализирован');
 
-    const playlistInfo = await play.playlist_info(playlistUrl, { incomplete: true });
+    const playlistInfo = await withTimeout(
+      play.playlist_info(playlistUrl, { incomplete: true }),
+      20000, 'playlist_info'
+    );
     if (!playlistInfo) {
       return { success: false, message: '❌ Плейлист не найден' };
     }

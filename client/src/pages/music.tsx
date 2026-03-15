@@ -240,7 +240,7 @@ export default function MusicPage() {
             {t('music.loginRequired')}
           </p>
           <Button asChild className="mt-6 gap-2" size="lg">
-            <a href="/api/auth/discord">
+            <a href="/auth/discord?returnTo=/music">
               <LogIn className="h-5 w-5" />
               {t('music.loginDiscord')}
             </a>

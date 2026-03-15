@@ -799,10 +799,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Голосовой канал не найден" });
       }
 
-      const result = await addSong(guild, channel, null, query, "Web User");
+      // Timeout 25s to avoid Render's 30s gateway timeout → 502
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Превышено время ожидания (25с). Попробуйте снова.')), 25000)
+      );
+      const result = await Promise.race([
+        addSong(guild, channel, null, query, "Web User"),
+        timeoutPromise,
+      ]);
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error('[Music Play Error]', error.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: error.message });
+      }
     }
   });
 
