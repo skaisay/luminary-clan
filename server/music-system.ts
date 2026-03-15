@@ -432,10 +432,16 @@ function destroyQueue(guildId: string) {
 async function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): Promise<VoiceConnection> {
   // Check for existing connection
   let connection = getVoiceConnection(guild.id);
-  if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
-    return connection;
+  if (connection) {
+    if (connection.state.status === VoiceConnectionStatus.Ready) {
+      return connection; // Already connected and ready
+    }
+    // Existing connection is in a bad state — destroy it and recreate
+    console.log(`[Music] Existing connection in state '${connection.state.status}', destroying and recreating...`);
+    try { connection.destroy(); } catch {}
   }
 
+  console.log(`[Music] Joining voice channel ${voiceChannel.id} in guild ${guild.id}...`);
   connection = joinVoiceChannel({
     channelId: voiceChannel.id,
     guildId: guild.id,
@@ -443,10 +449,11 @@ async function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): Pr
     selfDeaf: true,
   });
 
-  // ===== UDP keepAlive workaround for cloud hosting =====
-  // Render/Railway/Heroku have issues with UDP keepAlive timeouts
-  connection.on('stateChange', (_old: any, newS: any) => {
-    const networking = Reflect.get(newS, 'networking');
+  // Log all state transitions for debugging
+  connection.on('stateChange', (oldState: any, newState: any) => {
+    console.log(`[Voice] State: ${oldState.status} → ${newState.status}`);
+    // ===== UDP keepAlive workaround for cloud hosting =====
+    const networking = Reflect.get(newState, 'networking');
     networking?.on?.('stateChange', (_: any, ns: any) => {
       const udp = Reflect.get(ns, 'udp');
       if (udp) clearInterval(udp.keepAliveInterval);
@@ -470,12 +477,12 @@ async function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): Pr
     console.error('[Voice Connection Error]', error?.message || error);
   });
 
-  // Wait for the connection to be ready before returning
+  // Wait for the connection to be ready before returning — 30s timeout for cloud hosting
   try {
-    await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
     console.log(`[Music] Voice connection ready for guild ${guild.id}`);
   } catch {
-    console.error(`[Music] Voice connection failed to reach Ready state within 15s`);
+    console.error(`[Music] Voice connection failed to reach Ready state within 30s, current: ${connection.state.status}`);
     // Don't throw — let the caller handle the player state check
   }
 
