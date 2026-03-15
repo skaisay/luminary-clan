@@ -1072,9 +1072,9 @@ export async function testAudioEndToEnd(
       console.error(`[AudioTest] Voice error:`, err?.message);
     });
 
-    // Wait for Ready with 30s timeout
+    // Wait for Ready with 15s timeout (Render has 30s proxy limit)
     try {
-      await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+      await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
     } catch {}
 
     const connState = connection.state.status;
