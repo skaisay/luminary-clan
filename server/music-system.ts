@@ -1064,7 +1064,7 @@ export async function testAudioEndToEnd(
       console.log(`[AudioTest] Voice state: ${oldState.status} → ${newState.status}`);
     });
     connection.on('debug', (msg: string) => {
-      debugLog.push(msg.substring(0, 200));
+      debugLog.push(msg.substring(0, 500));
       console.log(`[AudioTest Debug] ${msg}`);
     });
     connection.on('error', (err: any) => {
