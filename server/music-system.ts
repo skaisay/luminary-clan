@@ -1022,12 +1022,61 @@ export async function testAudioEndToEnd(
     return { success: false, message: 'Missing required dependencies', steps };
   }
 
-  // Step 2: Connect to voice channel
+  // Step 2: Connect to voice channel with detailed adapter diagnostics
   let connection: VoiceConnection;
   try {
-    connection = await connectToVoice(guild, voiceChannel);
+    // First, destroy any existing connections
+    const existing = getVoiceConnection(guild.id);
+    if (existing) {
+      addStep('voice-cleanup', 'ok', `Destroyed existing connection in state: ${existing.state.status}`);
+      try { existing.destroy(); } catch {}
+    }
+
+    // Create a wrapped adapter that logs sendPayload
+    let adapterSendPayloadResult: boolean | null = null;
+    const originalAdapterCreator = guild.voiceAdapterCreator;
+    const wrappedAdapterCreator = (methods: any) => {
+      const adapter = originalAdapterCreator(methods);
+      const origSendPayload = adapter.sendPayload;
+      adapter.sendPayload = (data: any) => {
+        const result = origSendPayload(data);
+        adapterSendPayloadResult = result;
+        console.log(`[AudioTest] sendPayload called, op=${data?.op}, d.channel_id=${data?.d?.channel_id}, result=${result}`);
+        return result;
+      };
+      return adapter;
+    };
+
+    addStep('voice-joining', 'ok', `Joining channel ${voiceChannel.id}...`);
+    connection = joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: guild.id,
+      adapterCreator: wrappedAdapterCreator as any,
+      selfDeaf: true,
+    });
+
+    // Track state changes
+    const stateLog: string[] = [];
+    connection.on('stateChange', (oldState: any, newState: any) => {
+      stateLog.push(`${oldState.status}→${newState.status}`);
+      console.log(`[AudioTest] Voice state: ${oldState.status} → ${newState.status}`);
+    });
+    connection.on('error', (err: any) => {
+      stateLog.push(`error:${err?.message}`);
+      console.error(`[AudioTest] Voice error:`, err?.message);
+    });
+
+    // Wait for Ready with 30s timeout
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+    } catch {}
+
     const connState = connection.state.status;
-    addStep('voice-connect', connState === VoiceConnectionStatus.Ready ? 'ok' : 'fail', { state: connState });
+    addStep('voice-connect', connState === VoiceConnectionStatus.Ready ? 'ok' : 'fail', {
+      state: connState,
+      sendPayloadResult: adapterSendPayloadResult,
+      stateTransitions: stateLog,
+    });
     if (connState !== VoiceConnectionStatus.Ready) {
       return { success: false, message: `Voice connection not ready: ${connState}`, steps };
     }
