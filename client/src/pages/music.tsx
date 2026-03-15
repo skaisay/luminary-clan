@@ -69,6 +69,7 @@ interface NowPlayingResult {
   success: boolean;
   message?: string;
   song?: SongInfo;
+  isPaused?: boolean;
 }
 
 interface QueueResult {
@@ -99,14 +100,14 @@ export default function MusicPage() {
   // Fetch now playing
   const { data: nowPlaying, isLoading: nowPlayingLoading } = useQuery<NowPlayingResult>({
     queryKey: ["/api/music/now-playing"],
-    refetchInterval: 3000,
+    refetchInterval: 2000,
     retry: false,
   });
 
   // Fetch queue
   const { data: queueData, isLoading: queueLoading } = useQuery<QueueResult>({
     queryKey: ["/api/music/queue"],
-    refetchInterval: 5000,
+    refetchInterval: 3000,
     retry: false,
   });
 
@@ -191,6 +192,36 @@ export default function MusicPage() {
 
   const volumeMutation = useMutation({
     mutationFn: async (vol: number) => { const r = await apiRequest("POST", "/api/music/volume", { volume: vol }); return r.json(); },
+  });
+
+  const jumpMutation = useMutation({
+    mutationFn: async (position: number) => {
+      const r = await apiRequest("POST", "/api/music/jump", { position });
+      return r.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/music/now-playing"] });
+      toast({ title: data?.message || t('music.trackSkipped') });
+    },
+    onError: (error: any) => {
+      toast({ title: t('music.error'), description: error.message, variant: "destructive" });
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async (position: number) => {
+      const r = await apiRequest("POST", "/api/music/remove", { position });
+      return r.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/music/now-playing"] });
+      toast({ title: data?.message || '🗑️ Удалено' });
+    },
+    onError: (error: any) => {
+      toast({ title: t('music.error'), description: error.message, variant: "destructive" });
+    },
   });
 
   const searchMutation = useMutation({
@@ -622,25 +653,42 @@ export default function MusicPage() {
                   {queueData.queue.map((track, index) => (
                     <div
                       key={index}
+                      onClick={() => {
+                        if (!track.isPlaying && !jumpMutation.isPending) {
+                          jumpMutation.mutate(track.position);
+                        }
+                      }}
                       className={`flex items-center gap-2.5 p-2.5 rounded-lg transition-all duration-200 group ${
                         track.isPlaying 
                           ? 'bg-primary/10 border border-primary/20' 
-                          : 'hover:bg-card/80'
+                          : 'hover:bg-card/80 cursor-pointer'
                       }`}
                     >
                       <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
                         track.isPlaying 
                           ? 'bg-primary text-primary-foreground' 
-                          : 'bg-muted/50 text-muted-foreground'
+                          : 'bg-muted/50 text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary'
                       }`}>
                         {track.isPlaying ? '▶' : track.position}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className={`text-sm truncate ${track.isPlaying ? 'font-semibold text-primary' : ''}`}>
+                        <p className={`text-sm truncate ${track.isPlaying ? 'font-semibold text-primary' : 'group-hover:text-primary'}`}>
                           {track.title}
                         </p>
                         <p className="text-xs text-muted-foreground">{track.duration}</p>
                       </div>
+                      {!track.isPlaying && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeMutation.mutate(track.position);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-1 rounded"
+                          title="Удалить из очереди"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

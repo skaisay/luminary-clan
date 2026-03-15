@@ -56,6 +56,9 @@ import {
   setVolume,
   searchSongs,
   addPlaylist,
+  jumpToSong,
+  removeSong,
+  clearQueue,
   getDistube,
   testStreaming,
   testAudioEndToEnd
@@ -801,15 +804,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Голосовой канал не найден" });
       }
 
-      // Timeout 25s to avoid Render's 30s gateway timeout → 502
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Превышено время ожидания (25с). Попробуйте снова.')), 25000)
-      );
-      const result = await Promise.race([
-        addSong(guild, channel, null, query, "Web User"),
-        timeoutPromise,
-      ]);
-      res.json(result);
+      // Fire-and-forget: addSong runs in background, we return fast
+      // This prevents Render's 30s gateway timeout from killing the request
+      addSong(guild, channel, null, query, "Web User")
+        .then(result => {
+          console.log(`[Music Play] Background result: ${result.success ? '✅' : '❌'} ${result.message}`);
+        })
+        .catch(err => {
+          console.error('[Music Play] Background error:', err.message);
+        });
+
+      // Return immediately — frontend will poll /now-playing and /queue
+      res.json({ success: true, message: '⏳ Загрузка трека...' });
     } catch (error: any) {
       console.error('[Music Play Error]', error.message);
       if (!res.headersSent) {
@@ -967,6 +973,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const result = await searchSongs(query, limit);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Jump to a specific track in the queue
+  app.post("/api/music/jump", requireMusicAuth, async (req, res) => {
+    try {
+      const { position } = req.body;
+      if (!position || position < 1) {
+        return res.status(400).json({ error: "position обязателен (число >= 1)" });
+      }
+
+      const distube = getDistube();
+      const client = distube.client;
+      const guild = client.guilds.cache.first();
+      if (!guild) {
+        return res.status(500).json({ error: "Discord сервер не найден" });
+      }
+
+      const result = await jumpToSong(guild.id, position);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Remove a track from the queue
+  app.post("/api/music/remove", requireMusicAuth, async (req, res) => {
+    try {
+      const { position } = req.body;
+      if (!position || position < 1) {
+        return res.status(400).json({ error: "position обязателен (число >= 1)" });
+      }
+
+      const distube = getDistube();
+      const client = distube.client;
+      const guild = client.guilds.cache.first();
+      if (!guild) {
+        return res.status(500).json({ error: "Discord сервер не найден" });
+      }
+
+      const result = await removeSong(guild.id, position);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Clear queue (keep current track)
+  app.post("/api/music/clear", requireMusicAuth, async (req, res) => {
+    try {
+      const distube = getDistube();
+      const client = distube.client;
+      const guild = client.guilds.cache.first();
+      if (!guild) {
+        return res.status(500).json({ error: "Discord сервер не найден" });
+      }
+
+      const result = await clearQueue(guild.id);
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

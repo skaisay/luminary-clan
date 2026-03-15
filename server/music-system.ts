@@ -908,10 +908,21 @@ export async function jumpToSong(guildId: string, position: number): Promise<{ s
       return { success: false, message: '❌ Неверная позиция в очереди' };
     }
 
-    // Remove songs before the target position (keep current loop behavior)
+    // Already playing this track
+    if (position === 1) {
+      return { success: true, message: `▶️ Уже играет: **${q.songs[0].title}**` };
+    }
+
+    // Remove songs before the target position so target becomes songs[0]
     const target = q.songs[position - 1];
     q.songs = q.songs.slice(position - 1);
-    q.player.stop(); // Triggers Idle → handleNextSong will play new songs[0]
+    
+    // Directly start playing the new songs[0] — do NOT use stop() because
+    // that triggers handleNextSong which would shift() the target song away
+    const playResult = await playSong(guildId);
+    if (!playResult.success) {
+      return { success: false, message: `❌ Не удалось воспроизвести: ${playResult.error}` };
+    }
 
     return { success: true, message: `⏭️ Переход к: **${target.title}**` };
   } catch (error: any) {
