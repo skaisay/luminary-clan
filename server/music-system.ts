@@ -188,91 +188,110 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
   if (!q || q.songs.length === 0) return { success: false, error: 'No songs' };
 
   const song = q.songs[0];
+  const errors: string[] = [];
 
-  try {
-    let resource;
-    let strategyUsed = '';
-    
-    // Strategy 1: yt-dlp --get-url → ffmpeg (fastest & most reliable)
-    // Try twice with different format selection
-    setLoadingStatus(guildId, 'streaming', 65, 'Стратегия 1: получение ссылки на аудио...', { songTitle: song.title });
-    for (const fmt of ['bestaudio[ext=webm]/bestaudio/best', 'bestaudio']) {
-      if (resource) break;
-      try {
-        const directUrl = await getYtDlpDirectUrl(song.url, fmt);
-        setLoadingStatus(guildId, 'streaming', 75, 'Запуск аудиопотока через ffmpeg...', { songTitle: song.title });
-        resource = await streamViaFfmpeg(directUrl);
-        strategyUsed = 'yt-dlp URL + ffmpeg';
-        console.log(`[Music] ✅ Strategy 1 (yt-dlp URL + ffmpeg, fmt=${fmt}) for "${song.title}"`);
-      } catch (s1Err: any) {
-        console.log(`[Music] Strategy 1 failed (fmt=${fmt}): ${s1Err.message}`);
-      }
+  // Allow one full retry of all strategies
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      console.log(`[Music] Retry attempt ${attempt + 1} for "${song.title}"`);
+      setLoadingStatus(guildId, 'streaming', 55, `Повторная попытка (${attempt + 1}/2)...`, { songTitle: song.title });
+      await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
     }
 
-    // Strategy 2: yt-dlp pipe → ffmpeg → player
-    if (!resource) {
-      setLoadingStatus(guildId, 'streaming', 78, 'Стратегия 2: прямой поток...', { songTitle: song.title });
-      try {
-        resource = await getYtDlpPipeResource(song.url);
-        strategyUsed = 'yt-dlp pipe + ffmpeg';
-        console.log(`[Music] ✅ Strategy 2 (yt-dlp pipe) for "${song.title}"`);
-      } catch (s2Err: any) {
-        console.log(`[Music] Strategy 2 failed: ${s2Err.message}`);
-      }
-    }
-
-    // Strategy 3: play-dl stream
-    if (!resource) {
-      setLoadingStatus(guildId, 'streaming', 82, 'Стратегия 3: play-dl...', { songTitle: song.title });
-      try {
-        const stream = await withTimeout(play.stream(song.url), 12000, 'play-dl stream');
-        resource = createAudioResource(stream.stream, {
-          inputType: stream.type,
-          inlineVolume: true,
-        });
-        strategyUsed = 'play-dl';
-        console.log(`[Music] ✅ Strategy 3 (play-dl) for "${song.title}"`);
-      } catch (s3Err: any) {
-        console.log(`[Music] Strategy 3 failed: ${s3Err.message}`);
-      }
-    }
-
-    if (!resource) {
-      throw new Error('Все стратегии стриминга не сработали');
-    }
-
-    setLoadingStatus(guildId, 'streaming', 90, 'Запуск плеера...', { songTitle: song.title });
-
-    // Set volume
-    if (resource.volume) {
-      resource.volume.setVolume(q.volume / 100);
-    }
-
-    // Play and wait for confirmation that it actually starts
-    q.player.play(resource);
-    
-    // Wait up to 5s for player to enter Playing state
     try {
-      await entersState(q.player, AudioPlayerStatus.Playing, 5_000);
-      q.isPlaying = true;
-      q.isPaused = false;
-      setLoadingStatus(guildId, 'playing', 100, `Играет: ${song.title}`, { songTitle: song.title });
-      console.log(`[Music] ▶️ Confirmed playing: "${song.title}" via ${strategyUsed} in guild ${guildId}`);
+      let resource;
+      let strategyUsed = '';
       
-      if (q.textChannel) {
-        q.textChannel.send(`🎵 **Играет:** ${song.title} - \`${song.duration}\``).catch(() => {});
+      // Strategy 1: yt-dlp --get-url → ffmpeg (fastest & most reliable)
+      setLoadingStatus(guildId, 'streaming', 60 + attempt * 5, 'Получение ссылки на аудио (yt-dlp)...', { songTitle: song.title });
+      for (const fmt of ['bestaudio[ext=webm]/bestaudio/best', 'bestaudio']) {
+        if (resource) break;
+        try {
+          const directUrl = await getYtDlpDirectUrl(song.url, fmt);
+          setLoadingStatus(guildId, 'streaming', 75, 'Запуск аудиопотока (ffmpeg)...', { songTitle: song.title });
+          resource = await streamViaFfmpeg(directUrl);
+          strategyUsed = 'yt-dlp URL + ffmpeg';
+          console.log(`[Music] ✅ Strategy 1 (fmt=${fmt}) for "${song.title}"`);
+        } catch (s1Err: any) {
+          const msg = `S1(${fmt}): ${s1Err.message}`;
+          errors.push(msg);
+          console.log(`[Music] ${msg}`);
+        }
       }
-      return { success: true };
-    } catch (stateErr: any) {
-      // Player didn't enter Playing state — check what state it's in
-      const currentState = q.player.state.status;
-      console.error(`[Music] Player failed to enter Playing state. Current: ${currentState}. Strategy: ${strategyUsed}`);
-      throw new Error(`Player не начал воспроизведение (${currentState}) via ${strategyUsed}`);
-    }
-  } catch (error: any) {
-    console.error(`[Music] All stream strategies failed for "${song.title}":`, error.message);
-    setLoadingStatus(guildId, 'error', 0, `Не удалось: ${error.message}`, { songTitle: song.title, errorDetail: error.message });
-    if (q.textChannel) {
+
+      // Strategy 2: yt-dlp pipe → ffmpeg
+      if (!resource) {
+        setLoadingStatus(guildId, 'streaming', 80, 'Прямой поток (yt-dlp pipe)...', { songTitle: song.title });
+        try {
+          resource = await getYtDlpPipeResource(song.url);
+          strategyUsed = 'yt-dlp pipe + ffmpeg';
+          console.log(`[Music] ✅ Strategy 2 (pipe) for "${song.title}"`);
+        } catch (s2Err: any) {
+          const msg = `S2: ${s2Err.message}`;
+          errors.push(msg);
+          console.log(`[Music] ${msg}`);
+        }
+      }
+
+      // Strategy 3: play-dl stream
+      if (!resource) {
+        setLoadingStatus(guildId, 'streaming', 85, 'Альтернативный поток (play-dl)...', { songTitle: song.title });
+        try {
+          const stream = await withTimeout(play.stream(song.url), 15000, 'play-dl stream');
+          resource = createAudioResource(stream.stream, {
+            inputType: stream.type,
+            inlineVolume: true,
+          });
+          strategyUsed = 'play-dl';
+          console.log(`[Music] ✅ Strategy 3 (play-dl) for "${song.title}"`);
+        } catch (s3Err: any) {
+          const msg = `S3: ${s3Err.message}`;
+          errors.push(msg);
+          console.log(`[Music] ${msg}`);
+        }
+      }
+
+      if (!resource) {
+        // If this is the first attempt, continue to retry
+        if (attempt === 0) continue;
+        throw new Error(`Все стратегии не сработали. ${errors.slice(-3).join('; ')}`);
+      }
+
+      setLoadingStatus(guildId, 'streaming', 92, 'Запуск плеера...', { songTitle: song.title });
+
+      // Set volume
+      if (resource.volume) {
+        resource.volume.setVolume(q.volume / 100);
+      }
+
+      // Play and wait for confirmation
+      q.player.play(resource);
+      
+      try {
+        await entersState(q.player, AudioPlayerStatus.Playing, 8_000);
+        q.isPlaying = true;
+        q.isPaused = false;
+        setLoadingStatus(guildId, 'playing', 100, `Играет: ${song.title}`, { songTitle: song.title });
+        console.log(`[Music] ▶️ Playing: "${song.title}" via ${strategyUsed} in guild ${guildId}`);
+        
+        if (q.textChannel) {
+          q.textChannel.send(`🎵 **Играет:** ${song.title} - \`${song.duration}\``).catch(() => {});
+        }
+        return { success: true };
+      } catch (stateErr: any) {
+        const currentState = q.player.state.status;
+        const msg = `Player не начал воспроизведение (${currentState}) via ${strategyUsed}`;
+        errors.push(msg);
+        console.error(`[Music] ${msg}`);
+        if (attempt === 0) continue; // retry
+        throw new Error(msg);
+      }
+    } catch (error: any) {
+      if (attempt < 1) continue; // Will be retried
+      
+      console.error(`[Music] All strategies failed for "${song.title}":`, error.message);
+      setLoadingStatus(guildId, 'error', 0, `Не удалось: ${error.message}`, { songTitle: song.title, errorDetail: errors.join(' | ') });
+      if (q.textChannel) {
       q.textChannel.send(`❌ Не удалось воспроизвести: ${song.title}\n${error.message?.substring(0, 150)}`).catch(() => {});
     }
     // Skip to next
@@ -303,6 +322,7 @@ function getYtDlpDirectUrl(url: string, format: string = 'bestaudio[ext=webm]/be
       '--no-warnings',
       '--socket-timeout', '15',
       '--force-ipv4',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -343,6 +363,7 @@ function streamViaFfmpeg(directUrl: string): Promise<any> {
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       '-loglevel', 'warning',
       '-i', directUrl,
       '-vn',
@@ -363,9 +384,9 @@ function streamViaFfmpeg(directUrl: string): Promise<any> {
     const timeout = setTimeout(() => {
       if (!resolved) {
         ffmpegProc.kill();
-        reject(new Error(`ffmpeg stream timeout (15s). stderr: ${stderrData.substring(0, 300)}`));
+        reject(new Error(`ffmpeg stream timeout (30s). stderr: ${stderrData.substring(0, 300)}`));
       }
-    }, 15000);
+    }, 30000);
 
     let resolved = false;
     ffmpegProc.stdout.once('data', () => {
@@ -431,9 +452,9 @@ function getYtDlpPipeResource(url: string): Promise<any> {
       if (!resolved) {
         ytdlp.kill();
         ffmpegProc.kill();
-        reject(new Error(`yt-dlp pipe timeout (25s). yt-dlp: ${ytdlpStderr.substring(0, 150)}; ffmpeg: ${ffmpegStderr.substring(0, 150)}`));
+        reject(new Error(`yt-dlp pipe timeout (40s). yt-dlp: ${ytdlpStderr.substring(0, 150)}; ffmpeg: ${ffmpegStderr.substring(0, 150)}`));
       }
-    }, 25000);
+    }, 40000);
 
     let resolved = false;
     ffmpegProc.stdout.once('data', () => {
