@@ -236,6 +236,131 @@ async function handleNextSong(guildId: string) {
   }
 }
 
+// ========= Piped/Invidious Proxy Strategy =========
+// These use third-party public API proxies to bypass YouTube IP blocks on cloud hosting
+
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.r4fo.com',
+  'https://pipedapi.adminforge.de',
+  'https://api.piped.yt',
+];
+
+const INVIDIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://invidious.fdn.fr',
+  'https://vid.puffyan.us',
+  'https://invidious.nerdvpn.de',
+];
+
+/** Try to get audio URL from Piped API */
+async function getPipedAudioUrl(videoId: string): Promise<string> {
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      
+      const res = await fetch(`${instance}/streams/${videoId}`, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0' },
+      });
+      clearTimeout(timeout);
+      
+      if (!res.ok) {
+        musicLog(`Piped ${instance}: HTTP ${res.status}`);
+        continue;
+      }
+      
+      const data: any = await res.json();
+      
+      // Get audio streams, prefer opus/webm
+      const audioStreams = data.audioStreams || [];
+      if (audioStreams.length === 0) {
+        musicLog(`Piped ${instance}: no audio streams`);
+        continue;
+      }
+      
+      // Sort by quality (bitrate), prefer webm/opus
+      const sorted = audioStreams
+        .filter((s: any) => s.url)
+        .sort((a: any, b: any) => {
+          // Prefer webm/opus for better compatibility
+          const aWebm = a.mimeType?.includes('webm') ? 1 : 0;
+          const bWebm = b.mimeType?.includes('webm') ? 1 : 0;
+          if (aWebm !== bWebm) return bWebm - aWebm;
+          return (b.bitrate || 0) - (a.bitrate || 0);
+        });
+      
+      const bestAudio = sorted[0];
+      if (!bestAudio?.url) continue;
+      
+      musicLog(`✅ Piped ${instance}: got audio URL (${bestAudio.mimeType}, ${bestAudio.bitrate}bps)`);
+      return bestAudio.url;
+    } catch (err: any) {
+      musicLog(`Piped ${instance}: ${err.message}`);
+    }
+  }
+  throw new Error('All Piped instances failed');
+}
+
+/** Try to get audio URL from Invidious API */
+async function getInvidiousAudioUrl(videoId: string): Promise<string> {
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      
+      const res = await fetch(`${instance}/api/v1/videos/${videoId}`, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0' },
+      });
+      clearTimeout(timeout);
+      
+      if (!res.ok) {
+        musicLog(`Invidious ${instance}: HTTP ${res.status}`);
+        continue;
+      }
+      
+      const data: any = await res.json();
+      
+      // Get adaptive formats (audio only)
+      const adaptiveFormats = data.adaptiveFormats || [];
+      const audioFormats = adaptiveFormats
+        .filter((f: any) => f.type?.startsWith('audio/') && f.url)
+        .sort((a: any, b: any) => {
+          // Prefer webm/opus
+          const aWebm = a.type?.includes('webm') ? 1 : 0;
+          const bWebm = b.type?.includes('webm') ? 1 : 0;
+          if (aWebm !== bWebm) return bWebm - aWebm;
+          return (b.bitrate || 0) - (a.bitrate || 0);
+        });
+      
+      if (audioFormats.length === 0) {
+        musicLog(`Invidious ${instance}: no audio formats`);
+        continue;
+      }
+      
+      const bestAudio = audioFormats[0];
+      musicLog(`✅ Invidious ${instance}: got audio URL (${bestAudio.type}, ${bestAudio.bitrate}bps)`);
+      return bestAudio.url;
+    } catch (err: any) {
+      musicLog(`Invidious ${instance}: ${err.message}`);
+    }
+  }
+  throw new Error('All Invidious instances failed');
+}
+
+/** Get audio URL via proxy (Piped → Invidious fallback) */
+async function getProxyAudioUrl(videoId: string): Promise<string> {
+  // Try Piped first (usually faster)
+  try {
+    return await getPipedAudioUrl(videoId);
+  } catch {
+    // Fallback to Invidious
+    return await getInvidiousAudioUrl(videoId);
+  }
+}
+
 async function playSong(guildId: string): Promise<{ success: boolean; error?: string }> {
   const q = queues.get(guildId);
   if (!q || q.songs.length === 0) return { success: false, error: 'No songs' };
@@ -256,22 +381,45 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       let resource;
       let strategyUsed = '';
       
-      // Strategy 1: yt-dlp --get-url → ffmpeg
-      setLoadingStatus(guildId, 'streaming', 60 + attempt * 5, 'Получение ссылки на аудио (yt-dlp)...', { songTitle: song.title });
-      for (const fmt of ['bestaudio[ext=webm]/bestaudio/best', 'bestaudio']) {
-        if (resource) break;
+      // Extract video ID for proxy strategies
+      const videoId = extractVideoId(song.url);
+      
+      // Strategy 0: Piped/Invidious proxy → ffmpeg (bypasses YouTube IP blocks)
+      if (videoId && !resource) {
+        setLoadingStatus(guildId, 'streaming', 58 + attempt * 3, 'Получение аудио через прокси...', { songTitle: song.title });
         try {
-          musicLog(`S1: yt-dlp --get-url fmt=${fmt}...`);
-          const directUrl = await getYtDlpDirectUrl(song.url, fmt);
-          musicLog(`S1: got URL (${directUrl.length} chars), starting ffmpeg...`);
-          setLoadingStatus(guildId, 'streaming', 75, 'Запуск аудиопотока (ffmpeg)...', { songTitle: song.title });
-          resource = await streamViaFfmpeg(directUrl);
-          strategyUsed = `yt-dlp URL + ffmpeg (${fmt})`;
-          musicLog(`✅ S1 OK (fmt=${fmt})`);
-        } catch (s1Err: any) {
-          const msg = `S1(${fmt}): ${s1Err.message}`;
+          musicLog(`S0: proxy (Piped/Invidious) for videoId=${videoId}...`);
+          const proxyUrl = await getProxyAudioUrl(videoId);
+          musicLog(`S0: got proxy URL (${proxyUrl.length} chars), starting ffmpeg...`);
+          setLoadingStatus(guildId, 'streaming', 72, 'Запуск аудиопотока (ffmpeg через прокси)...', { songTitle: song.title });
+          resource = await streamViaFfmpeg(proxyUrl);
+          strategyUsed = 'Piped/Invidious proxy + ffmpeg';
+          musicLog(`✅ S0 OK (proxy)`);
+        } catch (s0Err: any) {
+          const msg = `S0(proxy): ${s0Err.message}`;
           errors.push(msg);
           musicLog(msg);
+        }
+      }
+      
+      // Strategy 1: yt-dlp --get-url → ffmpeg
+      if (!resource) {
+        setLoadingStatus(guildId, 'streaming', 60 + attempt * 5, 'Получение ссылки на аудио (yt-dlp)...', { songTitle: song.title });
+        for (const fmt of ['bestaudio[ext=webm]/bestaudio/best', 'bestaudio']) {
+          if (resource) break;
+          try {
+            musicLog(`S1: yt-dlp --get-url fmt=${fmt}...`);
+            const directUrl = await getYtDlpDirectUrl(song.url, fmt);
+            musicLog(`S1: got URL (${directUrl.length} chars), starting ffmpeg...`);
+            setLoadingStatus(guildId, 'streaming', 75, 'Запуск аудиопотока (ffmpeg)...', { songTitle: song.title });
+            resource = await streamViaFfmpeg(directUrl);
+            strategyUsed = `yt-dlp URL + ffmpeg (${fmt})`;
+            musicLog(`✅ S1 OK (fmt=${fmt})`);
+          } catch (s1Err: any) {
+            const msg = `S1(${fmt}): ${s1Err.message}`;
+            errors.push(msg);
+            musicLog(msg);
+          }
         }
       }
 
