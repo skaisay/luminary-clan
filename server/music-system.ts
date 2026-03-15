@@ -292,17 +292,21 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       console.error(`[Music] All strategies failed for "${song.title}":`, error.message);
       setLoadingStatus(guildId, 'error', 0, `Не удалось: ${error.message}`, { songTitle: song.title, errorDetail: errors.join(' | ') });
       if (q.textChannel) {
-      q.textChannel.send(`❌ Не удалось воспроизвести: ${song.title}\n${error.message?.substring(0, 150)}`).catch(() => {});
+        q.textChannel.send(`❌ Не удалось воспроизвести: ${song.title}\n${error.message?.substring(0, 150)}`).catch(() => {});
+      }
+      // Skip to next
+      q.songs.shift();
+      if (q.songs.length > 0) {
+        await playSong(guildId);
+      } else {
+        q.isPlaying = false;
+      }
+      return { success: false, error: error.message };
     }
-    // Skip to next
-    q.songs.shift();
-    if (q.songs.length > 0) {
-      await playSong(guildId);
-    } else {
-      q.isPlaying = false;
-    }
-    return { success: false, error: error.message };
   }
+
+  // Should never reach here, but just in case
+  return { success: false, error: 'Unexpected end of playSong' };
 }
 
 /** Extract YouTube video ID from various URL formats */
