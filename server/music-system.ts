@@ -13,6 +13,7 @@ import {
   VoiceConnection,
 } from '@discordjs/voice';
 import play from 'play-dl';
+import { spawn } from 'child_process';
 
 // Проверяем наличие системного FFmpeg, затем ffmpeg-static как запасной вариант
 import { execSync } from 'child_process';
@@ -168,12 +169,31 @@ async function playSong(guildId: string) {
   const song = q.songs[0];
 
   try {
-    // Get stream from play-dl
-    const stream = await withTimeout(play.stream(song.url), 20000, 'stream');
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type,
-      inlineVolume: true,
-    });
+    // Strategy 1: try play-dl stream
+    let resource;
+    try {
+      const stream = await withTimeout(play.stream(song.url), 15000, 'play-dl stream');
+      resource = createAudioResource(stream.stream, {
+        inputType: stream.type,
+        inlineVolume: true,
+      });
+      console.log(`[Music] Stream via play-dl for "${song.title}"`);
+    } catch (pdlErr: any) {
+      console.log(`[Music] play-dl stream failed: ${pdlErr.message}, trying yt-dlp...`);
+      
+      // Strategy 2: use yt-dlp via FFmpeg subprocess
+      // yt-dlp is available on most Linux systems; we fall back to ffmpeg raw URL
+      try {
+        resource = await getYtDlpResource(song.url);
+        console.log(`[Music] Stream via yt-dlp for "${song.title}"`);
+      } catch (ytdlpErr: any) {
+        console.log(`[Music] yt-dlp failed: ${ytdlpErr.message}, trying ffmpeg direct...`);
+        
+        // Strategy 3: try ffmpeg directly with the URL (works sometimes)
+        resource = await getFfmpegResource(song.url);
+        console.log(`[Music] Stream via ffmpeg for "${song.title}"`);
+      }
+    }
 
     // Set volume
     if (resource.volume) {
@@ -189,7 +209,7 @@ async function playSong(guildId: string) {
 
     console.log(`[Music] Playing: "${song.title}" in guild ${guildId}`);
   } catch (error: any) {
-    console.error(`[Music] Stream error for "${song.title}":`, error.message);
+    console.error(`[Music] All stream strategies failed for "${song.title}":`, error.message);
     if (q.textChannel) {
       q.textChannel.send(`❌ Не удалось воспроизвести: ${song.title}\n${error.message?.substring(0, 150)}`).catch(() => {});
     }
@@ -201,6 +221,111 @@ async function playSong(guildId: string) {
       q.isPlaying = false;
     }
   }
+}
+
+/** Get audio resource using yt-dlp subprocess */
+async function getYtDlpResource(url: string) {
+  return new Promise<any>((resolve, reject) => {
+    try {
+      // Try yt-dlp first, then youtube-dl
+      const ytdlp = spawn('yt-dlp', [
+        '-f', 'bestaudio[ext=webm]/bestaudio/best',
+        '-o', '-',  // output to stdout
+        '--no-playlist',
+        '--no-check-certificates',
+        url,
+      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+      let stderrData = '';
+      ytdlp.stderr.on('data', (chunk: Buffer) => { stderrData += chunk.toString(); });
+
+      ytdlp.on('error', (err: any) => {
+        reject(new Error(`yt-dlp not available: ${err.message}`));
+      });
+
+      // Give it 2 seconds to start producing data
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          ytdlp.kill();
+          reject(new Error('yt-dlp timeout'));
+        }
+      }, 15000);
+
+      let resolved = false;
+      ytdlp.stdout.once('data', () => {
+        resolved = true;
+        clearTimeout(timeout);
+        const resource = createAudioResource(ytdlp.stdout, {
+          inputType: StreamType.Arbitrary,
+          inlineVolume: true,
+        });
+        resolve(resource);
+      });
+
+      ytdlp.on('close', (code: number) => {
+        clearTimeout(timeout);
+        if (!resolved) {
+          reject(new Error(`yt-dlp exited with code ${code}: ${stderrData.substring(0, 200)}`));
+        }
+      });
+    } catch (err: any) {
+      reject(err);
+    }
+  });
+}
+
+/** Get audio resource using ffmpeg directly (for direct stream URLs) */
+async function getFfmpegResource(url: string) {
+  return new Promise<any>((resolve, reject) => {
+    try {
+      const ffmpeg = spawn('ffmpeg', [
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        '-i', url,
+        '-vn',              // no video
+        '-acodec', 'libopus',
+        '-f', 'opus',
+        '-ar', '48000',
+        '-ac', '2',
+        'pipe:1',           // output to stdout
+      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+      let stderrData = '';
+      ffmpeg.stderr.on('data', (chunk: Buffer) => { stderrData += chunk.toString(); });
+
+      ffmpeg.on('error', (err: any) => {
+        reject(new Error(`ffmpeg not available: ${err.message}`));
+      });
+
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          ffmpeg.kill();
+          reject(new Error('ffmpeg stream timeout'));
+        }
+      }, 15000);
+
+      let resolved = false;
+      ffmpeg.stdout.once('data', () => {
+        resolved = true;
+        clearTimeout(timeout);
+        const resource = createAudioResource(ffmpeg.stdout, {
+          inputType: StreamType.OggOpus,
+          inlineVolume: true,
+        });
+        resolve(resource);
+      });
+
+      ffmpeg.on('close', (code: number) => {
+        clearTimeout(timeout);
+        if (!resolved) {
+          reject(new Error(`ffmpeg exited with code ${code}: ${stderrData.substring(0, 200)}`));
+        }
+      });
+    } catch (err: any) {
+      reject(err);
+    }
+  });
 }
 
 function destroyQueue(guildId: string) {
@@ -289,17 +414,50 @@ export async function addSong(
     const validated = play.yt_validate(query);
 
     if (validated === 'video') {
-      // Direct YouTube URL
-      const info = await withTimeout(play.video_info(query), 15000, 'video_info');
-      const details = info.video_details;
-      songInfo = {
-        title: details.title || 'Неизвестно',
-        url: details.url,
-        duration: formatDuration(details.durationInSec || 0),
-        durationSec: details.durationInSec || 0,
-        thumbnail: details.thumbnails?.[0]?.url,
-        requestedBy,
-      };
+      // Direct YouTube URL — use youtube-sr for metadata (play.video_info times out on cloud)
+      try {
+        const YouTube = await import('youtube-sr');
+        const videoId = query.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
+        if (videoId) {
+          const video = await withTimeout(
+            YouTube.default.getVideo(`https://www.youtube.com/watch?v=${videoId}`),
+            10000, 'youtube-sr'
+          );
+          songInfo = {
+            title: video?.title || 'YouTube видео',
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            duration: video?.durationFormatted || '0:00',
+            durationSec: (video?.duration || 0) / 1000,
+            thumbnail: video?.thumbnail?.url,
+            requestedBy,
+          };
+        } else {
+          // Can't parse video ID — treat as search
+          const results = await withTimeout(
+            play.search(query, { limit: 1, source: { youtube: 'video' } }),
+            15000, 'search-fallback'
+          );
+          if (!results?.length) return { success: false, message: '❌ Видео не найдено' };
+          const v = results[0];
+          songInfo = {
+            title: v.title || 'Неизвестно',
+            url: v.url,
+            duration: formatDuration(v.durationInSec || 0),
+            durationSec: v.durationInSec || 0,
+            thumbnail: v.thumbnails?.[0]?.url,
+            requestedBy,
+          };
+        }
+      } catch {
+        // Fallback: just use the URL with minimal info
+        songInfo = {
+          title: 'YouTube видео',
+          url: query,
+          duration: '0:00',
+          durationSec: 0,
+          requestedBy,
+        };
+      }
     } else if (validated === 'playlist') {
       // Handle playlist — redirect to addPlaylist
       return addPlaylist(guild, voiceChannel, textChannel, query, requestedBy) as any;
