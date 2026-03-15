@@ -1052,6 +1052,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // UDP connectivity test — check if outbound UDP works on this host
+  app.get("/api/music/udp-test", async (_req, res) => {
+    const dgram = await import('node:dgram');
+    const results: any = { tests: [] };
+    
+    // Test 1: Can we create a UDP socket?
+    try {
+      const socket = dgram.createSocket('udp4');
+      await new Promise<void>((resolve, reject) => {
+        socket.bind(0, () => {
+          const addr = socket.address();
+          results.tests.push({ test: 'create-socket', status: 'ok', detail: `Bound to ${addr.address}:${addr.port}` });
+          resolve();
+        });
+        socket.on('error', (err) => {
+          results.tests.push({ test: 'create-socket', status: 'fail', detail: err.message });
+          reject(err);
+        });
+        setTimeout(() => { reject(new Error('timeout')); }, 5000);
+      });
+
+      // Test 2: Can we send a UDP packet to a Discord voice server?
+      // Use the voice server endpoint from the debug: c-arn07-68996708.discord.media:8443
+      await new Promise<void>((resolve) => {
+        const testBuf = Buffer.alloc(74); // IP discovery packet size
+        // Try sending to discord voice server
+        socket.send(testBuf, 0, testBuf.length, 443, '66.22.196.0', (err) => {
+          if (err) {
+            results.tests.push({ test: 'udp-send', status: 'fail', detail: err.message });
+          } else {
+            results.tests.push({ test: 'udp-send', status: 'ok', detail: 'Packet sent successfully' });
+          }
+          resolve();
+        });
+        setTimeout(resolve, 3000);
+      });
+
+      socket.close();
+    } catch (e: any) {
+      results.tests.push({ test: 'udp-overall', status: 'fail', detail: e.message });
+    }
+    
+    res.json(results);
+  });
+
   app.get("/api/requests", async (req, res) => {
     try {
       const requests = await storage.getAllRequests();
