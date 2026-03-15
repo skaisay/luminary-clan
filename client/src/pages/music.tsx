@@ -129,6 +129,15 @@ export default function MusicPage() {
     retry: false,
   });
 
+  // Debug logs (poll less frequently)
+  const [showDebugLogs, setShowDebugLogs] = useState(false);
+  const { data: debugLogs } = useQuery<{ logs: { time: string; msg: string }[]; count: number }>({
+    queryKey: ["/api/music/debug-logs"],
+    refetchInterval: showDebugLogs ? 3000 : false,
+    enabled: showDebugLogs,
+    retry: false,
+  });
+
   // Auto-select first channel with members, or first channel
   useEffect(() => {
     if (channels && channels.length > 0 && !selectedChannel) {
@@ -274,7 +283,7 @@ export default function MusicPage() {
   const isPlaying = nowPlaying?.success && nowPlaying?.song && !nowPlaying?.loading;
   const isPaused = isPlaying && nowPlaying?.isPaused;
   const isLoading = loadingStatus && ['resolving', 'connecting', 'streaming'].includes(loadingStatus.state);
-  const isError = loadingStatus?.state === 'error' && loadingStatus.timestamp && (Date.now() - loadingStatus.timestamp) < 30000;
+  const isError = loadingStatus?.state === 'error' && loadingStatus.timestamp && (Date.now() - loadingStatus.timestamp) < 120000;
   const isUnauthorized = channelsError && (channelsError as any)?.message?.includes?.("401");
 
   // Not logged in
@@ -774,6 +783,38 @@ export default function MusicPage() {
               )}
             </CardContent>
           </Card>
+        </div>
+
+        {/* Debug Logs Panel */}
+        <div className="mt-6">
+          <button 
+            onClick={() => setShowDebugLogs(!showDebugLogs)}
+            className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+          >
+            {showDebugLogs ? '▼ Скрыть логи' : '▶ Показать логи сервера'}
+          </button>
+          {showDebugLogs && debugLogs?.logs && (
+            <Card className="mt-2 bg-black/50 border-muted/20">
+              <CardContent className="p-3">
+                <div className="max-h-[300px] overflow-y-auto font-mono text-[10px] leading-relaxed space-y-0.5">
+                  {debugLogs.logs.slice(-50).map((entry, i) => (
+                    <div key={i} className={`${
+                      entry.msg.includes('✅') ? 'text-green-400' :
+                      entry.msg.includes('❌') ? 'text-red-400' :
+                      entry.msg.includes('⚠️') ? 'text-yellow-400' :
+                      entry.msg.includes('▶') ? 'text-blue-400' :
+                      'text-muted-foreground/70'
+                    }`}>
+                      <span className="text-muted-foreground/40">{entry.time}</span> {entry.msg}
+                    </div>
+                  ))}
+                  {debugLogs.logs.length === 0 && (
+                    <p className="text-muted-foreground/40 text-center py-4">Нет логов</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>

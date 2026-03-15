@@ -60,6 +60,9 @@ interface GuildQueue {
   loopMode: number;  // 0 = off, 1 = song, 2 = queue
   isPlaying: boolean;
   isPaused: boolean;
+  playStartedAt: number;      // timestamp when current song started playing
+  currentStrategy: string;    // which strategy is currently playing
+  streamRetryCount: number;   // how many times we retried the current song due to premature end
 }
 
 // ========= Loading Status =========
@@ -70,6 +73,19 @@ interface LoadingStatus {
   songTitle?: string;
   errorDetail?: string;
   timestamp: number;
+}
+
+// ========= Debug Log Ring Buffer =========
+const MAX_LOG_ENTRIES = 100;
+const debugLogs: { time: string; msg: string }[] = [];
+function musicLog(msg: string) {
+  const time = new Date().toISOString().substring(11, 23);
+  debugLogs.push({ time, msg });
+  if (debugLogs.length > MAX_LOG_ENTRIES) debugLogs.shift();
+  console.log(`[Music] ${msg}`);
+}
+export function getDebugLogs(): { time: string; msg: string }[] {
+  return [...debugLogs];
 }
 
 // ========= State =========
@@ -123,21 +139,31 @@ function getOrCreateQueue(guildId: string): GuildQueue {
       loopMode: 0,
       isPlaying: false,
       isPaused: false,
+      playStartedAt: 0,
+      currentStrategy: '',
+      streamRetryCount: 0,
     };
 
     // Когда трек закончился — переходим к следующему
     player.on(AudioPlayerStatus.Idle, () => {
+      const gq = queues.get(guildId);
+      const playDur = gq?.playStartedAt ? ((Date.now() - gq.playStartedAt) / 1000).toFixed(1) : '?';
+      musicLog(`Player → Idle (played ${playDur}s) guild=${guildId}`);
       handleNextSong(guildId);
     });
 
     player.on('error', (error) => {
-      console.error(`[Music] Player error guild=${guildId}:`, error.message);
+      musicLog(`Player ERROR guild=${guildId}: ${error.message}`);
       const gq = queues.get(guildId);
       if (gq?.textChannel) {
         gq.textChannel.send(`❌ Ошибка воспроизведения: ${error.message.substring(0, 200)}`).catch(() => {});
       }
-      // Переходим к следующему треку при ошибке
       handleNextSong(guildId);
+    });
+
+    // Log all player state transitions
+    player.on('stateChange', (oldState, newState) => {
+      musicLog(`Player: ${oldState.status} → ${newState.status} guild=${guildId}`);
     });
 
     queues.set(guildId, q);
@@ -149,15 +175,42 @@ async function handleNextSong(guildId: string) {
   const q = queues.get(guildId);
   if (!q) return;
 
+  const currentSong = q.songs[0];
+  const playDuration = q.playStartedAt > 0 ? (Date.now() - q.playStartedAt) / 1000 : 0;
+
+  // Detect premature stream end: if song played < 10 seconds, the stream likely died
+  const MIN_PLAY_SECONDS = 10;
+  if (currentSong && playDuration > 0 && playDuration < MIN_PLAY_SECONDS && q.streamRetryCount < 2) {
+    q.streamRetryCount++;
+    musicLog(`⚠️ Stream died after ${playDuration.toFixed(1)}s for "${currentSong.title}" (retry ${q.streamRetryCount}/2)`);
+    setLoadingStatus(guildId, 'streaming', 50, `Поток прервался (${playDuration.toFixed(0)}с), повтор ${q.streamRetryCount}/2...`, { songTitle: currentSong.title });
+    
+    // Wait a bit before retrying
+    await new Promise(r => setTimeout(r, 2000));
+    await playSong(guildId);
+    return;
+  }
+
+  if (currentSong && playDuration > 0 && playDuration < MIN_PLAY_SECONDS) {
+    musicLog(`❌ Stream died after ${playDuration.toFixed(1)}s for "${currentSong.title}" — no more retries`);
+    setLoadingStatus(guildId, 'error', 0, `Поток прервался через ${playDuration.toFixed(0)}с — не удалось воспроизвести`, { 
+      songTitle: currentSong.title, 
+      errorDetail: `Stream died after ${playDuration.toFixed(1)}s via ${q.currentStrategy}. Retried ${q.streamRetryCount} times.` 
+    });
+  }
+
+  // Reset retry state for next song
+  q.playStartedAt = 0;
+  q.streamRetryCount = 0;
+  q.currentStrategy = '';
+
   // Loop modes
   if (q.loopMode === 1 && q.songs.length > 0) {
-    // Loop current song — replay songs[0]
     await playSong(guildId);
     return;
   }
 
   if (q.loopMode === 2 && q.songs.length > 0) {
-    // Loop queue — move current to end
     const current = q.songs.shift()!;
     q.songs.push(current);
     await playSong(guildId);
@@ -169,8 +222,8 @@ async function handleNextSong(guildId: string) {
   if (q.songs.length > 0) {
     await playSong(guildId);
   } else {
-    // Queue empty — disconnect after short delay
     q.isPlaying = false;
+    musicLog('Queue empty, stopping playback');
     if (q.textChannel) {
       q.textChannel.send('✅ Очередь завершена!').catch(() => {});
     }
@@ -179,7 +232,7 @@ async function handleNextSong(guildId: string) {
       if (gq && gq.songs.length === 0) {
         destroyQueue(guildId);
       }
-    }, 30000); // Wait 30s before disconnecting
+    }, 30000);
   }
 }
 
@@ -189,33 +242,36 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
 
   const song = q.songs[0];
   const errors: string[] = [];
+  musicLog(`▶ playSong start: "${song.title}" (url=${song.url.substring(0, 60)})`);
 
   // Allow one full retry of all strategies
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) {
-      console.log(`[Music] Retry attempt ${attempt + 1} for "${song.title}"`);
+      musicLog(`Retry attempt ${attempt + 1} for "${song.title}"`);
       setLoadingStatus(guildId, 'streaming', 55, `Повторная попытка (${attempt + 1}/2)...`, { songTitle: song.title });
-      await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
+      await new Promise(r => setTimeout(r, 2000));
     }
 
     try {
       let resource;
       let strategyUsed = '';
       
-      // Strategy 1: yt-dlp --get-url → ffmpeg (fastest & most reliable)
+      // Strategy 1: yt-dlp --get-url → ffmpeg
       setLoadingStatus(guildId, 'streaming', 60 + attempt * 5, 'Получение ссылки на аудио (yt-dlp)...', { songTitle: song.title });
       for (const fmt of ['bestaudio[ext=webm]/bestaudio/best', 'bestaudio']) {
         if (resource) break;
         try {
+          musicLog(`S1: yt-dlp --get-url fmt=${fmt}...`);
           const directUrl = await getYtDlpDirectUrl(song.url, fmt);
+          musicLog(`S1: got URL (${directUrl.length} chars), starting ffmpeg...`);
           setLoadingStatus(guildId, 'streaming', 75, 'Запуск аудиопотока (ffmpeg)...', { songTitle: song.title });
           resource = await streamViaFfmpeg(directUrl);
-          strategyUsed = 'yt-dlp URL + ffmpeg';
-          console.log(`[Music] ✅ Strategy 1 (fmt=${fmt}) for "${song.title}"`);
+          strategyUsed = `yt-dlp URL + ffmpeg (${fmt})`;
+          musicLog(`✅ S1 OK (fmt=${fmt})`);
         } catch (s1Err: any) {
           const msg = `S1(${fmt}): ${s1Err.message}`;
           errors.push(msg);
-          console.log(`[Music] ${msg}`);
+          musicLog(msg);
         }
       }
 
@@ -223,13 +279,14 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       if (!resource) {
         setLoadingStatus(guildId, 'streaming', 80, 'Прямой поток (yt-dlp pipe)...', { songTitle: song.title });
         try {
+          musicLog('S2: yt-dlp pipe...');
           resource = await getYtDlpPipeResource(song.url);
           strategyUsed = 'yt-dlp pipe + ffmpeg';
-          console.log(`[Music] ✅ Strategy 2 (pipe) for "${song.title}"`);
+          musicLog('✅ S2 OK');
         } catch (s2Err: any) {
           const msg = `S2: ${s2Err.message}`;
           errors.push(msg);
-          console.log(`[Music] ${msg}`);
+          musicLog(msg);
         }
       }
 
@@ -237,22 +294,22 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       if (!resource) {
         setLoadingStatus(guildId, 'streaming', 85, 'Альтернативный поток (play-dl)...', { songTitle: song.title });
         try {
+          musicLog('S3: play-dl stream...');
           const stream = await withTimeout(play.stream(song.url), 15000, 'play-dl stream');
           resource = createAudioResource(stream.stream, {
             inputType: stream.type,
             inlineVolume: true,
           });
           strategyUsed = 'play-dl';
-          console.log(`[Music] ✅ Strategy 3 (play-dl) for "${song.title}"`);
+          musicLog('✅ S3 OK');
         } catch (s3Err: any) {
           const msg = `S3: ${s3Err.message}`;
           errors.push(msg);
-          console.log(`[Music] ${msg}`);
+          musicLog(msg);
         }
       }
 
       if (!resource) {
-        // If this is the first attempt, continue to retry
         if (attempt === 0) continue;
         throw new Error(`Все стратегии не сработали. ${errors.slice(-3).join('; ')}`);
       }
@@ -265,14 +322,30 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       }
 
       // Play and wait for confirmation
+      musicLog(`Playing resource via ${strategyUsed}, waiting for Playing state...`);
       q.player.play(resource);
       
       try {
         await entersState(q.player, AudioPlayerStatus.Playing, 8_000);
         q.isPlaying = true;
         q.isPaused = false;
+        q.playStartedAt = Date.now();
+        q.currentStrategy = strategyUsed;
         setLoadingStatus(guildId, 'playing', 100, `Играет: ${song.title}`, { songTitle: song.title });
-        console.log(`[Music] ▶️ Playing: "${song.title}" via ${strategyUsed} in guild ${guildId}`);
+        musicLog(`▶️ Playing: "${song.title}" via ${strategyUsed} (guild=${guildId})`);
+        
+        // Wait an extra 3 seconds and verify the player is still playing
+        // This catches streams that die immediately after starting
+        await new Promise(r => setTimeout(r, 3000));
+        const stateAfter3s = q.player.state.status;
+        if (stateAfter3s !== AudioPlayerStatus.Playing && stateAfter3s !== AudioPlayerStatus.Paused) {
+          musicLog(`⚠️ Player died after 3s check: state=${stateAfter3s} via ${strategyUsed}`);
+          const msg = `Stream died within 3s (state=${stateAfter3s}) via ${strategyUsed}`;
+          errors.push(msg);
+          if (attempt === 0) continue; // retry with different strategy
+          throw new Error(msg);
+        }
+        musicLog(`✅ Player still alive after 3s check: state=${stateAfter3s}`);
         
         if (q.textChannel) {
           q.textChannel.send(`🎵 **Играет:** ${song.title} - \`${song.duration}\``).catch(() => {});
@@ -282,14 +355,14 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
         const currentState = q.player.state.status;
         const msg = `Player не начал воспроизведение (${currentState}) via ${strategyUsed}`;
         errors.push(msg);
-        console.error(`[Music] ${msg}`);
-        if (attempt === 0) continue; // retry
+        musicLog(`❌ ${msg}`);
+        if (attempt === 0) continue;
         throw new Error(msg);
       }
     } catch (error: any) {
-      if (attempt < 1) continue; // Will be retried
+      if (attempt < 1) continue;
       
-      console.error(`[Music] All strategies failed for "${song.title}":`, error.message);
+      musicLog(`❌ All strategies failed for "${song.title}": ${error.message}`);
       setLoadingStatus(guildId, 'error', 0, `Не удалось: ${error.message}`, { songTitle: song.title, errorDetail: errors.join(' | ') });
       if (q.textChannel) {
         q.textChannel.send(`❌ Не удалось воспроизвести: ${song.title}\n${error.message?.substring(0, 150)}`).catch(() => {});
@@ -832,8 +905,8 @@ export async function getCurrentSong(guildId: string): Promise<{ success: boolea
       };
     }
     
-    // If there was an error recently (last 30s), return it
-    if (loadingStatus.state === 'error' && (Date.now() - loadingStatus.timestamp) < 30000) {
+    // If there was an error recently (last 2 min), return it
+    if (loadingStatus.state === 'error' && (Date.now() - loadingStatus.timestamp) < 120000) {
       return {
         success: false,
         message: loadingStatus.message,

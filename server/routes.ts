@@ -61,6 +61,7 @@ import {
   clearQueue,
   getDistube,
   getLoadingStatus,
+  getDebugLogs,
   testStreaming,
   testAudioEndToEnd
 } from "./music-system";
@@ -797,6 +798,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const status = getLoadingStatus(guild.id);
       res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Debug logs endpoint — shows last 100 music system log entries
+  app.get("/api/music/debug-logs", requireMusicAuth, async (req, res) => {
+    try {
+      const logs = getDebugLogs();
+      res.json({ logs, count: logs.length });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
