@@ -52,6 +52,7 @@ import {
   shuffleQueue,
   toggleLoop,
   getQueue,
+  getCurrentSong,
   setVolume,
   searchSongs,
   addPlaylist,
@@ -739,8 +740,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Music API endpoints - требуют аутентификации
-  app.get("/api/music/voice-channels", requireAdmin, async (req, res) => {
+  // Music API endpoints - требуют Discord-аутентификации
+  const requireMusicAuth = (req: any, res: any, next: any) => {
+    // Разрешаем и админам, и Discord-пользователям
+    if (req.isAuthenticated()) {
+      return next();
+    }
+    res.status(401).json({ error: "Требуется авторизация" });
+  };
+
+  app.get("/api/music/voice-channels", requireMusicAuth, async (req, res) => {
     try {
       const channels = await getVoiceChannels();
       res.json(channels);
@@ -749,7 +758,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/play", requireAdmin, async (req, res) => {
+  app.get("/api/music/now-playing", requireMusicAuth, async (req, res) => {
+    try {
+      const distube = getDistube();
+      const client = distube.client;
+      const guild = client.guilds.cache.first();
+      
+      if (!guild) {
+        return res.status(500).json({ error: "Discord сервер не найден" });
+      }
+
+      const result = await getCurrentSong(guild.id);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/music/play", requireMusicAuth, async (req, res) => {
     try {
       const { query, channelId } = req.body;
       if (!query || !channelId) {
@@ -776,7 +802,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/pause", requireAdmin, async (req, res) => {
+  app.post("/api/music/pause", requireMusicAuth, async (req, res) => {
     try {
       const distube = getDistube();
       const client = distube.client;
@@ -793,7 +819,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/resume", requireAdmin, async (req, res) => {
+  app.post("/api/music/resume", requireMusicAuth, async (req, res) => {
     try {
       const distube = getDistube();
       const client = distube.client;
@@ -810,7 +836,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/skip", requireAdmin, async (req, res) => {
+  app.post("/api/music/skip", requireMusicAuth, async (req, res) => {
     try {
       const distube = getDistube();
       const client = distube.client;
@@ -827,7 +853,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/stop", requireAdmin, async (req, res) => {
+  app.post("/api/music/stop", requireMusicAuth, async (req, res) => {
     try {
       const distube = getDistube();
       const client = distube.client;
@@ -844,7 +870,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/shuffle", requireAdmin, async (req, res) => {
+  app.post("/api/music/shuffle", requireMusicAuth, async (req, res) => {
     try {
       const distube = getDistube();
       const client = distube.client;
@@ -861,7 +887,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/loop", requireAdmin, async (req, res) => {
+  app.post("/api/music/loop", requireMusicAuth, async (req, res) => {
     try {
       const distube = getDistube();
       const client = distube.client;
@@ -878,7 +904,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/music/queue", requireAdmin, async (req, res) => {
+  app.get("/api/music/queue", requireMusicAuth, async (req, res) => {
     try {
       const distube = getDistube();
       const client = distube.client;
@@ -895,7 +921,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/volume", requireAdmin, async (req, res) => {
+  app.post("/api/music/volume", requireMusicAuth, async (req, res) => {
     try {
       const { volume } = req.body;
       if (volume === undefined || volume < 0 || volume > 100) {
@@ -917,7 +943,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/music/search", requireAdmin, async (req, res) => {
+  app.post("/api/music/search", requireMusicAuth, async (req, res) => {
     try {
       const { query, limit = 5 } = req.body;
       if (!query) {

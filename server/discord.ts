@@ -217,13 +217,27 @@ export async function getVoiceChannels() {
       throw new Error('Сервер не найден');
     }
 
+    // Получаем голосовые каналы с участниками внутри
     const channels = guild.channels.cache
       .filter(channel => channel.type === 2) // Только голосовые каналы
-      .map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        type: 'voice',
-      }));
+      .map(channel => {
+        const voiceChannel = channel as any;
+        const members = voiceChannel.members?.map((member: any) => ({
+          id: member.user.id,
+          username: member.user.username,
+          displayName: member.displayName || member.user.username,
+          avatar: member.user.displayAvatarURL({ size: 64 }),
+          isBot: member.user.bot,
+        })) || [];
+        
+        return {
+          id: channel.id,
+          name: channel.name,
+          type: 'voice',
+          memberCount: members.length,
+          members,
+        };
+      });
 
     return channels;
   } catch (error: any) {

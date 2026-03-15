@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   Music2, 
@@ -7,159 +7,214 @@ import {
   SkipForward, 
   StopCircle, 
   Volume2,
+  VolumeX,
   Shuffle,
   Repeat,
+  Repeat1,
   Search,
-  Loader2
+  Loader2,
+  Headphones,
+  Radio,
+  ListMusic,
+  Plus,
+  Bot,
+  LogIn,
+  ExternalLink
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
+
+interface VoiceChannelMember {
+  id: string;
+  username: string;
+  displayName: string;
+  avatar: string;
+  isBot: boolean;
+}
 
 interface VoiceChannel {
   id: string;
   name: string;
   type: string;
+  memberCount: number;
+  members: VoiceChannelMember[];
 }
 
-interface QueueTrack {
-  name: string;
+interface SongInfo {
+  title: string;
+  duration: string;
   url: string;
-  duration: number;
   thumbnail?: string;
+  requestedBy?: string;
 }
 
-interface QueueData {
+interface QueueSong {
+  position: number;
+  title: string;
+  duration: string;
+  url: string;
+  isPlaying: boolean;
+}
+
+interface NowPlayingResult {
   success: boolean;
-  queue?: QueueTrack[];
-  currentTrack?: QueueTrack;
-  isPaused?: boolean;
-  volume?: number;
-  repeatMode?: number;
+  message?: string;
+  song?: SongInfo;
 }
 
-export default function Music() {
+interface QueueResult {
+  success: boolean;
+  message?: string;
+  queue?: QueueSong[];
+  totalSongs?: number;
+  loop?: boolean;
+}
+
+export default function MusicPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedChannel, setSelectedChannel] = useState("");
   const [volume, setVolume] = useState(50);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [showSearch, setShowSearch] = useState(false);
   const { toast } = useToast();
+  const { t } = useLanguage();
+  const { user } = useAuth();
 
+  // Fetch voice channels with members
   const { data: channels, isLoading: channelsLoading, error: channelsError } = useQuery<VoiceChannel[]>({
     queryKey: ["/api/music/voice-channels"],
+    refetchInterval: 10000,
     retry: false,
   });
 
-  const { data: queueData, isLoading: queueLoading, error: queueError } = useQuery<QueueData>({
+  // Fetch now playing
+  const { data: nowPlaying, isLoading: nowPlayingLoading } = useQuery<NowPlayingResult>({
+    queryKey: ["/api/music/now-playing"],
+    refetchInterval: 3000,
+    retry: false,
+  });
+
+  // Fetch queue
+  const { data: queueData, isLoading: queueLoading } = useQuery<QueueResult>({
     queryKey: ["/api/music/queue"],
-    refetchInterval: 5000, // Обновлять каждые 5 секунд
+    refetchInterval: 5000,
     retry: false,
   });
 
+  // Auto-select first channel with members, or first channel
   useEffect(() => {
     if (channels && channels.length > 0 && !selectedChannel) {
-      setSelectedChannel(channels[0].id);
+      const channelWithMembers = channels.find(c => c.memberCount > 0);
+      setSelectedChannel(channelWithMembers?.id || channels[0].id);
     }
   }, [channels, selectedChannel]);
 
-  useEffect(() => {
-    if (queueData?.volume !== undefined) {
-      setVolume(queueData.volume);
-    }
-  }, [queueData?.volume]);
-
+  // Mutations
   const playMutation = useMutation({
     mutationFn: async (query: string) => {
-      return await apiRequest("POST", "/api/music/play", { 
-        query, 
-        channelId: selectedChannel 
-      });
+      const res = await apiRequest("POST", "/api/music/play", { query, channelId: selectedChannel });
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/music/now-playing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/music/voice-channels"] });
       setSearchQuery("");
-      toast({
-        title: "Успех",
-        description: "Трек добавлен в очередь",
-      });
+      setSearchResults([]);
+      setShowSearch(false);
+      toast({ title: data?.message || t('music.trackAdded') });
     },
     onError: (error: any) => {
-      toast({
-        title: "Ошибка",
-        description: error.message || "Не удалось добавить трек",
-        variant: "destructive",
-      });
+      toast({ title: t('music.error'), description: error.message, variant: "destructive" });
     },
   });
 
   const pauseMutation = useMutation({
-    mutationFn: async () => await apiRequest("POST", "/api/music/pause"),
+    mutationFn: async () => { const r = await apiRequest("POST", "/api/music/pause"); return r.json(); },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/music/now-playing"] });
       queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
     },
   });
 
   const resumeMutation = useMutation({
-    mutationFn: async () => await apiRequest("POST", "/api/music/resume"),
+    mutationFn: async () => { const r = await apiRequest("POST", "/api/music/resume"); return r.json(); },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/music/now-playing"] });
       queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
     },
   });
 
   const skipMutation = useMutation({
-    mutationFn: async () => await apiRequest("POST", "/api/music/skip"),
+    mutationFn: async () => { const r = await apiRequest("POST", "/api/music/skip"); return r.json(); },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
-      toast({
-        title: "Трек пропущен",
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/music/now-playing"] });
+      toast({ title: "⏭️ " + t('music.trackSkipped') });
     },
   });
 
   const stopMutation = useMutation({
-    mutationFn: async () => await apiRequest("POST", "/api/music/stop"),
+    mutationFn: async () => { const r = await apiRequest("POST", "/api/music/stop"); return r.json(); },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
-      toast({
-        title: "Воспроизведение остановлено",
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/music/now-playing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/music/voice-channels"] });
+      toast({ title: "⏹️ " + t('music.stopped') });
     },
   });
 
   const shuffleMutation = useMutation({
-    mutationFn: async () => await apiRequest("POST", "/api/music/shuffle"),
+    mutationFn: async () => { const r = await apiRequest("POST", "/api/music/shuffle"); return r.json(); },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
-      toast({
-        title: "Очередь перемешана",
-      });
+      toast({ title: "🔀 " + t('music.shuffled') });
     },
   });
 
   const loopMutation = useMutation({
-    mutationFn: async () => await apiRequest("POST", "/api/music/loop"),
-    onSuccess: () => {
+    mutationFn: async () => { const r = await apiRequest("POST", "/api/music/loop"); return r.json(); },
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
+      toast({ title: data?.message || t('music.loopChanged') });
     },
   });
 
   const volumeMutation = useMutation({
-    mutationFn: async (vol: number) => await apiRequest("POST", "/api/music/volume", { volume: vol }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/music/queue"] });
+    mutationFn: async (vol: number) => { const r = await apiRequest("POST", "/api/music/volume", { volume: vol }); return r.json(); },
+  });
+
+  const searchMutation = useMutation({
+    mutationFn: async (q: string) => {
+      const r = await apiRequest("POST", "/api/music/search", { query: q, limit: 5 });
+      return r.json();
+    },
+    onSuccess: (data: any) => {
+      if (data?.results) {
+        setSearchResults(data.results);
+        setShowSearch(true);
+      }
     },
   });
 
-  const handlePlay = () => {
-    if (searchQuery.trim()) {
-      playMutation.mutate(searchQuery);
-    }
-  };
+  const handlePlay = useCallback(() => {
+    if (!searchQuery.trim() || !selectedChannel) return;
+    playMutation.mutate(searchQuery);
+  }, [searchQuery, selectedChannel]);
+
+  const handleSearch = useCallback(() => {
+    if (!searchQuery.trim()) return;
+    searchMutation.mutate(searchQuery);
+  }, [searchQuery]);
 
   const handleVolumeChange = (values: number[]) => {
     const newVolume = values[0];
@@ -167,282 +222,444 @@ export default function Music() {
     volumeMutation.mutate(newVolume);
   };
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  const isPlaying = nowPlaying?.success && nowPlaying?.song;
+  const isUnauthorized = channelsError && (channelsError as any)?.message?.includes?.("401");
 
-  // Проверка доступа
-  const isUnauthorized = channelsError && (channelsError as any).message?.includes("401");
-
-  if (isUnauthorized) {
+  // Not logged in
+  if (isUnauthorized || !user) {
     return (
-      <div className="container mx-auto px-4 py-8 max-w-4xl relative">
-        <div className="mb-8 ml-16">
-          <h1 className="text-4xl md:text-5xl font-bold mb-4 text-primary tracking-wide flex items-center gap-3">
-            <Music2 className="h-10 w-10 text-primary" strokeWidth={1.5} />
-            Музыкальный Плеер
+      <div className="container mx-auto px-4 py-8 max-w-4xl pt-24">
+        <div className="mb-8 text-center">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary/10 mb-6">
+            <Music2 className="h-10 w-10 text-primary" />
+          </div>
+          <h1 className="text-4xl font-bold mb-3 bg-gradient-to-r from-primary to-[hsl(var(--accent))] bg-clip-text text-transparent">
+            {t('music.title')}
           </h1>
+          <p className="text-muted-foreground text-lg max-w-md mx-auto">
+            {t('music.loginRequired')}
+          </p>
+          <Button asChild className="mt-6 gap-2" size="lg">
+            <a href="/api/auth/discord">
+              <LogIn className="h-5 w-5" />
+              {t('music.loginDiscord')}
+            </a>
+          </Button>
         </div>
-        <Card className="glass glass-border neon-glow-cyan">
-          <CardContent className="py-12">
-            <div className="text-center">
-              <Music2 className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-              <h2 className="text-2xl font-bold mb-2">Доступ Ограничен</h2>
-              <p className="text-muted-foreground mb-4">
-                Только администраторы клана могут управлять музыкальным плеером.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Войдите как администратор чтобы получить доступ к управлению музыкой.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl relative">
-      <div className="mb-8 ml-16">
-        <h1 className="text-4xl md:text-5xl font-bold mb-4 neon-text-cyan tracking-wide flex items-center gap-3">
-          <Music2 className="h-12 w-12 animate-pulse-glow" />
-          Музыкальный Плеер
-        </h1>
-        <p className="text-muted-foreground text-lg">
-          Управляй музыкой Discord бота прямо из веба
-        </p>
+    <div className="container mx-auto px-4 py-8 max-w-7xl pt-24">
+      {/* Header */}
+      <div className="mb-8 ml-0 md:ml-4">
+        <div className="flex items-center gap-4 mb-2">
+          <div className="relative">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg shadow-primary/25">
+              <Music2 className="h-7 w-7 text-white" />
+            </div>
+            {isPlaying && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-[hsl(var(--accent))] rounded-full animate-pulse border-2 border-background" />
+            )}
+          </div>
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-primary to-[hsl(var(--accent))] bg-clip-text text-transparent">
+              {t('music.title')}
+            </h1>
+            <p className="text-muted-foreground">
+              {t('music.subtitle')}
+            </p>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Левая колонка - Управление */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Выбор канала и поиск */}
-          <Card className="glass glass-border neon-glow-cyan">
-            <CardHeader>
-              <CardTitle>Добавить Трек</CardTitle>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left column - Voice Channels */}
+        <div className="lg:col-span-3 space-y-4">
+          <Card className="glass glass-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Headphones className="h-4 w-4 text-[hsl(var(--accent))]" />
+                {t('music.voiceChannels')}
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm text-muted-foreground mb-2 block">
-                  Голосовой канал
-                </label>
-                {channelsLoading ? (
-                  <Skeleton className="h-10 w-full" />
-                ) : (
-                  <Select value={selectedChannel} onValueChange={setSelectedChannel}>
-                    <SelectTrigger data-testid="select-voice-channel" className="glass glass-border">
-                      <SelectValue placeholder="Выберите голосовой канал" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {channels?.map((channel) => (
-                        <SelectItem key={channel.id} value={channel.id}>
-                          {channel.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <Input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handlePlay()}
-                  placeholder="Название трека или YouTube URL..."
-                  className="glass glass-border flex-1"
-                  disabled={playMutation.isPending || !selectedChannel}
-                  data-testid="input-search-track"
-                />
-                <Button
-                  onClick={handlePlay}
-                  disabled={!searchQuery.trim() || playMutation.isPending || !selectedChannel}
-                  className="neon-glow-cyan"
-                  data-testid="button-play-track"
-                >
-                  {playMutation.isPending ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <><Search className="h-5 w-5 mr-2" /> Играть</>
-                  )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Текущий трек */}
-          <Card className="glass glass-border neon-glow-purple">
-            <CardHeader>
-              <CardTitle>Сейчас Играет</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {queueLoading ? (
-                <Skeleton className="h-32 w-full" />
-              ) : queueData?.currentTrack ? (
-                <div className="space-y-4">
-                  <div className="flex items-start gap-4">
-                    {queueData.currentTrack.thumbnail && (
-                      <img 
-                        src={queueData.currentTrack.thumbnail} 
-                        alt="Track thumbnail"
-                        className="w-24 h-24 rounded-lg object-cover neon-glow-cyan"
-                        data-testid="img-current-track-thumbnail"
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-semibold truncate" data-testid="text-current-track-name">
-                        {queueData.currentTrack.name}
-                      </h3>
-                      <p className="text-sm text-muted-foreground" data-testid="text-current-track-duration">
-                        Длительность: {formatDuration(queueData.currentTrack.duration)}
-                      </p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <Badge variant={queueData.isPaused ? "secondary" : "default"}>
-                          {queueData.isPaused ? "Пауза" : "Играет"}
-                        </Badge>
-                        {queueData.repeatMode === 1 && (
-                          <Badge variant="outline">🔁 Повтор очереди</Badge>
-                        )}
-                        {queueData.repeatMode === 2 && (
-                          <Badge variant="outline">🔂 Повтор трека</Badge>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Управление воспроизведением */}
-                  <div className="flex items-center justify-center gap-3">
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => shuffleMutation.mutate()}
-                      disabled={shuffleMutation.isPending}
-                      className="glass glass-border"
-                      data-testid="button-shuffle"
-                    >
-                      <Shuffle className="h-5 w-5" />
-                    </Button>
-
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => queueData.isPaused ? resumeMutation.mutate() : pauseMutation.mutate()}
-                      disabled={pauseMutation.isPending || resumeMutation.isPending}
-                      className="glass glass-border"
-                      data-testid="button-pause-resume"
-                    >
-                      {queueData.isPaused ? (
-                        <Play className="h-6 w-6" />
-                      ) : (
-                        <Pause className="h-6 w-6" />
-                      )}
-                    </Button>
-
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => skipMutation.mutate()}
-                      disabled={skipMutation.isPending}
-                      className="glass glass-border"
-                      data-testid="button-skip"
-                    >
-                      <SkipForward className="h-5 w-5" />
-                    </Button>
-
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => loopMutation.mutate()}
-                      disabled={loopMutation.isPending}
-                      className="glass glass-border"
-                      data-testid="button-loop"
-                    >
-                      <Repeat className="h-5 w-5" />
-                    </Button>
-
-                    <Button
-                      size="icon"
-                      variant="destructive"
-                      onClick={() => stopMutation.mutate()}
-                      disabled={stopMutation.isPending}
-                      data-testid="button-stop"
-                    >
-                      <StopCircle className="h-5 w-5" />
-                    </Button>
-                  </div>
-
-                  {/* Громкость */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Volume2 className="h-5 w-5 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">Громкость</span>
-                      </div>
-                      <span className="text-sm font-semibold">{volume}%</span>
-                    </div>
-                    <Slider
-                      value={[volume]}
-                      onValueChange={handleVolumeChange}
-                      max={100}
-                      step={1}
-                      className="w-full"
-                      data-testid="slider-volume"
-                    />
-                  </div>
+            <CardContent className="space-y-2">
+              {channelsLoading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map(i => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
                 </div>
+              ) : channels && channels.length > 0 ? (
+                channels.map(channel => (
+                  <button
+                    key={channel.id}
+                    onClick={() => setSelectedChannel(channel.id)}
+                    className={`w-full text-left rounded-xl p-3 transition-all duration-200 border ${
+                      selectedChannel === channel.id
+                        ? 'bg-primary/10 border-primary/40 shadow-md shadow-primary/10'
+                        : 'bg-card/50 border-border/50 hover:bg-card/80 hover:border-border'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Radio className={`h-4 w-4 ${selectedChannel === channel.id ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span className={`text-sm font-medium truncate ${selectedChannel === channel.id ? 'text-primary' : ''}`}>
+                        {channel.name}
+                      </span>
+                      {channel.memberCount > 0 && (
+                        <Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
+                          {channel.memberCount}
+                        </Badge>
+                      )}
+                    </div>
+                    {channel.members.length > 0 && (
+                      <div className="space-y-1.5 ml-6">
+                        {channel.members.map(member => (
+                          <div key={member.id} className="flex items-center gap-2">
+                            <Avatar className="h-5 w-5">
+                              <AvatarImage src={member.avatar} />
+                              <AvatarFallback className="text-[8px]">{member.displayName[0]}</AvatarFallback>
+                            </Avatar>
+                            <span className={`text-xs truncate ${member.isBot ? 'text-[hsl(var(--accent))]' : 'text-muted-foreground'}`}>
+                              {member.displayName}
+                              {member.isBot && <Bot className="inline h-3 w-3 ml-1" />}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {channel.memberCount === 0 && (
+                      <p className="text-xs text-muted-foreground/50 ml-6">{t('music.emptyChannel')}</p>
+                    )}
+                  </button>
+                ))
               ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Music2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>Ничего не играет</p>
-                  <p className="text-sm">Добавьте трек чтобы начать</p>
+                <div className="text-center py-6 text-muted-foreground">
+                  <Headphones className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">{t('music.noChannels')}</p>
                 </div>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Правая колонка - Очередь */}
-        <div>
-          <Card className="glass glass-border neon-glow-cyan">
-            <CardHeader>
-              <CardTitle>Очередь Треков</CardTitle>
+        {/* Center column - Player */}
+        <div className="lg:col-span-6 space-y-6">
+          {/* Search / Add track */}
+          <Card className="glass glass-border">
+            <CardContent className="pt-6">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handlePlay();
+                      }
+                    }}
+                    placeholder={t('music.searchPlaceholder')}
+                    className="pl-10 glass glass-border"
+                    disabled={playMutation.isPending || !selectedChannel}
+                  />
+                </div>
+                <Button
+                  onClick={handlePlay}
+                  disabled={!searchQuery.trim() || playMutation.isPending || !selectedChannel}
+                  className="bg-primary hover:bg-primary/90 gap-2"
+                >
+                  {playMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <><Play className="h-4 w-4" /> {t('music.play')}</>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleSearch}
+                  disabled={!searchQuery.trim() || searchMutation.isPending}
+                  className="glass glass-border"
+                  title={t('music.search')}
+                >
+                  {searchMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+
+              {/* Search results */}
+              {showSearch && searchResults.length > 0 && (
+                <div className="mt-4 space-y-2 border-t border-border/50 pt-4">
+                  <p className="text-xs text-muted-foreground mb-2">{t('music.searchResults')}</p>
+                  {searchResults.map((result: any, i: number) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-card/80 transition-colors cursor-pointer group"
+                      onClick={() => {
+                        playMutation.mutate(result.url || result.title);
+                      }}
+                    >
+                      {result.thumbnail && (
+                        <img src={result.thumbnail} alt="" className="w-12 h-9 rounded object-cover flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{result.title}</p>
+                        <p className="text-xs text-muted-foreground">{result.duration}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Now Playing */}
+          <Card className={`glass glass-border overflow-hidden relative ${isPlaying ? 'ring-1 ring-primary/30' : ''}`}>
+            {/* Animated background when playing */}
+            {isPlaying && (
+              <div className="absolute inset-0 opacity-[0.03]">
+                <div className="absolute inset-0 bg-gradient-to-br from-primary via-transparent to-[hsl(var(--accent))] animate-pulse" />
+              </div>
+            )}
+            
+            <CardHeader className="pb-3 relative">
+              <CardTitle className="text-base flex items-center gap-2">
+                {isPlaying ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="flex gap-[2px] items-end h-4">
+                      <span className="w-[3px] bg-primary rounded-full animate-bounce" style={{ height: '60%', animationDelay: '0ms', animationDuration: '600ms' }} />
+                      <span className="w-[3px] bg-primary rounded-full animate-bounce" style={{ height: '100%', animationDelay: '150ms', animationDuration: '600ms' }} />
+                      <span className="w-[3px] bg-primary rounded-full animate-bounce" style={{ height: '40%', animationDelay: '300ms', animationDuration: '600ms' }} />
+                      <span className="w-[3px] bg-primary rounded-full animate-bounce" style={{ height: '80%', animationDelay: '450ms', animationDuration: '600ms' }} />
+                    </span>
+                    <span className="text-primary">{t('music.nowPlaying')}</span>
+                  </div>
+                ) : (
+                  <>
+                    <Music2 className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">{t('music.nowPlaying')}</span>
+                  </>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="relative">
+              {nowPlayingLoading ? (
+                <div className="flex items-center gap-4">
+                  <Skeleton className="w-20 h-20 rounded-xl" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-5 w-3/4" />
+                    <Skeleton className="h-4 w-1/3" />
+                  </div>
+                </div>
+              ) : isPlaying ? (
+                <div className="space-y-5">
+                  {/* Track info */}
+                  <div className="flex items-start gap-4">
+                    {nowPlaying.song?.thumbnail ? (
+                      <div className="relative flex-shrink-0">
+                        <img 
+                          src={nowPlaying.song.thumbnail} 
+                          alt={nowPlaying.song.title}
+                          className="w-20 h-20 rounded-xl object-cover shadow-lg"
+                        />
+                        <div className="absolute inset-0 rounded-xl ring-1 ring-white/10" />
+                      </div>
+                    ) : (
+                      <div className="w-20 h-20 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Music2 className="h-8 w-8 text-primary/50" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-base leading-tight line-clamp-2">
+                        {nowPlaying.song?.title}
+                      </h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {nowPlaying.song?.duration}
+                      </p>
+                      {nowPlaying.song?.url && (
+                        <a 
+                          href={nowPlaying.song.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-primary/70 hover:text-primary mt-1 transition-colors"
+                        >
+                          YouTube <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Playback controls */}
+                  <div className="flex items-center justify-center gap-2">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => shuffleMutation.mutate()}
+                      disabled={shuffleMutation.isPending}
+                      className="h-10 w-10 rounded-full"
+                    >
+                      <Shuffle className="h-4 w-4" />
+                    </Button>
+
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => loopMutation.mutate()}
+                      disabled={loopMutation.isPending}
+                      className={`h-10 w-10 rounded-full ${queueData?.loop ? 'text-primary bg-primary/10' : ''}`}
+                    >
+                      {queueData?.loop ? <Repeat1 className="h-4 w-4" /> : <Repeat className="h-4 w-4" />}
+                    </Button>
+
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      onClick={() => pauseMutation.mutate()}
+                      disabled={pauseMutation.isPending}
+                      className="h-12 w-12 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 border-0 shadow-lg shadow-primary/25"
+                    >
+                      <Pause className="h-5 w-5" />
+                    </Button>
+
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => skipMutation.mutate()}
+                      disabled={skipMutation.isPending}
+                      className="h-10 w-10 rounded-full"
+                    >
+                      <SkipForward className="h-4 w-4" />
+                    </Button>
+
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => stopMutation.mutate()}
+                      disabled={stopMutation.isPending}
+                      className="h-10 w-10 rounded-full text-destructive hover:text-destructive"
+                    >
+                      <StopCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  {/* Volume */}
+                  <div className="flex items-center gap-3 px-2">
+                    <button 
+                      onClick={() => handleVolumeChange([volume > 0 ? 0 : 50])}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {volume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                    </button>
+                    <Slider
+                      value={[volume]}
+                      onValueChange={handleVolumeChange}
+                      max={100}
+                      step={1}
+                      className="flex-1"
+                    />
+                    <span className="text-xs text-muted-foreground w-8 text-right">{volume}%</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-10">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted/30 mb-4">
+                    <Music2 className="h-8 w-8 text-muted-foreground/40" />
+                  </div>
+                  <p className="text-muted-foreground font-medium">{t('music.nothingPlaying')}</p>
+                  <p className="text-sm text-muted-foreground/60 mt-1">{t('music.addTrackHint')}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Paused state - show resume button */}
+          {!isPlaying && queueData?.success && queueData?.queue && queueData.queue.length > 0 && (
+            <Card className="glass glass-border">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Pause className="h-5 w-5 text-yellow-500" />
+                    <div>
+                      <p className="text-sm font-medium">{t('music.paused')}</p>
+                      <p className="text-xs text-muted-foreground">{queueData.queue[0]?.title}</p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => resumeMutation.mutate()}
+                    disabled={resumeMutation.isPending}
+                    className="gap-2"
+                  >
+                    <Play className="h-4 w-4" /> {t('music.resume')}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Right column - Queue */}
+        <div className="lg:col-span-3">
+          <Card className="glass glass-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ListMusic className="h-4 w-4 text-primary" />
+                  {t('music.queue')}
+                </div>
+                {queueData?.totalSongs && queueData.totalSongs > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {queueData.totalSongs} {t('music.tracks')}
+                  </Badge>
+                )}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {queueLoading ? (
                 <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-16 w-full" />
-                  ))}
+                  {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
                 </div>
               ) : queueData?.queue && queueData.queue.length > 0 ? (
-                <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
                   {queueData.queue.map((track, index) => (
                     <div
                       key={index}
-                      className="glass glass-border rounded-lg p-3 hover-elevate"
-                      data-testid={`queue-track-${index}`}
+                      className={`flex items-center gap-2.5 p-2.5 rounded-lg transition-all duration-200 group ${
+                        track.isPlaying 
+                          ? 'bg-primary/10 border border-primary/20' 
+                          : 'hover:bg-card/80'
+                      }`}
                     >
-                      <div className="flex items-start gap-3">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full glass glass-border flex items-center justify-center text-sm font-semibold neon-text-cyan">
-                          {index + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate" data-testid={`text-track-name-${index}`}>
-                            {track.name}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatDuration(track.duration)}
-                          </p>
-                        </div>
+                      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                        track.isPlaying 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'bg-muted/50 text-muted-foreground'
+                      }`}>
+                        {track.isPlaying ? '▶' : track.position}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm truncate ${track.isPlaying ? 'font-semibold text-primary' : ''}`}>
+                          {track.title}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{track.duration}</p>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <p>Очередь пуста</p>
+                <div className="text-center py-8">
+                  <ListMusic className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">{t('music.emptyQueue')}</p>
                 </div>
               )}
             </CardContent>

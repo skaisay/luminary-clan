@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Home, Trophy, Newspaper, Users, Info, BarChart3, MessageSquarePlus, MessagesSquare, ShoppingBag, Package, Coins, Menu, LogOut, LogIn, User as UserIcon, Gamepad2 } from "lucide-react";
+import { Home, Trophy, Newspaper, Users, Info, BarChart3, MessageSquarePlus, MessagesSquare, ShoppingBag, Package, Coins, Menu, LogOut, LogIn, User as UserIcon, Gamepad2, Music2 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { CoinBalance } from "@/components/coin-balance";
 import { DiscordFlowerButton } from "@/components/discord-flower-button";
@@ -88,6 +88,11 @@ const menuItemsConfig = [
     key: "nav.roblox",
     url: "/roblox-tracker",
     icon: Gamepad2,
+  },
+  {
+    key: "nav.music",
+    url: "/music",
+    icon: Music2,
   },
 ];
 
