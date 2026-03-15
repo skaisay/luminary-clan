@@ -1011,6 +1011,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Quick voice debug endpoint - no auth required for diagnostics
+  app.get("/api/music/voice-debug", async (_req, res) => {
+    try {
+      const distube = getDistube();
+      const client = distube.client;
+      const wsStatus = client.ws.status;
+      const wsStatusName = ['READY','CONNECTING','RECONNECTING','IDLE','NEARLY','DISCONNECTED','WAITING_FOR_GUILDS','IDENTIFYING','RESUMING'][wsStatus] || `UNKNOWN(${wsStatus})`;
+      const guild = client.guilds.cache.first();
+      const channelId = '1421975908784541907';
+      let channelInfo: any = null;
+      let permissions: any = null;
+      if (guild) {
+        try {
+          const ch = await guild.channels.fetch(channelId);
+          if (ch && ch.isVoiceBased()) {
+            const me = guild.members.me;
+            const perms = me ? ch.permissionsFor(me) : null;
+            channelInfo = { name: ch.name, type: ch.type, id: ch.id };
+            permissions = perms ? {
+              Connect: perms.has('Connect'),
+              Speak: perms.has('Speak'),
+              ViewChannel: perms.has('ViewChannel'),
+            } : 'no bot member found';
+          }
+        } catch (e: any) { channelInfo = { error: e.message }; }
+      }
+      res.json({
+        botReady: client.isReady(),
+        wsStatus: wsStatusName,
+        guilds: client.guilds.cache.size,
+        guildName: guild?.name,
+        guildId: guild?.id,
+        channel: channelInfo,
+        permissions,
+        uptime: process.uptime(),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/requests", async (req, res) => {
     try {
       const requests = await storage.getAllRequests();
