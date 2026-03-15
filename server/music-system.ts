@@ -236,93 +236,135 @@ async function handleNextSong(guildId: string) {
   }
 }
 
-// ========= ytdl-core Strategy (pure Node.js, no external binary) =========
-let ytdlCore: any = null;
+// ========= URL Cleaning =========
+/** Clean YouTube URLs: strip tracking params, normalize format */
+function cleanYouTubeUrl(url: string): string {
+  try {
+    // Handle youtu.be short links
+    const shortMatch = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+    if (shortMatch) return `https://www.youtube.com/watch?v=${shortMatch[1]}`;
+    
+    // Handle full YouTube URLs — strip tracking params
+    const longMatch = url.match(/youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]{11})/);
+    if (longMatch) return `https://www.youtube.com/watch?v=${longMatch[1]}`;
+    
+    return url;
+  } catch { return url; }
+}
 
-async function getYtdlCoreStream(url: string): Promise<any> {
-  // Lazy-load ytdl-core
-  if (!ytdlCore) {
-    try {
-      ytdlCore = (await import('@distube/ytdl-core')).default;
-      musicLog('ytdl-core loaded (@distube/ytdl-core)');
-    } catch {
-      try {
-        ytdlCore = (await import('ytdl-core')).default;
-        musicLog('ytdl-core loaded (ytdl-core)');
-      } catch {
-        throw new Error('ytdl-core not available');
-      }
-    }
-  }
-  
-  return new Promise((resolve, reject) => {
-    const ffmpegCmd = ffmpegPath || 'ffmpeg';
+// ========= Strategy 0: Direct YouTube Innertube API (Node.js fetch) =========
+/** 
+ * Call YouTube's internal player API directly with different client configurations.
+ * This has a completely different fingerprint from yt-dlp/ytdl-core binaries.
+ */
+async function getInnertubeAudioUrl(videoId: string): Promise<string> {
+  const clients = [
+    {
+      name: 'IOS',
+      clientName: 'IOS',
+      clientVersion: '19.29.1',
+      key: 'AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc',
+      userAgent: 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+      headers: { 'X-Youtube-Client-Name': '5', 'X-Youtube-Client-Version': '19.29.1' },
+      extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '17.5.1.21F90' },
+    },
+    {
+      name: 'ANDROID',
+      clientName: 'ANDROID',
+      clientVersion: '19.29.37',
+      key: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+      userAgent: 'com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US) gzip',
+      headers: { 'X-Youtube-Client-Name': '3', 'X-Youtube-Client-Version': '19.29.37' },
+      extra: { androidSdkVersion: 34, osName: 'Android', osVersion: '14', platform: 'MOBILE' },
+    },
+    {
+      name: 'TV_EMBEDDED',
+      clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+      clientVersion: '2.0',
+      key: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
+      userAgent: 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 (KHTML, like Gecko) 94.0.4606.31/7.0 TV Safari/537.36',
+      headers: { 'X-Youtube-Client-Name': '85', 'X-Youtube-Client-Version': '2.0' },
+      extra: {},
+      thirdParty: { embedUrl: 'https://www.youtube.com/' },
+    },
+  ];
 
+  for (const cl of clients) {
     try {
-      const stream = ytdlCore(url, {
-        filter: 'audioonly',
-        quality: 'highestaudio',
-        highWaterMark: 1 << 25, // 32MB buffer
-        requestOptions: {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      musicLog(`S0(innertube/${cl.name}): requesting player data for ${videoId}...`);
+      const body: any = {
+        videoId,
+        context: {
+          client: {
+            clientName: cl.clientName,
+            clientVersion: cl.clientVersion,
+            hl: 'en',
+            gl: 'US',
+            ...cl.extra,
           },
         },
+        contentCheckOk: true,
+        racyCheckOk: true,
+      };
+      if (cl.thirdParty) body.context.thirdParty = cl.thirdParty;
+
+      const controller = new AbortController();
+      const abortTimer = setTimeout(() => controller.abort(), 12000);
+
+      const response = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${cl.key}&prettyPrint=false`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': cl.userAgent,
+          ...cl.headers,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
       });
+      clearTimeout(abortTimer);
 
-      // Pipe through ffmpeg for consistent raw PCM output
-      const ffmpegProc = spawn(ffmpegCmd, [
-        '-i', 'pipe:0',
-        '-vn',
-        '-f', 's16le',
-        '-ar', '48000',
-        '-ac', '2',
-        'pipe:1',
-      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+      if (!response.ok) {
+        musicLog(`S0(innertube/${cl.name}): HTTP ${response.status}`);
+        continue;
+      }
 
-      stream.pipe(ffmpegProc.stdin);
+      const data: any = await response.json();
+      const status = data.playabilityStatus?.status;
+      if (status !== 'OK') {
+        musicLog(`S0(innertube/${cl.name}): ${status} — ${data.playabilityStatus?.reason || data.playabilityStatus?.messages?.[0] || 'no reason'}`);
+        continue;
+      }
 
-      let ffmpegStderr = '';
-      ffmpegProc.stderr.on('data', (chunk: Buffer) => { ffmpegStderr += chunk.toString(); });
+      const formats = [
+        ...(data.streamingData?.adaptiveFormats || []),
+        ...(data.streamingData?.formats || []),
+      ];
 
-      stream.on('error', (err: any) => {
-        ffmpegProc.kill();
-        reject(new Error(`ytdl-core stream error: ${err.message}`));
-      });
+      // Prefer audio-only formats, sorted by bitrate
+      const audioFormats = formats
+        .filter((f: any) => f.url && (f.mimeType?.startsWith('audio/') || f.audioQuality))
+        .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
 
-      ffmpegProc.on('error', (err: any) => {
-        reject(new Error(`ffmpeg error: ${err.message}`));
-      });
+      if (audioFormats.length > 0) {
+        const best = audioFormats[0];
+        musicLog(`S0(innertube/${cl.name}): ✅ got audio URL (${best.mimeType}, ${Math.round((best.bitrate || 0) / 1000)}kbps, ${audioFormats.length} formats)`);
+        return best.url;
+      }
 
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          stream.destroy();
-          ffmpegProc.kill();
-          reject(new Error('ytdl-core timeout (30s)'));
-        }
-      }, 30000);
+      // Check for formats with signatureCipher (can't use directly)
+      const ciphered = formats.filter((f: any) => f.signatureCipher && !f.url);
+      if (ciphered.length > 0) {
+        musicLog(`S0(innertube/${cl.name}): ${ciphered.length} formats with signatureCipher (can't decode), skipping`);
+        continue;
+      }
 
-      let resolved = false;
-      ffmpegProc.stdout.once('data', () => {
-        resolved = true;
-        clearTimeout(timeout);
-        const resource = createAudioResource(ffmpegProc.stdout, {
-          inputType: StreamType.Raw,
-          inlineVolume: true,
-        });
-        resolve(resource);
-      });
-
-      ffmpegProc.on('close', (code: number) => {
-        clearTimeout(timeout);
-        if (!resolved) {
-          reject(new Error(`ffmpeg exited ${code} (ytdl-core): ${ffmpegStderr.substring(0, 200)}`));
-        }
-      });
+      musicLog(`S0(innertube/${cl.name}): no usable audio formats in ${formats.length} total formats`);
     } catch (err: any) {
-      reject(new Error(`ytdl-core init error: ${err.message}`));
+      musicLog(`S0(innertube/${cl.name}): ${err.name === 'AbortError' ? 'timeout 12s' : err.message}`);
     }
-  });
+  }
+
+  throw new Error('Innertube: все клиенты не сработали');
 }
 
 async function playSong(guildId: string): Promise<{ success: boolean; error?: string }> {
@@ -331,62 +373,63 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
 
   const song = q.songs[0];
   const errors: string[] = [];
-  musicLog(`▶ playSong start: "${song.title}" (url=${song.url.substring(0, 60)})`);
+  
+  // Clean URL to remove tracking params
+  song.url = cleanYouTubeUrl(song.url);
+  const videoId = extractVideoId(song.url);
+  musicLog(`▶ playSong start: "${song.title}" (url=${song.url}, videoId=${videoId})`);
 
-  // Allow one full retry of all strategies
+  // Retry loop: 2 attempts with 5s cooldown
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) {
-      musicLog(`Retry attempt ${attempt + 1} for "${song.title}"`);
+      musicLog(`Retry attempt ${attempt + 1} for "${song.title}" (5s cooldown)`);
       setLoadingStatus(guildId, 'streaming', 55, `Повторная попытка (${attempt + 1}/2)...`, { songTitle: song.title });
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 5000));
     }
 
     try {
       let resource;
       let strategyUsed = '';
       
-      // Extract video ID for proxy strategies
-      const videoId = extractVideoId(song.url);
-      
-      // Strategy 0: @distube/ytdl-core (pure Node.js, bypasses cloud IP blocks)
-      if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 58 + attempt * 3, 'Получение аудио (ytdl-core)...', { songTitle: song.title });
+      // Strategy 0: Direct Innertube API (fast, different fingerprint from yt-dlp)
+      // Only works if we have a video ID and get a direct URL (no cipher)
+      if (!resource && videoId) {
+        setLoadingStatus(guildId, 'streaming', 58 + attempt * 3, 'Получение аудио (innertube)...', { songTitle: song.title });
         try {
-          musicLog(`S0: ytdl-core for "${song.title}"...`);
-          resource = await getYtdlCoreStream(song.url);
-          strategyUsed = 'ytdl-core + ffmpeg';
-          musicLog(`✅ S0 OK (ytdl-core)`);
+          const audioUrl = await getInnertubeAudioUrl(videoId);
+          musicLog(`S0: innertube got URL (${audioUrl.length} chars), starting ffmpeg...`);
+          setLoadingStatus(guildId, 'streaming', 70, 'Запуск аудиопотока...', { songTitle: song.title });
+          resource = await streamViaFfmpeg(audioUrl);
+          strategyUsed = 'innertube + ffmpeg';
+          musicLog(`✅ S0 OK (innertube)`);
         } catch (s0Err: any) {
-          const msg = `S0(ytdl-core): ${s0Err.message}`;
+          const msg = `S0(innertube): ${s0Err.message}`;
           errors.push(msg);
           musicLog(msg);
         }
       }
       
-      // Strategy 1: yt-dlp --get-url → ffmpeg
+      // Strategy 1: yt-dlp --get-url → ffmpeg (single format, no custom player_client)
       if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 60 + attempt * 5, 'Получение ссылки на аудио (yt-dlp)...', { songTitle: song.title });
-        for (const fmt of ['bestaudio/best', 'best*[acodec!=none]/best', '140/139/best']) {
-          if (resource) break;
-          try {
-            musicLog(`S1: yt-dlp --get-url fmt=${fmt}...`);
-            const directUrl = await getYtDlpDirectUrl(song.url, fmt);
-            musicLog(`S1: got URL (${directUrl.length} chars), starting ffmpeg...`);
-            setLoadingStatus(guildId, 'streaming', 75, 'Запуск аудиопотока (ffmpeg)...', { songTitle: song.title });
-            resource = await streamViaFfmpeg(directUrl);
-            strategyUsed = `yt-dlp URL + ffmpeg (${fmt})`;
-            musicLog(`✅ S1 OK (fmt=${fmt})`);
-          } catch (s1Err: any) {
-            const msg = `S1(${fmt}): ${s1Err.message}`;
-            errors.push(msg);
-            musicLog(msg);
-          }
+        setLoadingStatus(guildId, 'streaming', 65 + attempt * 5, 'Получение ссылки (yt-dlp)...', { songTitle: song.title });
+        try {
+          musicLog(`S1: yt-dlp --get-url fmt=bestaudio/best...`);
+          const directUrl = await getYtDlpDirectUrl(song.url, 'bestaudio/best');
+          musicLog(`S1: got URL (${directUrl.length} chars), starting ffmpeg...`);
+          setLoadingStatus(guildId, 'streaming', 78, 'Запуск аудиопотока (ffmpeg)...', { songTitle: song.title });
+          resource = await streamViaFfmpeg(directUrl);
+          strategyUsed = 'yt-dlp URL + ffmpeg';
+          musicLog(`✅ S1 OK`);
+        } catch (s1Err: any) {
+          const msg = `S1(yt-dlp): ${s1Err.message}`;
+          errors.push(msg);
+          musicLog(msg);
         }
       }
 
       // Strategy 2: yt-dlp pipe → ffmpeg
       if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 80, 'Прямой поток (yt-dlp pipe)...', { songTitle: song.title });
+        setLoadingStatus(guildId, 'streaming', 82, 'Прямой поток (yt-dlp pipe)...', { songTitle: song.title });
         try {
           musicLog('S2: yt-dlp pipe...');
           resource = await getYtDlpPipeResource(song.url);
@@ -394,25 +437,6 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
           musicLog('✅ S2 OK');
         } catch (s2Err: any) {
           const msg = `S2: ${s2Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
-        }
-      }
-
-      // Strategy 3: play-dl stream
-      if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 85, 'Альтернативный поток (play-dl)...', { songTitle: song.title });
-        try {
-          musicLog('S3: play-dl stream...');
-          const stream = await withTimeout(play.stream(song.url), 15000, 'play-dl stream');
-          resource = createAudioResource(stream.stream, {
-            inputType: stream.type,
-            inlineVolume: true,
-          });
-          strategyUsed = 'play-dl';
-          musicLog('✅ S3 OK');
-        } catch (s3Err: any) {
-          const msg = `S3: ${s3Err.message}`;
           errors.push(msg);
           musicLog(msg);
         }
@@ -508,8 +532,6 @@ function getYtDlpDirectUrl(url: string, format: string = 'bestaudio/best'): Prom
       '--no-warnings',
       '--socket-timeout', '15',
       '--force-ipv4',
-      '--extractor-args', 'youtube:player_client=web_creator,android_vr',
-      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -608,7 +630,6 @@ function getYtDlpPipeResource(url: string): Promise<any> {
       '--no-check-certificates',
       '--force-ipv4',
       '--socket-timeout', '15',
-      '--extractor-args', 'youtube:player_client=web_creator,android_vr',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -772,14 +793,18 @@ export async function addSong(
     // Resolve query → song info
     let songInfo: Song;
 
+    // Clean YouTube URL if applicable
+    const cleanedQuery = cleanYouTubeUrl(query);
+    musicLog(`addSong: query="${query.substring(0, 60)}" → cleaned="${cleanedQuery.substring(0, 60)}"`);
+
     // Check if URL or search query
-    const validated = play.yt_validate(query);
+    const validated = play.yt_validate(cleanedQuery) || play.yt_validate(query);
 
     if (validated === 'video') {
       // Direct YouTube URL — use youtube-sr for metadata (play.video_info times out on cloud)
       try {
         const YouTube = await import('youtube-sr');
-        const videoId = query.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
+        const videoId = cleanedQuery.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
         if (videoId) {
           const video = await withTimeout(
             YouTube.default.getVideo(`https://www.youtube.com/watch?v=${videoId}`),
@@ -814,7 +839,7 @@ export async function addSong(
         // Fallback: just use the URL with minimal info
         songInfo = {
           title: 'YouTube видео',
-          url: query,
+          url: cleanedQuery,
           duration: '0:00',
           durationSec: 0,
           requestedBy,
