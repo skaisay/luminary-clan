@@ -8,6 +8,15 @@ import { setupDiscordBot } from "./bot-commands";
 import { pool } from "./db";
 import "./auth";
 
+// Prevent unhandled promise rejections from crashing the process
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[UNCAUGHT EXCEPTION]', error);
+  // Don't exit — let the server keep running
+});
+
 const app = express();
 const PgStore = connectPg(session);
 

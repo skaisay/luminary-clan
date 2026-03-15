@@ -236,17 +236,20 @@ function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): VoiceCon
   });
 
   // Auto-reconnect on disconnect
-  connection.on(VoiceConnectionStatus.Disconnected, async () => {
-    try {
-      await Promise.race([
-        entersState(connection!, VoiceConnectionStatus.Signalling, 5_000),
-        entersState(connection!, VoiceConnectionStatus.Connecting, 5_000),
-      ]);
-      // Reconnecting automatically
-    } catch {
-      // Can't reconnect, destroy
-      destroyQueue(guild.id);
-    }
+  connection.on(VoiceConnectionStatus.Disconnected, () => {
+    // Use .then/.catch instead of async to prevent unhandled rejection
+    Promise.race([
+      entersState(connection!, VoiceConnectionStatus.Signalling, 5_000),
+      entersState(connection!, VoiceConnectionStatus.Connecting, 5_000),
+    ]).catch(() => {
+      // Can't reconnect, destroy safely
+      try { destroyQueue(guild.id); } catch {}
+    });
+  });
+
+  // Catch any errors from the connection itself
+  connection.on('error', (error: any) => {
+    console.error('[Voice Connection Error]', error?.message || error);
   });
 
   return connection;

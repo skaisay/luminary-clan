@@ -407,6 +407,15 @@ export async function setupDiscordBot() {
       ),
   ];
 
+  // Prevent Discord.js errors from crashing the process
+  client.on('error', (error) => {
+    console.error('[Discord Client Error]', error.message);
+  });
+
+  client.on('shardError', (error) => {
+    console.error('[Discord Shard Error]', error.message);
+  });
+
   client.once('ready', async () => {
     console.log(`✅ Discord бот запущен: ${client.user?.tag}`);
     console.log(`📊 База данных: ${process.env.DATABASE_URL?.substring(0, 50)}...`);
