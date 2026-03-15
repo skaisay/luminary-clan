@@ -223,6 +223,7 @@ export default function MusicPage() {
   };
 
   const isPlaying = nowPlaying?.success && nowPlaying?.song;
+  const isPaused = isPlaying && nowPlaying?.isPaused;
   const isUnauthorized = channelsError && (channelsError as any)?.message?.includes?.("401");
 
   // Not logged in
@@ -524,11 +525,11 @@ export default function MusicPage() {
                     <Button
                       size="icon"
                       variant="outline"
-                      onClick={() => pauseMutation.mutate()}
-                      disabled={pauseMutation.isPending}
+                      onClick={() => isPaused ? resumeMutation.mutate() : pauseMutation.mutate()}
+                      disabled={pauseMutation.isPending || resumeMutation.isPending}
                       className="h-12 w-12 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 border-0 shadow-lg shadow-primary/25"
                     >
-                      <Pause className="h-5 w-5" />
+                      {isPaused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
                     </Button>
 
                     <Button
@@ -582,26 +583,13 @@ export default function MusicPage() {
             </CardContent>
           </Card>
 
-          {/* Paused state - show resume button */}
-          {!isPlaying && queueData?.success && queueData?.queue && queueData.queue.length > 0 && (
-            <Card className="glass glass-border">
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Pause className="h-5 w-5 text-yellow-500" />
-                    <div>
-                      <p className="text-sm font-medium">{t('music.paused')}</p>
-                      <p className="text-xs text-muted-foreground">{queueData.queue[0]?.title}</p>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={() => resumeMutation.mutate()}
-                    disabled={resumeMutation.isPending}
-                    className="gap-2"
-                  >
-                    <Play className="h-4 w-4" /> {t('music.resume')}
-                  </Button>
+          {/* Paused state indicator - shown below player when paused */}
+          {isPaused && (
+            <Card className="glass glass-border border-yellow-500/30">
+              <CardContent className="py-3">
+                <div className="flex items-center justify-center gap-2 text-yellow-500">
+                  <Pause className="h-4 w-4" />
+                  <span className="text-sm font-medium">{t('music.paused')}</span>
                 </div>
               </CardContent>
             </Card>

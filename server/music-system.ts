@@ -59,6 +59,7 @@ interface GuildQueue {
   volume: number;
   loopMode: number;  // 0 = off, 1 = song, 2 = queue
   isPlaying: boolean;
+  isPaused: boolean;
 }
 
 // ========= State =========
@@ -100,6 +101,7 @@ function getOrCreateQueue(guildId: string): GuildQueue {
       volume: 100,
       loopMode: 0,
       isPlaying: false,
+      isPaused: false,
     };
 
     // Когда трек закончился — переходим к следующему
@@ -171,13 +173,17 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
     let strategyUsed = '';
     
     // Strategy 1: yt-dlp --get-url → ffmpeg (fastest & most reliable)
-    try {
-      const directUrl = await getYtDlpDirectUrl(song.url);
-      resource = await streamViaFfmpeg(directUrl);
-      strategyUsed = 'yt-dlp URL + ffmpeg';
-      console.log(`[Music] ✅ Strategy 1 (yt-dlp URL + ffmpeg) for "${song.title}"`);
-    } catch (s1Err: any) {
-      console.log(`[Music] Strategy 1 failed: ${s1Err.message}`);
+    // Try twice with different format selection
+    for (const fmt of ['bestaudio[ext=webm]/bestaudio/best', 'bestaudio']) {
+      if (resource) break;
+      try {
+        const directUrl = await getYtDlpDirectUrl(song.url, fmt);
+        resource = await streamViaFfmpeg(directUrl);
+        strategyUsed = 'yt-dlp URL + ffmpeg';
+        console.log(`[Music] ✅ Strategy 1 (yt-dlp URL + ffmpeg, fmt=${fmt}) for "${song.title}"`);
+      } catch (s1Err: any) {
+        console.log(`[Music] Strategy 1 failed (fmt=${fmt}): ${s1Err.message}`);
+      }
     }
 
     // Strategy 2: yt-dlp pipe → ffmpeg → player
@@ -222,6 +228,7 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
     try {
       await entersState(q.player, AudioPlayerStatus.Playing, 5_000);
       q.isPlaying = true;
+      q.isPaused = false;
       console.log(`[Music] ▶️ Confirmed playing: "${song.title}" via ${strategyUsed} in guild ${guildId}`);
       
       if (q.textChannel) {
@@ -257,14 +264,16 @@ function extractVideoId(url: string): string | null {
 }
 
 /** Use yt-dlp --get-url to quickly extract direct audio URL (no download, just URL extraction) */
-function getYtDlpDirectUrl(url: string): Promise<string> {
+function getYtDlpDirectUrl(url: string, format: string = 'bestaudio[ext=webm]/bestaudio/best'): Promise<string> {
   return new Promise((resolve, reject) => {
     const ytdlp = spawn('yt-dlp', [
       '--get-url',
-      '-f', 'bestaudio[ext=webm]/bestaudio/best',
+      '-f', format,
       '--no-playlist',
       '--no-check-certificates',
       '--no-warnings',
+      '--socket-timeout', '15',
+      '--force-ipv4',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -275,8 +284,8 @@ function getYtDlpDirectUrl(url: string): Promise<string> {
 
     const timeout = setTimeout(() => {
       ytdlp.kill();
-      reject(new Error(`yt-dlp --get-url timeout (20s). stderr: ${stderr.substring(0, 200)}`));
-    }, 20000);
+      reject(new Error(`yt-dlp --get-url timeout (30s). stderr: ${stderr.substring(0, 200)}`));
+    }, 30000);
 
     ytdlp.on('error', (err: any) => {
       clearTimeout(timeout);
@@ -305,11 +314,13 @@ function streamViaFfmpeg(directUrl: string): Promise<any> {
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
+      '-loglevel', 'warning',
       '-i', directUrl,
       '-vn',
       '-f', 's16le',        // raw PCM
       '-ar', '48000',
       '-ac', '2',
+      '-bufsize', '64k',
       'pipe:1',
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -323,9 +334,9 @@ function streamViaFfmpeg(directUrl: string): Promise<any> {
     const timeout = setTimeout(() => {
       if (!resolved) {
         ffmpegProc.kill();
-        reject(new Error(`ffmpeg stream timeout (20s). stderr: ${stderrData.substring(0, 300)}`));
+        reject(new Error(`ffmpeg stream timeout (15s). stderr: ${stderrData.substring(0, 300)}`));
       }
-    }, 20000);
+    }, 15000);
 
     let resolved = false;
     ffmpegProc.stdout.once('data', () => {
@@ -358,6 +369,8 @@ function getYtDlpPipeResource(url: string): Promise<any> {
       '-o', '-',
       '--no-playlist',
       '--no-check-certificates',
+      '--force-ipv4',
+      '--socket-timeout', '15',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -644,11 +657,15 @@ export async function addSong(
 export async function pauseSong(guildId: string): Promise<{ success: boolean; message: string }> {
   try {
     const q = queues.get(guildId);
-    if (!q || !q.isPlaying) return { success: false, message: '❌ Ничего не играет' };
+    if (!q || !q.isPlaying || q.songs.length === 0) return { success: false, message: '❌ Ничего не играет' };
+    if (q.isPaused) return { success: true, message: '⏸️ Уже на паузе' };
 
-    q.player.pause();
+    const result = q.player.pause(true); // force pause
+    q.isPaused = true;
+    console.log(`[Music] Paused in guild ${guildId}, player state: ${q.player.state.status}, pause result: ${result}`);
     return { success: true, message: '⏸️ Пауза' };
   } catch (error: any) {
+    console.error('[Music] Pause error:', error);
     return { success: false, message: `❌ Ошибка: ${error.message}` };
   }
 }
@@ -656,11 +673,15 @@ export async function pauseSong(guildId: string): Promise<{ success: boolean; me
 export async function resumeSong(guildId: string): Promise<{ success: boolean; message: string }> {
   try {
     const q = queues.get(guildId);
-    if (!q) return { success: false, message: '❌ Ничего не играет' };
+    if (!q || q.songs.length === 0) return { success: false, message: '❌ Ничего не играет' };
+    if (!q.isPaused) return { success: true, message: '▶️ Уже играет' };
 
-    q.player.unpause();
+    const result = q.player.unpause();
+    q.isPaused = false;
+    console.log(`[Music] Resumed in guild ${guildId}, player state: ${q.player.state.status}, unpause result: ${result}`);
     return { success: true, message: '▶️ Продолжаем' };
   } catch (error: any) {
+    console.error('[Music] Resume error:', error);
     return { success: false, message: `❌ Ошибка: ${error.message}` };
   }
 }
@@ -724,16 +745,18 @@ export async function toggleLoop(guildId: string): Promise<{ success: boolean; m
   }
 }
 
-export async function getCurrentSong(guildId: string): Promise<{ success: boolean; message?: string; song?: any }> {
+export async function getCurrentSong(guildId: string): Promise<{ success: boolean; message?: string; song?: any; isPaused?: boolean }> {
   try {
     const q = queues.get(guildId);
-    if (!q || q.songs.length === 0 || !q.isPlaying) {
+    if (!q || q.songs.length === 0 || (!q.isPlaying && !q.isPaused)) {
       return { success: false, message: '❌ Ничего не играет' };
     }
 
     const song = q.songs[0];
+    const playerState = q.player.state.status;
     return {
       success: true,
+      isPaused: q.isPaused || playerState === AudioPlayerStatus.Paused || playerState === AudioPlayerStatus.AutoPaused,
       song: {
         title: song.title,
         duration: song.duration,
