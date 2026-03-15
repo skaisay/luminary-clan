@@ -1,127 +1,262 @@
-import { Client, TextChannel, VoiceBasedChannel, Guild } from 'discord.js';
-import { DisTube, Queue, Song as DisTubeSong } from 'distube';
-import { YouTubePlugin } from '@distube/youtube';
-import { getVoiceConnection } from '@discordjs/voice';
+import { Client, TextChannel, VoiceBasedChannel, Guild, GuildMember } from 'discord.js';
+import {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  VoiceConnectionStatus,
+  getVoiceConnection,
+  entersState,
+  StreamType,
+  NoSubscriberBehavior,
+  AudioPlayer,
+  VoiceConnection,
+} from '@discordjs/voice';
+import play from 'play-dl';
 
 // Проверяем наличие системного FFmpeg, затем ffmpeg-static как запасной вариант
 import { execSync } from 'child_process';
 
-let ffmpegFound = false;
+let ffmpegPath: string | null = null;
 try {
   const systemFfmpeg = execSync('which ffmpeg 2>/dev/null || where ffmpeg 2>nul', { encoding: 'utf8' }).trim();
   if (systemFfmpeg) {
+    ffmpegPath = systemFfmpeg;
     console.log('✅ Системный FFmpeg найден:', systemFfmpeg);
-    ffmpegFound = true;
   }
 } catch {
   // Системный FFmpeg не найден
 }
 
-if (!ffmpegFound) {
+if (!ffmpegPath) {
   try {
     const ffmpegStatic = await import('ffmpeg-static');
     if (ffmpegStatic.default) {
+      ffmpegPath = ffmpegStatic.default;
       process.env.FFMPEG_PATH = ffmpegStatic.default;
       console.log('✅ ffmpeg-static найден:', ffmpegStatic.default);
-      ffmpegFound = true;
     }
   } catch {
-    console.log('⚠️ FFmpeg не найден! Музыка не будет работать.');
+    console.log('⚠️ FFmpeg не найден! Музыка может не работать.');
   }
 }
 
-let distube: DisTube | null = null;
+// ========= Типы =========
+interface Song {
+  title: string;
+  url: string;
+  duration: string;       // formatted: "3:45"
+  durationSec: number;    // seconds
+  thumbnail?: string;
+  requestedBy: string;
+}
+
+interface GuildQueue {
+  songs: Song[];
+  player: AudioPlayer;
+  connection: VoiceConnection | null;
+  guildId: string;
+  textChannel: TextChannel | null;
+  volume: number;
+  loopMode: number;  // 0 = off, 1 = song, 2 = queue
+  isPlaying: boolean;
+}
+
+// ========= State =========
+const queues = new Map<string, GuildQueue>();
+let botClient: Client | null = null;
+
+// ========= Helpers =========
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function getOrCreateQueue(guildId: string): GuildQueue {
+  let q = queues.get(guildId);
+  if (!q) {
+    const player = createAudioPlayer({
+      behaviors: { noSubscriber: NoSubscriberBehavior.Play },
+    });
+    q = {
+      songs: [],
+      player,
+      connection: null,
+      guildId,
+      textChannel: null,
+      volume: 100,
+      loopMode: 0,
+      isPlaying: false,
+    };
+
+    // Когда трек закончился — переходим к следующему
+    player.on(AudioPlayerStatus.Idle, () => {
+      handleNextSong(guildId);
+    });
+
+    player.on('error', (error) => {
+      console.error(`[Music] Player error guild=${guildId}:`, error.message);
+      const gq = queues.get(guildId);
+      if (gq?.textChannel) {
+        gq.textChannel.send(`❌ Ошибка воспроизведения: ${error.message.substring(0, 200)}`).catch(() => {});
+      }
+      // Переходим к следующему треку при ошибке
+      handleNextSong(guildId);
+    });
+
+    queues.set(guildId, q);
+  }
+  return q;
+}
+
+async function handleNextSong(guildId: string) {
+  const q = queues.get(guildId);
+  if (!q) return;
+
+  // Loop modes
+  if (q.loopMode === 1 && q.songs.length > 0) {
+    // Loop current song — replay songs[0]
+    await playSong(guildId);
+    return;
+  }
+
+  if (q.loopMode === 2 && q.songs.length > 0) {
+    // Loop queue — move current to end
+    const current = q.songs.shift()!;
+    q.songs.push(current);
+    await playSong(guildId);
+    return;
+  }
+
+  // Normal — remove current, play next
+  q.songs.shift();
+  if (q.songs.length > 0) {
+    await playSong(guildId);
+  } else {
+    // Queue empty — disconnect after short delay
+    q.isPlaying = false;
+    if (q.textChannel) {
+      q.textChannel.send('✅ Очередь завершена!').catch(() => {});
+    }
+    setTimeout(() => {
+      const gq = queues.get(guildId);
+      if (gq && gq.songs.length === 0) {
+        destroyQueue(guildId);
+      }
+    }, 30000); // Wait 30s before disconnecting
+  }
+}
+
+async function playSong(guildId: string) {
+  const q = queues.get(guildId);
+  if (!q || q.songs.length === 0) return;
+
+  const song = q.songs[0];
+
+  try {
+    // Get stream from play-dl
+    const stream = await play.stream(song.url);
+    const resource = createAudioResource(stream.stream, {
+      inputType: stream.type,
+      inlineVolume: true,
+    });
+
+    // Set volume
+    if (resource.volume) {
+      resource.volume.setVolume(q.volume / 100);
+    }
+
+    q.player.play(resource);
+    q.isPlaying = true;
+
+    if (q.textChannel) {
+      q.textChannel.send(`🎵 **Играет:** ${song.title} - \`${song.duration}\``).catch(() => {});
+    }
+
+    console.log(`[Music] Playing: "${song.title}" in guild ${guildId}`);
+  } catch (error: any) {
+    console.error(`[Music] Stream error for "${song.title}":`, error.message);
+    if (q.textChannel) {
+      q.textChannel.send(`❌ Не удалось воспроизвести: ${song.title}\n${error.message?.substring(0, 150)}`).catch(() => {});
+    }
+    // Skip to next
+    q.songs.shift();
+    if (q.songs.length > 0) {
+      await playSong(guildId);
+    } else {
+      q.isPlaying = false;
+    }
+  }
+}
+
+function destroyQueue(guildId: string) {
+  const q = queues.get(guildId);
+  if (!q) return;
+  q.player.stop(true);
+  q.connection?.destroy();
+  queues.delete(guildId);
+}
+
+function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): VoiceConnection {
+  // Check for existing connection
+  let connection = getVoiceConnection(guild.id);
+  if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
+    return connection;
+  }
+
+  connection = joinVoiceChannel({
+    channelId: voiceChannel.id,
+    guildId: guild.id,
+    adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: true,
+  });
+
+  // ===== UDP keepAlive workaround for cloud hosting =====
+  // Render/Railway/Heroku have issues with UDP keepAlive timeouts
+  connection.on('stateChange', (_old: any, newS: any) => {
+    const networking = Reflect.get(newS, 'networking');
+    networking?.on?.('stateChange', (_: any, ns: any) => {
+      const udp = Reflect.get(ns, 'udp');
+      if (udp) clearInterval(udp.keepAliveInterval);
+    });
+  });
+
+  // Auto-reconnect on disconnect
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    try {
+      await Promise.race([
+        entersState(connection!, VoiceConnectionStatus.Signalling, 5_000),
+        entersState(connection!, VoiceConnectionStatus.Connecting, 5_000),
+      ]);
+      // Reconnecting automatically
+    } catch {
+      // Can't reconnect, destroy
+      destroyQueue(guild.id);
+    }
+  });
+
+  return connection;
+}
+
+// ========= Public API =========
 
 export function initializeMusicSystem(client: Client) {
-  try {
-    distube = new DisTube(client, {
-      emitNewSongOnly: true,
-      emitAddSongWhenCreatingQueue: false,
-      emitAddListWhenCreatingQueue: false,
-      nsfw: false,
-      plugins: [new YouTubePlugin()],
-    });
-
-    // Событие: начало воспроизведения
-    distube.on('playSong', (queue: Queue, song: DisTubeSong) => {
-      queue.textChannel?.send(`🎵 **Играет:** ${song.name} - \`${song.formattedDuration}\``);
-    });
-
-    // Событие: очередь закончилась
-    distube.on('finishQueue', (queue: Queue) => {
-      queue.textChannel?.send('✅ Очередь завершена!');
-    });
-
-    // Событие: ошибка (не даём crash процессу)
-    distube.on('error', (channel: any, error: Error) => {
-      console.error('DisTube ошибка:', error.message);
-      if (channel?.send) {
-        channel.send(`❌ Музыкальная ошибка: ${error.message.substring(0, 200)}`);
-      }
-    });
-
-    // ===== GLOBAL VOICE CONNECTION FIX =====
-    // Workaround для cloud-хостингов (Render, Railway, Heroku)
-    // UDP keepAlive packets вызывают таймаут на платформах с ограниченным UDP.
-    // Патчим КАЖДОЕ voice-соединение, которое создаёт DisTube, через voiceStateUpdate.
-    const patchedGuilds = new Set<string>();
-    
-    client.on('voiceStateUpdate', (_oldState, newState) => {
-      // Только наш бот
-      if (newState.member?.id !== client.user?.id) return;
-      if (!newState.channelId) return; // disconnect — игнорируем
-      
-      const guildId = newState.guild.id;
-      if (patchedGuilds.has(guildId)) return; // уже пропатчено
-      patchedGuilds.add(guildId);
-      
-      // Небольшая задержка, чтобы VoiceConnection объект был создан
-      setTimeout(() => {
-        try {
-          const connection = getVoiceConnection(guildId);
-          if (!connection) { patchedGuilds.delete(guildId); return; }
-          
-          // Патчим networking: отключаем UDP keepAlive
-          connection.on('stateChange', (_old: any, newS: any) => {
-            const networking = Reflect.get(newS, 'networking');
-            networking?.on('stateChange', (_: any, ns: any) => {
-              const udp = Reflect.get(ns, 'udp');
-              clearInterval(udp?.keepAliveInterval);
-            });
-          });
-          
-          // Также проверяем текущее состояние
-          const curNet = Reflect.get(connection.state, 'networking');
-          curNet?.on('stateChange', (_: any, ns: any) => {
-            const udp = Reflect.get(ns, 'udp');
-            clearInterval(udp?.keepAliveInterval);
-          });
-          
-          // Убираем из set при disconnect, чтобы можно было пропатчить заново
-          connection.on('stateChange' as any, (oldS: any, newS: any) => {
-            if (newS.status === 'destroyed') patchedGuilds.delete(guildId);
-          });
-          
-          console.log(`✅ Voice UDP keepAlive workaround applied for guild ${guildId}`);
-        } catch (e: any) {
-          patchedGuilds.delete(guildId);
-          console.log('⚠️ Voice fix error:', e.message);
-        }
-      }, 200);
-    });
-
-    console.log('✅ DisTube музыкальная система инициализирована (с UDP workaround)');
-  } catch (err: any) {
-    console.error('❌ Ошибка инициализации DisTube:', err.message);
-    distube = null;
-  }
+  botClient = client;
+  console.log('✅ Music system initialized (play-dl + @discordjs/voice)');
 }
 
-export function getDistube(): DisTube {
-  if (!distube) {
-    throw new Error('DisTube не инициализирован');
+/**
+ * Compatibility shim — routes.ts and discord.ts use getDistube().client
+ */
+export function getDistube(): { client: Client } {
+  if (!botClient) {
+    throw new Error('Music system не инициализирован');
   }
-  return distube;
+  return { client: botClient };
 }
 
 export async function addSong(
@@ -132,71 +267,97 @@ export async function addSong(
   requestedBy: string
 ): Promise<{ success: boolean; message: string; song?: any }> {
   try {
-    if (!distube) {
-      throw new Error('DisTube не инициализирован');
+    if (!botClient) throw new Error('Music system не инициализирован');
+
+    // Resolve query → song info
+    let songInfo: Song;
+
+    // Check if URL or search query
+    const validated = play.yt_validate(query);
+
+    if (validated === 'video') {
+      // Direct YouTube URL
+      const info = await play.video_info(query);
+      const details = info.video_details;
+      songInfo = {
+        title: details.title || 'Неизвестно',
+        url: details.url,
+        duration: formatDuration(details.durationInSec || 0),
+        durationSec: details.durationInSec || 0,
+        thumbnail: details.thumbnails?.[0]?.url,
+        requestedBy,
+      };
+    } else if (validated === 'playlist') {
+      // Handle playlist — redirect to addPlaylist
+      return addPlaylist(guild, voiceChannel, textChannel, query, requestedBy) as any;
+    } else {
+      // Search YouTube
+      const results = await play.search(query, { limit: 1, source: { youtube: 'video' } });
+      if (!results || results.length === 0) {
+        return { success: false, message: '❌ Ничего не найдено по запросу' };
+      }
+      const video = results[0];
+      songInfo = {
+        title: video.title || 'Неизвестно',
+        url: video.url,
+        duration: formatDuration(video.durationInSec || 0),
+        durationSec: video.durationInSec || 0,
+        thumbnail: video.thumbnails?.[0]?.url,
+        requestedBy,
+      };
     }
 
-    // DisTube сам управляет voice-подключениями.
-    // UDP keepAlive workaround применяется глобально через voiceStateUpdate в initializeMusicSystem.
-    const result = await distube.play(voiceChannel, query, {
-      textChannel: textChannel,
-      member: guild.members.cache.find(m => m.user.tag === requestedBy),
-    });
+    // Connect to voice
+    const q = getOrCreateQueue(guild.id);
+    q.textChannel = textChannel;
+    const connection = connectToVoice(guild, voiceChannel);
+    q.connection = connection;
+    connection.subscribe(q.player);
 
-    // Получаем информацию о песне
-    const queue = distube.getQueue(guild.id);
-    const song = queue?.songs[queue.songs.length - 1];
+    // Add song to queue
+    q.songs.push(songInfo);
 
-    if (song) {
-      return {
-        success: true,
-        message: `✅ Добавлено в очередь: **${song.name}**`,
-        song: {
-          title: song.name,
-          url: song.url,
-          duration: song.formattedDuration,
-          thumbnail: song.thumbnail,
-          requestedBy,
-        },
-      };
+    // If this is the only song, start playing
+    if (q.songs.length === 1) {
+      await playSong(guild.id);
     }
 
     return {
       success: true,
-      message: '✅ Трек добавлен в очередь',
+      message: q.songs.length === 1
+        ? `🎵 Играет: **${songInfo.title}**`
+        : `✅ Добавлено в очередь (#${q.songs.length}): **${songInfo.title}**`,
+      song: {
+        title: songInfo.title,
+        url: songInfo.url,
+        duration: songInfo.duration,
+        thumbnail: songInfo.thumbnail,
+        requestedBy,
+      },
     };
   } catch (error: any) {
-    console.error('Ошибка добавления песни:', error);
-    
-    // Улучшенные сообщения об ошибках
+    console.error('[Music] addSong error:', error);
+
     let message = `❌ Ошибка: ${error.message || 'Не удалось добавить трек'}`;
-    
-    if (error.message?.includes('Cannot connect to the voice channel') || error.message?.includes('30 seconds') || error.message?.includes('not managed by DisTube')) {
-      message = '❌ Не удалось подключиться к голосовому каналу. Возможные причины:\n' +
-        '• Бот не имеет прав на подключение к каналу\n' +
-        '• Сервер хостинга не поддерживает UDP-соединения для голоса\n' +
-        '• Попробуйте перезайти в голосовой канал\n' +
-        '• Попробуйте команду /стоп перед повторной попыткой';
-    } else if (error.message?.includes('Sign in') || error.message?.includes('confirm your age') || error.message?.includes('bot')) {
-      message = '❌ YouTube заблокировал запрос. Попробуйте:\n• Использовать прямую ссылку\n• Попробовать другой трек';
+
+    if (error.message?.includes('Sign in') || error.message?.includes('confirm your age') || error.message?.includes('bot')) {
+      message = '❌ YouTube заблокировал запрос. Попробуйте другой трек или прямую ссылку.';
     } else if (error.message?.includes('No result') || error.message?.includes('not found')) {
       message = '❌ Трек не найден. Проверьте ссылку или название.';
+    } else if (error.message?.includes('private') || error.message?.includes('unavailable')) {
+      message = '❌ Видео недоступно (приватное или удалено).';
     }
-    
-    return {
-      success: false,
-      message,
-    };
+
+    return { success: false, message };
   }
 }
 
 export async function pauseSong(guildId: string): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q || !q.isPlaying) return { success: false, message: '❌ Ничего не играет' };
 
-    distube.pause(guildId);
+    q.player.pause();
     return { success: true, message: '⏸️ Пауза' };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
@@ -205,11 +366,10 @@ export async function pauseSong(guildId: string): Promise<{ success: boolean; me
 
 export async function resumeSong(guildId: string): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q) return { success: false, message: '❌ Ничего не играет' };
 
-    distube.resume(guildId);
+    q.player.unpause();
     return { success: true, message: '▶️ Продолжаем' };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
@@ -218,12 +378,13 @@ export async function resumeSong(guildId: string): Promise<{ success: boolean; m
 
 export async function skipSong(guildId: string): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q || q.songs.length === 0) return { success: false, message: '❌ Ничего не играет' };
 
-    const song = await distube.skip(guildId);
-    return { success: true, message: `⏭️ Переход к: **${song.name}**` };
+    const skipped = q.songs[0];
+    // Stop current — triggers Idle event which calls handleNextSong
+    q.player.stop();
+    return { success: true, message: `⏭️ Пропущено: **${skipped.title}**` };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
   }
@@ -231,11 +392,10 @@ export async function skipSong(guildId: string): Promise<{ success: boolean; mes
 
 export async function stopSong(guildId: string): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q) return { success: false, message: '❌ Ничего не играет' };
 
-    distube.stop(guildId);
+    destroyQueue(guildId);
     return { success: true, message: '⏹️ Остановлено' };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
@@ -244,11 +404,18 @@ export async function stopSong(guildId: string): Promise<{ success: boolean; mes
 
 export async function shuffleQueue(guildId: string): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q || q.songs.length <= 1) return { success: false, message: '❌ Недостаточно треков для перемешивания' };
 
-    await distube.shuffle(guildId);
+    // Shuffle everything except current (songs[0])
+    const current = q.songs[0];
+    const rest = q.songs.slice(1);
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    q.songs = [current, ...rest];
+
     return { success: true, message: '🔀 Очередь перемешана' };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
@@ -257,13 +424,12 @@ export async function shuffleQueue(guildId: string): Promise<{ success: boolean;
 
 export async function toggleLoop(guildId: string): Promise<{ success: boolean; message: string; loopMode?: number }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q) return { success: false, message: '❌ Ничего не играет' };
 
-    const mode = distube.setRepeatMode(guildId);
+    q.loopMode = (q.loopMode + 1) % 3;
     const messages = ['🔁 Повтор выключен', '🔂 Повтор трека', '🔁 Повтор очереди'];
-    return { success: true, message: messages[mode], loopMode: mode };
+    return { success: true, message: messages[q.loopMode], loopMode: q.loopMode };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
   }
@@ -271,20 +437,21 @@ export async function toggleLoop(guildId: string): Promise<{ success: boolean; m
 
 export async function getCurrentSong(guildId: string): Promise<{ success: boolean; message?: string; song?: any }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue || !queue.songs[0]) return { success: false, message: '❌ Ничего не играет' };
-    
-    const song = queue.songs[0];
+    const q = queues.get(guildId);
+    if (!q || q.songs.length === 0 || !q.isPlaying) {
+      return { success: false, message: '❌ Ничего не играет' };
+    }
+
+    const song = q.songs[0];
     return {
       success: true,
       song: {
-        title: song.name,
-        duration: song.formattedDuration,
+        title: song.title,
+        duration: song.duration,
         url: song.url,
         thumbnail: song.thumbnail,
-        requestedBy: song.user?.username || 'Неизвестно',
-      }
+        requestedBy: song.requestedBy,
+      },
     };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
@@ -293,22 +460,25 @@ export async function getCurrentSong(guildId: string): Promise<{ success: boolea
 
 export async function getQueue(guildId: string): Promise<{ success: boolean; message?: string; queue?: any[]; totalSongs?: number; loop?: boolean }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    
-    if (!queue || queue.songs.length === 0) {
+    const q = queues.get(guildId);
+    if (!q || q.songs.length === 0) {
       return { success: false, message: '❌ Очередь пуста' };
     }
 
-    const songs = queue.songs.slice(0, 10).map((song, index) => ({
+    const songs = q.songs.slice(0, 10).map((song, index) => ({
       position: index + 1,
-      title: song.name,
-      duration: song.formattedDuration,
+      title: song.title,
+      duration: song.duration,
       url: song.url,
       isPlaying: index === 0,
     }));
 
-    return { success: true, queue: songs, totalSongs: queue.songs.length, loop: queue.repeatMode !== 0 };
+    return {
+      success: true,
+      queue: songs,
+      totalSongs: q.songs.length,
+      loop: q.loopMode !== 0,
+    };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
   }
@@ -316,12 +486,13 @@ export async function getQueue(guildId: string): Promise<{ success: boolean; mes
 
 export async function setVolume(guildId: string, volume: number): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q) return { success: false, message: '❌ Ничего не играет' };
 
-    distube.setVolume(guildId, volume);
-    return { success: true, message: `🔊 Громкость: ${volume}%` };
+    q.volume = Math.max(0, Math.min(200, volume));
+    // Volume is applied per-resource at play time; current resource can't be changed easily
+    // But we store it for the next song  
+    return { success: true, message: `🔊 Громкость: ${q.volume}%` };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
   }
@@ -329,27 +500,23 @@ export async function setVolume(guildId: string, volume: number): Promise<{ succ
 
 export async function searchSongs(query: string, limit: number = 5): Promise<{ success: boolean; message?: string; results?: any[] }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    
-    // Используем YouTube SR для поиска
-    const YouTube = await import('youtube-sr');
-    const results = await YouTube.default.search(query, { limit, type: 'video' });
-    
+    const results = await play.search(query, { limit, source: { youtube: 'video' } });
+
     if (!results || results.length === 0) {
       return { success: false, message: '❌ Ничего не найдено' };
     }
 
-    const formattedResults = results.map((song: any, index: number) => ({
+    const formattedResults = results.map((video, index) => ({
       index: index + 1,
-      title: song.title || 'Неизвестно',
-      url: song.url,
-      duration: song.durationFormatted || '0:00',
-      thumbnail: song.thumbnail?.url,
+      title: video.title || 'Неизвестно',
+      url: video.url,
+      duration: formatDuration(video.durationInSec || 0),
+      thumbnail: video.thumbnails?.[0]?.url,
     }));
 
     return { success: true, results: formattedResults };
   } catch (error: any) {
-    console.error('Ошибка поиска:', error);
+    console.error('[Music] Search error:', error);
     return { success: false, message: '❌ Ошибка при поиске' };
   }
 }
@@ -362,23 +529,51 @@ export async function addPlaylist(
   requestedBy: string
 ): Promise<{ success: boolean; message: string; count?: number }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
+    if (!botClient) throw new Error('Music system не инициализирован');
 
-    const result = await distube.play(voiceChannel, playlistUrl, {
-      textChannel: textChannel,
-      member: guild.members.cache.find(m => m.user.tag === requestedBy),
-    });
+    const playlistInfo = await play.playlist_info(playlistUrl, { incomplete: true });
+    if (!playlistInfo) {
+      return { success: false, message: '❌ Плейлист не найден' };
+    }
 
-    const queue = distube.getQueue(guild.id);
-    const count = queue?.songs.length || 0;
+    const videos = await playlistInfo.all_videos();
+    if (!videos || videos.length === 0) {
+      return { success: false, message: '❌ Плейлист пуст' };
+    }
+
+    // Connect to voice
+    const q = getOrCreateQueue(guild.id);
+    q.textChannel = textChannel;
+    const connection = connectToVoice(guild, voiceChannel);
+    q.connection = connection;
+    connection.subscribe(q.player);
+
+    const wasEmpty = q.songs.length === 0;
+
+    // Add all songs
+    for (const video of videos) {
+      q.songs.push({
+        title: video.title || 'Неизвестно',
+        url: video.url,
+        duration: formatDuration(video.durationInSec || 0),
+        durationSec: video.durationInSec || 0,
+        thumbnail: video.thumbnails?.[0]?.url,
+        requestedBy,
+      });
+    }
+
+    // Start playing if queue was empty
+    if (wasEmpty && q.songs.length > 0) {
+      await playSong(guild.id);
+    }
 
     return {
       success: true,
-      message: `✅ Добавлен плейлист (${count} треков)`,
-      count,
+      message: `✅ Добавлен плейлист: **${playlistInfo.title || 'Плейлист'}** (${videos.length} треков)`,
+      count: videos.length,
     };
   } catch (error: any) {
-    console.error('Ошибка добавления плейлиста:', error);
+    console.error('[Music] Playlist error:', error);
     return {
       success: false,
       message: `❌ Ошибка: ${error.message || 'Не удалось добавить плейлист'}`,
@@ -388,16 +583,19 @@ export async function addPlaylist(
 
 export async function jumpToSong(guildId: string, position: number): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q || q.songs.length === 0) return { success: false, message: '❌ Ничего не играет' };
 
-    if (position < 1 || position > queue.songs.length) {
+    if (position < 1 || position > q.songs.length) {
       return { success: false, message: '❌ Неверная позиция в очереди' };
     }
 
-    const song = await distube.jump(guildId, position - 1);
-    return { success: true, message: `⏭️ Переход к: **${song.name}**` };
+    // Remove songs before the target position (keep current loop behavior)
+    const target = q.songs[position - 1];
+    q.songs = q.songs.slice(position - 1);
+    q.player.stop(); // Triggers Idle → handleNextSong will play new songs[0]
+
+    return { success: true, message: `⏭️ Переход к: **${target.title}**` };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
   }
@@ -405,16 +603,22 @@ export async function jumpToSong(guildId: string, position: number): Promise<{ s
 
 export async function removeSong(guildId: string, position: number): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q || q.songs.length === 0) return { success: false, message: '❌ Ничего не играет' };
 
-    if (position < 1 || position > queue.songs.length) {
+    if (position < 1 || position > q.songs.length) {
       return { success: false, message: '❌ Неверная позиция в очереди' };
     }
 
-    const removed = queue.songs.splice(position - 1, 1)[0];
-    return { success: true, message: `🗑️ Удалено: **${removed?.name || 'Неизвестный трек'}**` };
+    // If removing currently playing song, skip to next
+    if (position === 1) {
+      const removed = q.songs[0];
+      q.player.stop(); // Triggers next song via Idle
+      return { success: true, message: `🗑️ Удалено (текущий): **${removed.title}**` };
+    }
+
+    const removed = q.songs.splice(position - 1, 1)[0];
+    return { success: true, message: `🗑️ Удалено: **${removed?.title || 'Неизвестный трек'}**` };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
   }
@@ -422,12 +626,11 @@ export async function removeSong(guildId: string, position: number): Promise<{ s
 
 export async function clearQueue(guildId: string): Promise<{ success: boolean; message: string }> {
   try {
-    if (!distube) throw new Error('DisTube не инициализирован');
-    const queue = distube.getQueue(guildId);
-    if (!queue) return { success: false, message: '❌ Ничего не играет' };
+    const q = queues.get(guildId);
+    if (!q || q.songs.length === 0) return { success: false, message: '❌ Ничего не играет' };
 
-    // Оставляем текущий трек, очищаем остальные
-    queue.songs.splice(1);
+    // Keep current song, remove rest
+    q.songs.splice(1);
     return { success: true, message: '🧹 Очередь очищена (текущий трек продолжает играть)' };
   } catch (error: any) {
     return { success: false, message: `❌ Ошибка: ${error.message}` };
@@ -436,5 +639,5 @@ export async function clearQueue(guildId: string): Promise<{ success: boolean; m
 
 // Функция для совместимости со старым кодом
 export async function initializePlayDl() {
-  console.log('✅ DisTube готов к работе (старая функция)');
+  console.log('✅ play-dl music system ready');
 }

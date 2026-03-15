@@ -275,7 +275,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (destroyErr) {
           return res.status(500).json({ error: "Ошибка при очистке сессии" });
         }
-        res.clearCookie('connect.sid');
+        res.clearCookie('luminary.sid');
         res.json({ success: true });
       });
     });
@@ -476,12 +476,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (err) {
           return res.status(500).json({ error: err.message });
         }
-        return res.json({ 
-          success: true, 
-          admin: { 
-            id: user.id, 
-            username: user.username 
-          } 
+        // Явно сохраняем сессию перед отправкой ответа
+        req.session.save((saveErr) => {
+          if (saveErr) console.error('Ошибка сохранения сессии:', saveErr);
+          return res.json({ 
+            success: true, 
+            admin: { 
+              id: user.id, 
+              username: user.username 
+            } 
+          });
         });
       });
     })(req, res, next);
