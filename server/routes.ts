@@ -57,7 +57,8 @@ import {
   searchSongs,
   addPlaylist,
   getDistube,
-  testStreaming
+  testStreaming,
+  testAudioEndToEnd
 } from "./music-system";
 
 // Расширяем тип Session для поддержки returnTo
@@ -978,6 +979,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await testStreaming(req.params.videoId);
       res.json(result);
     } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Full audio diagnostic: test tone → voice channel
+  app.post("/api/music/test-audio", requireMusicAuth, async (req, res) => {
+    try {
+      const { channelId } = req.body;
+      if (!channelId) {
+        return res.status(400).json({ error: "channelId обязателен" });
+      }
+
+      const distube = getDistube();
+      const client = distube.client;
+      const guild = client.guilds.cache.first();
+      if (!guild) {
+        return res.status(500).json({ error: "Discord сервер не найден" });
+      }
+
+      const channel = await guild.channels.fetch(channelId);
+      if (!channel || !channel.isVoiceBased()) {
+        return res.status(400).json({ error: "Голосовой канал не найден" });
+      }
+
+      const result = await testAudioEndToEnd(guild, channel);
+      res.json(result);
+    } catch (error: any) {
+      console.error('[Test Audio Error]', error);
       res.status(500).json({ error: error.message });
     }
   });

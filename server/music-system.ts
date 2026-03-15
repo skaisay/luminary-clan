@@ -966,3 +966,142 @@ export async function testStreaming(videoId: string): Promise<any> {
 
   return results;
 }
+
+/** Full end-to-end audio diagnostic — generates test tone, plays it, reports at each step */
+export async function testAudioEndToEnd(
+  guild: Guild,
+  voiceChannel: VoiceBasedChannel
+): Promise<any> {
+  const steps: any[] = [];
+  const addStep = (name: string, status: string, detail?: any) => {
+    steps.push({ step: name, status, detail, timestamp: Date.now() });
+    console.log(`[AudioTest] ${status === 'ok' ? '✅' : '❌'} ${name}: ${JSON.stringify(detail || '')}`);
+  };
+
+  // Step 1: Check required dependencies
+  // 1a: Opus encoder
+  let opusOk = false;
+  try {
+    // @discordjs/voice checks for these
+    try { require('@discordjs/opus'); opusOk = true; addStep('opus-encoder', 'ok', '@discordjs/opus'); }
+    catch {
+      try { require('opusscript'); opusOk = true; addStep('opus-encoder', 'ok', 'opusscript'); }
+      catch { addStep('opus-encoder', 'fail', 'Neither @discordjs/opus nor opusscript found'); }
+    }
+  } catch (e: any) { addStep('opus-encoder', 'fail', e.message); }
+
+  // 1b: Sodium encryption
+  let sodiumOk = false;
+  try {
+    try { require('sodium-native'); sodiumOk = true; addStep('sodium', 'ok', 'sodium-native'); }
+    catch {
+      try { require('libsodium-wrappers'); sodiumOk = true; addStep('sodium', 'ok', 'libsodium-wrappers'); }
+      catch {
+        try { require('tweetnacl'); sodiumOk = true; addStep('sodium', 'ok', 'tweetnacl'); }
+        catch { addStep('sodium', 'fail', 'No sodium library found (need sodium-native, libsodium-wrappers, or tweetnacl)'); }
+      }
+    }
+  } catch (e: any) { addStep('sodium', 'fail', e.message); }
+
+  // 1c: FFmpeg
+  try {
+    const ver = execSync(`${ffmpegPath || 'ffmpeg'} -version 2>/dev/null | head -1`, { encoding: 'utf8', timeout: 5000 }).trim();
+    addStep('ffmpeg', 'ok', ver.substring(0, 80));
+  } catch {
+    addStep('ffmpeg', 'fail', 'ffmpeg not found');
+  }
+
+  if (!opusOk || !sodiumOk) {
+    return { success: false, message: 'Missing required dependencies', steps };
+  }
+
+  // Step 2: Connect to voice channel
+  let connection: VoiceConnection;
+  try {
+    connection = await connectToVoice(guild, voiceChannel);
+    const connState = connection.state.status;
+    addStep('voice-connect', connState === VoiceConnectionStatus.Ready ? 'ok' : 'fail', { state: connState });
+    if (connState !== VoiceConnectionStatus.Ready) {
+      return { success: false, message: `Voice connection not ready: ${connState}`, steps };
+    }
+  } catch (e: any) {
+    addStep('voice-connect', 'fail', e.message);
+    return { success: false, message: `Cannot connect to voice: ${e.message}`, steps };
+  }
+
+  // Step 3: Create audio player
+  let player: AudioPlayer;
+  try {
+    player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+    connection.subscribe(player);
+    addStep('player-create', 'ok', 'Player created and subscribed');
+  } catch (e: any) {
+    addStep('player-create', 'fail', e.message);
+    return { success: false, message: `Cannot create player: ${e.message}`, steps };
+  }
+
+  // Step 4: Generate a 440Hz sine wave test tone (3 seconds) as raw PCM s16le 48kHz stereo
+  try {
+    const { Readable } = require('stream');
+    const sampleRate = 48000;
+    const channels = 2;
+    const durationSec = 3;
+    const frequency = 440; // A4 note
+    const totalSamples = sampleRate * durationSec;
+    const buf = Buffer.alloc(totalSamples * channels * 2); // 2 bytes per sample (s16le)
+
+    for (let i = 0; i < totalSamples; i++) {
+      const t = i / sampleRate;
+      const sample = Math.sin(2 * Math.PI * frequency * t) * 0.5; // 50% volume
+      const intSample = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
+      // Write to both channels (stereo)
+      buf.writeInt16LE(intSample, (i * channels) * 2);      // left
+      buf.writeInt16LE(intSample, (i * channels + 1) * 2);  // right
+    }
+
+    const pcmStream = Readable.from(buf);
+    addStep('generate-tone', 'ok', { frequency: 440, durationSec: 3, bufferSize: buf.length });
+
+    // Step 5: Create audio resource from the PCM stream
+    const resource = createAudioResource(pcmStream, {
+      inputType: StreamType.Raw,
+    });
+    addStep('create-resource', 'ok', 'AudioResource created from PCM tone');
+
+    // Step 6: Play it
+    player.play(resource);
+    addStep('player-play-called', 'ok', `Player state after play(): ${player.state.status}`);
+
+    // Step 7: Wait for Playing state
+    try {
+      await entersState(player, AudioPlayerStatus.Playing, 5_000);
+      addStep('player-playing', 'ok', `Player confirmed Playing state`);
+    } catch {
+      addStep('player-playing', 'fail', `Player did not reach Playing. State: ${player.state.status}`);
+      player.stop(true);
+      return { success: false, message: `Player did not start playing`, steps };
+    }
+
+    // Step 8: Wait 3 seconds and check if still playing
+    await new Promise(r => setTimeout(r, 2000));
+    const stateAfter2s = player.state.status;
+    addStep('player-after-2s', stateAfter2s === AudioPlayerStatus.Playing ? 'ok' : 'fail', { state: stateAfter2s });
+
+    // Wait for it to finish or timeout
+    await new Promise(r => setTimeout(r, 2000));
+    const finalState = player.state.status;
+    addStep('player-final', 'ok', { state: finalState });
+
+    // Cleanup
+    player.stop(true);
+
+    return {
+      success: true,
+      message: 'Test tone played successfully! Check if you heard a 440Hz beep in Discord voice channel.',
+      steps,
+    };
+  } catch (e: any) {
+    addStep('test-tone', 'fail', e.message);
+    return { success: false, message: `Test tone failed: ${e.message}`, steps };
+  }
+}
