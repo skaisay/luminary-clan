@@ -994,8 +994,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: "Discord сервер не найден" });
       }
 
-      const result = await jumpToSong(guild.id, position);
-      res.json(result);
+      // Fire-and-forget — jumpToSong calls playSong which takes time
+      jumpToSong(guild.id, position)
+        .then(result => {
+          console.log(`[Music Jump] Background: ${result.success ? '✅' : '❌'} ${result.message}`);
+        })
+        .catch(err => {
+          console.error('[Music Jump] Background error:', err.message);
+        });
+
+      res.json({ success: true, message: '⏭️ Переключение...' });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
