@@ -13,10 +13,7 @@ import {
   VoiceConnection,
 } from '@discordjs/voice';
 import play from 'play-dl';
-import { spawn } from 'child_process';
-import { execSync } from 'child_process';
-import https from 'https';
-import http from 'http';
+import { spawn, execSync } from 'child_process';
 
 // ========= FFmpeg detection =========
 let ffmpegPath: string | null = null;
@@ -42,22 +39,6 @@ if (!ffmpegPath) {
     console.log('⚠️ FFmpeg не найден! Музыка может не работать.');
   }
 }
-
-// ========= Invidious/Piped instances for YouTube proxy =========
-const INVIDIOUS_INSTANCES = [
-  'https://inv.nadeko.net',
-  'https://invidious.fdn.fr',
-  'https://vid.puffyan.us',
-  'https://invidious.nerdvpn.de',
-  'https://iv.ggtyler.dev',
-  'https://invidious.privacyredirect.com',
-];
-
-const PIPED_INSTANCES = [
-  'https://pipedapi.kavin.rocks',
-  'https://pipedapi.adminforge.de',
-  'https://api-piped.mha.fi',
-];
 
 // ========= Типы =========
 interface Song {
@@ -184,29 +165,27 @@ async function playSong(guildId: string) {
   if (!q || q.songs.length === 0) return;
 
   const song = q.songs[0];
-  const videoId = extractVideoId(song.url);
 
   try {
     let resource;
     
-    // Strategy 1: Invidious/Piped proxy (most reliable for cloud hosting)
-    if (videoId) {
-      try {
-        const directUrl = await getDirectAudioUrl(videoId);
-        resource = await streamFromDirectUrl(directUrl);
-        console.log(`[Music] ✅ Strategy 1 (Invidious/Piped proxy) for "${song.title}"`);
-      } catch (proxyErr: any) {
-        console.log(`[Music] Strategy 1 (proxy) failed: ${proxyErr.message}`);
-      }
+    // Strategy 1: yt-dlp --get-url → ffmpeg (fastest & most reliable)
+    // yt-dlp extracts the direct audio URL, ffmpeg streams & transcodes it
+    try {
+      const directUrl = await getYtDlpDirectUrl(song.url);
+      resource = await streamFromDirectUrl(directUrl);
+      console.log(`[Music] ✅ Strategy 1 (yt-dlp URL + ffmpeg) for "${song.title}"`);
+    } catch (s1Err: any) {
+      console.log(`[Music] Strategy 1 (yt-dlp URL + ffmpeg) failed: ${s1Err.message}`);
     }
 
-    // Strategy 2: yt-dlp subprocess (works if installed & not blocked)
+    // Strategy 2: yt-dlp pipe directly to player
     if (!resource) {
       try {
-        resource = await getYtDlpResource(song.url);
-        console.log(`[Music] ✅ Strategy 2 (yt-dlp) for "${song.title}"`);
-      } catch (ytdlpErr: any) {
-        console.log(`[Music] Strategy 2 (yt-dlp) failed: ${ytdlpErr.message}`);
+        resource = await getYtDlpPipeResource(song.url);
+        console.log(`[Music] ✅ Strategy 2 (yt-dlp pipe) for "${song.title}"`);
+      } catch (s2Err: any) {
+        console.log(`[Music] Strategy 2 (yt-dlp pipe) failed: ${s2Err.message}`);
       }
     }
 
@@ -219,8 +198,8 @@ async function playSong(guildId: string) {
           inlineVolume: true,
         });
         console.log(`[Music] ✅ Strategy 3 (play-dl) for "${song.title}"`);
-      } catch (pdlErr: any) {
-        console.log(`[Music] Strategy 3 (play-dl) failed: ${pdlErr.message}`);
+      } catch (s3Err: any) {
+        console.log(`[Music] Strategy 3 (play-dl) failed: ${s3Err.message}`);
       }
     }
 
@@ -262,92 +241,52 @@ function extractVideoId(url: string): string | null {
   return match?.[1] || null;
 }
 
-/** Fetch JSON from a URL with timeout */
-function fetchJson(url: string, timeoutMs: number = 8000): Promise<any> {
+/** Use yt-dlp --get-url to quickly extract direct audio URL (no download, just URL extraction) */
+function getYtDlpDirectUrl(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const protocol = url.startsWith('https') ? https : http;
-    const timer = setTimeout(() => {
-      req.destroy();
-      reject(new Error(`Timeout fetching ${url}`));
-    }, timeoutMs);
-    
-    const req = protocol.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-      if (res.statusCode && (res.statusCode >= 300 && res.statusCode < 400) && res.headers.location) {
-        // Follow redirect
-        clearTimeout(timer);
-        fetchJson(res.headers.location, timeoutMs).then(resolve).catch(reject);
-        return;
-      }
-      if (res.statusCode !== 200) {
-        clearTimeout(timer);
-        reject(new Error(`HTTP ${res.statusCode} from ${url}`));
-        return;
-      }
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        clearTimeout(timer);
-        try { resolve(JSON.parse(data)); }
-        catch { reject(new Error(`Invalid JSON from ${url}`)); }
-      });
-      res.on('error', (e) => { clearTimeout(timer); reject(e); });
+    const ytdlp = spawn('yt-dlp', [
+      '--get-url',
+      '-f', 'bestaudio[ext=webm]/bestaudio/best',
+      '--no-playlist',
+      '--no-check-certificates',
+      '--no-warnings',
+      url,
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    let stdout = '';
+    let stderr = '';
+    ytdlp.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    ytdlp.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+    const timeout = setTimeout(() => {
+      ytdlp.kill();
+      reject(new Error(`yt-dlp --get-url timeout (20s). stderr: ${stderr.substring(0, 200)}`));
+    }, 20000);
+
+    ytdlp.on('error', (err: any) => {
+      clearTimeout(timeout);
+      reject(new Error(`yt-dlp not available: ${err.message}`));
     });
-    req.on('error', (e) => { clearTimeout(timer); reject(e); });
+
+    ytdlp.on('close', (code: number) => {
+      clearTimeout(timeout);
+      const directUrl = stdout.trim().split('\n')[0];
+      if (code === 0 && directUrl && directUrl.startsWith('http')) {
+        console.log(`[Music] yt-dlp extracted URL (${directUrl.length} chars)`);
+        resolve(directUrl);
+      } else {
+        reject(new Error(`yt-dlp --get-url failed (code ${code}): ${stderr.substring(0, 200)}`));
+      }
+    });
   });
 }
 
-/** Get direct audio URL via Invidious or Piped proxy instances */
-async function getDirectAudioUrl(videoId: string): Promise<string> {
-  const errors: string[] = [];
-
-  // Try Invidious instances
-  for (const instance of INVIDIOUS_INSTANCES) {
-    try {
-      const data = await fetchJson(`${instance}/api/v1/videos/${videoId}?fields=adaptiveFormats`, 8000);
-      if (data?.adaptiveFormats) {
-        // Find best audio-only format
-        const audioFormats = data.adaptiveFormats
-          .filter((f: any) => f.type?.startsWith('audio/') && f.url)
-          .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-        
-        if (audioFormats.length > 0) {
-          console.log(`[Music] Got direct audio URL from Invidious (${instance}), bitrate: ${audioFormats[0].bitrate}`);
-          return audioFormats[0].url;
-        }
-      }
-    } catch (e: any) {
-      errors.push(`${instance}: ${e.message}`);
-    }
-  }
-
-  // Try Piped instances
-  for (const instance of PIPED_INSTANCES) {
-    try {
-      const data = await fetchJson(`${instance}/streams/${videoId}`, 8000);
-      if (data?.audioStreams) {
-        const audioStreams = data.audioStreams
-          .filter((s: any) => s.url)
-          .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-        
-        if (audioStreams.length > 0) {
-          console.log(`[Music] Got direct audio URL from Piped (${instance}), bitrate: ${audioStreams[0].bitrate}`);
-          return audioStreams[0].url;
-        }
-      }
-    } catch (e: any) {
-      errors.push(`${instance}: ${e.message}`);
-    }
-  }
-
-  throw new Error(`No proxy instance returned audio URL. Errors: ${errors.slice(0, 3).join('; ')}`);
-}
-
 /** Stream from a direct audio URL using ffmpeg → AudioResource */
-async function streamFromDirectUrl(directUrl: string): Promise<any> {
+function streamFromDirectUrl(directUrl: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const ffmpegCmd = ffmpegPath || 'ffmpeg';
     
-    const ffmpeg = spawn(ffmpegCmd, [
+    const ffmpegProc = spawn(ffmpegCmd, [
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
@@ -362,31 +301,31 @@ async function streamFromDirectUrl(directUrl: string): Promise<any> {
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
     let stderrData = '';
-    ffmpeg.stderr.on('data', (chunk: Buffer) => { stderrData += chunk.toString(); });
+    ffmpegProc.stderr.on('data', (chunk: Buffer) => { stderrData += chunk.toString(); });
 
-    ffmpeg.on('error', (err: any) => {
+    ffmpegProc.on('error', (err: any) => {
       reject(new Error(`ffmpeg not available: ${err.message}`));
     });
 
     const timeout = setTimeout(() => {
       if (!resolved) {
-        ffmpeg.kill();
-        reject(new Error(`ffmpeg stream timeout (15s). stderr: ${stderrData.substring(0, 200)}`));
+        ffmpegProc.kill();
+        reject(new Error(`ffmpeg stream timeout (20s). stderr: ${stderrData.substring(0, 300)}`));
       }
-    }, 15000);
+    }, 20000);
 
     let resolved = false;
-    ffmpeg.stdout.once('data', () => {
+    ffmpegProc.stdout.once('data', () => {
       resolved = true;
       clearTimeout(timeout);
-      const resource = createAudioResource(ffmpeg.stdout, {
+      const resource = createAudioResource(ffmpegProc.stdout, {
         inputType: StreamType.OggOpus,
         inlineVolume: true,
       });
       resolve(resource);
     });
 
-    ffmpeg.on('close', (code: number) => {
+    ffmpegProc.on('close', (code: number) => {
       clearTimeout(timeout);
       if (!resolved) {
         reject(new Error(`ffmpeg exited ${code}: ${stderrData.substring(0, 300)}`));
@@ -395,52 +334,79 @@ async function streamFromDirectUrl(directUrl: string): Promise<any> {
   });
 }
 
-/** Get audio resource using yt-dlp subprocess */
-async function getYtDlpResource(url: string) {
-  return new Promise<any>((resolve, reject) => {
-    try {
-      const ytdlp = spawn('yt-dlp', [
-        '-f', 'bestaudio[ext=webm]/bestaudio/best',
-        '-o', '-',
-        '--no-playlist',
-        '--no-check-certificates',
-        url,
-      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+/** Get audio resource using yt-dlp piping audio directly to stdout */
+function getYtDlpPipeResource(url: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    // yt-dlp → stdout → ffmpeg → opus pipe
+    const ffmpegCmd = ffmpegPath || 'ffmpeg';
+    
+    const ytdlp = spawn('yt-dlp', [
+      '-f', 'bestaudio[ext=webm]/bestaudio/best',
+      '-o', '-',
+      '--no-playlist',
+      '--no-check-certificates',
+      url,
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
-      let stderrData = '';
-      ytdlp.stderr.on('data', (chunk: Buffer) => { stderrData += chunk.toString(); });
+    const ffmpegProc = spawn(ffmpegCmd, [
+      '-i', 'pipe:0',
+      '-vn',
+      '-acodec', 'libopus',
+      '-f', 'opus',
+      '-ar', '48000',
+      '-ac', '2',
+      '-b:a', '96k',
+      'pipe:1',
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
-      ytdlp.on('error', (err: any) => {
-        reject(new Error(`yt-dlp not available: ${err.message}`));
+    // Pipe yt-dlp stdout → ffmpeg stdin
+    ytdlp.stdout.pipe(ffmpegProc.stdin);
+
+    let ytdlpStderr = '';
+    let ffmpegStderr = '';
+    ytdlp.stderr.on('data', (chunk: Buffer) => { ytdlpStderr += chunk.toString(); });
+    ffmpegProc.stderr.on('data', (chunk: Buffer) => { ffmpegStderr += chunk.toString(); });
+
+    ytdlp.on('error', (err: any) => {
+      reject(new Error(`yt-dlp not available: ${err.message}`));
+    });
+    ffmpegProc.on('error', (err: any) => {
+      reject(new Error(`ffmpeg not available: ${err.message}`));
+    });
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        ytdlp.kill();
+        ffmpegProc.kill();
+        reject(new Error(`yt-dlp pipe timeout (25s). yt-dlp: ${ytdlpStderr.substring(0, 150)}; ffmpeg: ${ffmpegStderr.substring(0, 150)}`));
+      }
+    }, 25000);
+
+    let resolved = false;
+    ffmpegProc.stdout.once('data', () => {
+      resolved = true;
+      clearTimeout(timeout);
+      const resource = createAudioResource(ffmpegProc.stdout, {
+        inputType: StreamType.OggOpus,
+        inlineVolume: true,
       });
+      resolve(resource);
+    });
 
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          ytdlp.kill();
-          reject(new Error(`yt-dlp timeout (15s). stderr: ${stderrData.substring(0, 200)}`));
-        }
-      }, 15000);
+    ffmpegProc.on('close', (code: number) => {
+      clearTimeout(timeout);
+      if (!resolved) {
+        reject(new Error(`ffmpeg pipe exited ${code}. yt-dlp: ${ytdlpStderr.substring(0, 150)}; ffmpeg: ${ffmpegStderr.substring(0, 150)}`));
+      }
+    });
 
-      let resolved = false;
-      ytdlp.stdout.once('data', () => {
-        resolved = true;
+    ytdlp.on('close', (code: number) => {
+      if (code !== 0 && !resolved) {
         clearTimeout(timeout);
-        const resource = createAudioResource(ytdlp.stdout, {
-          inputType: StreamType.Arbitrary,
-          inlineVolume: true,
-        });
-        resolve(resource);
-      });
-
-      ytdlp.on('close', (code: number) => {
-        clearTimeout(timeout);
-        if (!resolved) {
-          reject(new Error(`yt-dlp exited ${code}: ${stderrData.substring(0, 200)}`));
-        }
-      });
-    } catch (err: any) {
-      reject(err);
-    }
+        ffmpegProc.kill();
+        reject(new Error(`yt-dlp pipe exited ${code}: ${ytdlpStderr.substring(0, 200)}`));
+      }
+    });
   });
 }
 
@@ -941,18 +907,19 @@ export async function initializePlayDl() {
 /** Diagnostic: test each streaming strategy and return results */
 export async function testStreaming(videoId: string): Promise<any> {
   const results: any = { videoId, strategies: {} };
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
   
-  // Test Invidious/Piped proxy
+  // Test yt-dlp --get-url (Strategy 1 first step)
   try {
     const t0 = Date.now();
-    const directUrl = await getDirectAudioUrl(videoId);
-    results.strategies.proxy = {
+    const directUrl = await getYtDlpDirectUrl(url);
+    results.strategies.ytdlpGetUrl = {
       success: true,
       timeMs: Date.now() - t0,
       urlPreview: directUrl.substring(0, 120) + '...',
     };
   } catch (e: any) {
-    results.strategies.proxy = { success: false, error: e.message };
+    results.strategies.ytdlpGetUrl = { success: false, error: e.message };
   }
 
   // Test yt-dlp availability
