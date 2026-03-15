@@ -160,36 +160,38 @@ async function handleNextSong(guildId: string) {
   }
 }
 
-async function playSong(guildId: string) {
+async function playSong(guildId: string): Promise<{ success: boolean; error?: string }> {
   const q = queues.get(guildId);
-  if (!q || q.songs.length === 0) return;
+  if (!q || q.songs.length === 0) return { success: false, error: 'No songs' };
 
   const song = q.songs[0];
 
   try {
     let resource;
+    let strategyUsed = '';
     
     // Strategy 1: yt-dlp --get-url → ffmpeg (fastest & most reliable)
-    // yt-dlp extracts the direct audio URL, ffmpeg streams & transcodes it
     try {
       const directUrl = await getYtDlpDirectUrl(song.url);
-      resource = await streamFromDirectUrl(directUrl);
+      resource = await streamViaFfmpeg(directUrl);
+      strategyUsed = 'yt-dlp URL + ffmpeg';
       console.log(`[Music] ✅ Strategy 1 (yt-dlp URL + ffmpeg) for "${song.title}"`);
     } catch (s1Err: any) {
-      console.log(`[Music] Strategy 1 (yt-dlp URL + ffmpeg) failed: ${s1Err.message}`);
+      console.log(`[Music] Strategy 1 failed: ${s1Err.message}`);
     }
 
-    // Strategy 2: yt-dlp pipe directly to player
+    // Strategy 2: yt-dlp pipe → ffmpeg → player
     if (!resource) {
       try {
         resource = await getYtDlpPipeResource(song.url);
+        strategyUsed = 'yt-dlp pipe + ffmpeg';
         console.log(`[Music] ✅ Strategy 2 (yt-dlp pipe) for "${song.title}"`);
       } catch (s2Err: any) {
-        console.log(`[Music] Strategy 2 (yt-dlp pipe) failed: ${s2Err.message}`);
+        console.log(`[Music] Strategy 2 failed: ${s2Err.message}`);
       }
     }
 
-    // Strategy 3: play-dl stream (rarely works on cloud, but worth trying)
+    // Strategy 3: play-dl stream
     if (!resource) {
       try {
         const stream = await withTimeout(play.stream(song.url), 12000, 'play-dl stream');
@@ -197,9 +199,10 @@ async function playSong(guildId: string) {
           inputType: stream.type,
           inlineVolume: true,
         });
+        strategyUsed = 'play-dl';
         console.log(`[Music] ✅ Strategy 3 (play-dl) for "${song.title}"`);
       } catch (s3Err: any) {
-        console.log(`[Music] Strategy 3 (play-dl) failed: ${s3Err.message}`);
+        console.log(`[Music] Strategy 3 failed: ${s3Err.message}`);
       }
     }
 
@@ -212,14 +215,25 @@ async function playSong(guildId: string) {
       resource.volume.setVolume(q.volume / 100);
     }
 
+    // Play and wait for confirmation that it actually starts
     q.player.play(resource);
-    q.isPlaying = true;
-
-    if (q.textChannel) {
-      q.textChannel.send(`🎵 **Играет:** ${song.title} - \`${song.duration}\``).catch(() => {});
+    
+    // Wait up to 5s for player to enter Playing state
+    try {
+      await entersState(q.player, AudioPlayerStatus.Playing, 5_000);
+      q.isPlaying = true;
+      console.log(`[Music] ▶️ Confirmed playing: "${song.title}" via ${strategyUsed} in guild ${guildId}`);
+      
+      if (q.textChannel) {
+        q.textChannel.send(`🎵 **Играет:** ${song.title} - \`${song.duration}\``).catch(() => {});
+      }
+      return { success: true };
+    } catch (stateErr: any) {
+      // Player didn't enter Playing state — check what state it's in
+      const currentState = q.player.state.status;
+      console.error(`[Music] Player failed to enter Playing state. Current: ${currentState}. Strategy: ${strategyUsed}`);
+      throw new Error(`Player не начал воспроизведение (${currentState}) via ${strategyUsed}`);
     }
-
-    console.log(`[Music] Playing: "${song.title}" in guild ${guildId}`);
   } catch (error: any) {
     console.error(`[Music] All stream strategies failed for "${song.title}":`, error.message);
     if (q.textChannel) {
@@ -232,6 +246,7 @@ async function playSong(guildId: string) {
     } else {
       q.isPlaying = false;
     }
+    return { success: false, error: error.message };
   }
 }
 
@@ -281,8 +296,8 @@ function getYtDlpDirectUrl(url: string): Promise<string> {
   });
 }
 
-/** Stream from a direct audio URL using ffmpeg → AudioResource */
-function streamFromDirectUrl(directUrl: string): Promise<any> {
+/** Stream from a direct audio URL using ffmpeg → raw PCM → AudioResource */
+function streamViaFfmpeg(directUrl: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const ffmpegCmd = ffmpegPath || 'ffmpeg';
     
@@ -292,11 +307,9 @@ function streamFromDirectUrl(directUrl: string): Promise<any> {
       '-reconnect_delay_max', '5',
       '-i', directUrl,
       '-vn',
-      '-acodec', 'libopus',
-      '-f', 'opus',
+      '-f', 's16le',        // raw PCM
       '-ar', '48000',
       '-ac', '2',
-      '-b:a', '96k',
       'pipe:1',
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -319,7 +332,7 @@ function streamFromDirectUrl(directUrl: string): Promise<any> {
       resolved = true;
       clearTimeout(timeout);
       const resource = createAudioResource(ffmpegProc.stdout, {
-        inputType: StreamType.OggOpus,
+        inputType: StreamType.Raw,
         inlineVolume: true,
       });
       resolve(resource);
@@ -351,11 +364,9 @@ function getYtDlpPipeResource(url: string): Promise<any> {
     const ffmpegProc = spawn(ffmpegCmd, [
       '-i', 'pipe:0',
       '-vn',
-      '-acodec', 'libopus',
-      '-f', 'opus',
+      '-f', 's16le',        // raw PCM
       '-ar', '48000',
       '-ac', '2',
-      '-b:a', '96k',
       'pipe:1',
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -387,7 +398,7 @@ function getYtDlpPipeResource(url: string): Promise<any> {
       resolved = true;
       clearTimeout(timeout);
       const resource = createAudioResource(ffmpegProc.stdout, {
-        inputType: StreamType.OggOpus,
+        inputType: StreamType.Raw,
         inlineVolume: true,
       });
       resolve(resource);
@@ -418,7 +429,7 @@ function destroyQueue(guildId: string) {
   queues.delete(guildId);
 }
 
-function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): VoiceConnection {
+async function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): Promise<VoiceConnection> {
   // Check for existing connection
   let connection = getVoiceConnection(guild.id);
   if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
@@ -458,6 +469,15 @@ function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): VoiceCon
   connection.on('error', (error: any) => {
     console.error('[Voice Connection Error]', error?.message || error);
   });
+
+  // Wait for the connection to be ready before returning
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+    console.log(`[Music] Voice connection ready for guild ${guild.id}`);
+  } catch {
+    console.error(`[Music] Voice connection failed to reach Ready state within 15s`);
+    // Don't throw — let the caller handle the player state check
+  }
 
   return connection;
 }
@@ -566,16 +586,22 @@ export async function addSong(
     // Connect to voice
     const q = getOrCreateQueue(guild.id);
     q.textChannel = textChannel;
-    const connection = connectToVoice(guild, voiceChannel);
+    const connection = await connectToVoice(guild, voiceChannel);
     q.connection = connection;
     connection.subscribe(q.player);
 
     // Add song to queue
     q.songs.push(songInfo);
 
-    // If this is the only song, start playing
+    // If this is the only song, start playing and verify it works
     if (q.songs.length === 1) {
-      await playSong(guild.id);
+      const playResult = await playSong(guild.id);
+      if (!playResult.success) {
+        return {
+          success: false,
+          message: `❌ Не удалось воспроизвести: ${playResult.error || 'Неизвестная ошибка'}`,
+        };
+      }
     }
 
     return {
@@ -806,7 +832,7 @@ export async function addPlaylist(
     // Connect to voice
     const q = getOrCreateQueue(guild.id);
     q.textChannel = textChannel;
-    const connection = connectToVoice(guild, voiceChannel);
+    const connection = await connectToVoice(guild, voiceChannel);
     q.connection = connection;
     connection.subscribe(q.player);
 
