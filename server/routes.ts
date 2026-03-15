@@ -60,6 +60,7 @@ import {
   removeSong,
   clearQueue,
   getDistube,
+  getLoadingStatus,
   testStreaming,
   testAudioEndToEnd
 } from "./music-system";
@@ -779,6 +780,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const result = await getCurrentSong(guild.id);
       res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/music/loading-status", requireMusicAuth, async (req, res) => {
+    try {
+      const distube = getDistube();
+      const client = distube.client;
+      const guild = client.guilds.cache.first();
+      
+      if (!guild) {
+        return res.status(500).json({ error: "Discord сервер не найден" });
+      }
+
+      const status = getLoadingStatus(guild.id);
+      res.json(status);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -62,9 +62,30 @@ interface GuildQueue {
   isPaused: boolean;
 }
 
+// ========= Loading Status =========
+interface LoadingStatus {
+  state: 'idle' | 'resolving' | 'connecting' | 'streaming' | 'playing' | 'error';
+  progress: number;    // 0-100
+  message: string;
+  songTitle?: string;
+  errorDetail?: string;
+  timestamp: number;
+}
+
 // ========= State =========
 const queues = new Map<string, GuildQueue>();
+const loadingStatuses = new Map<string, LoadingStatus>();
 let botClient: Client | null = null;
+
+function setLoadingStatus(guildId: string, state: LoadingStatus['state'], progress: number, message: string, extra?: Partial<LoadingStatus>) {
+  const status: LoadingStatus = { state, progress, message, timestamp: Date.now(), ...extra };
+  loadingStatuses.set(guildId, status);
+  console.log(`[Music Loading] ${guildId}: ${state} ${progress}% - ${message}`);
+}
+
+export function getLoadingStatus(guildId: string): LoadingStatus {
+  return loadingStatuses.get(guildId) || { state: 'idle', progress: 0, message: '', timestamp: Date.now() };
+}
 
 // ========= Helpers =========
 
@@ -174,10 +195,12 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
     
     // Strategy 1: yt-dlp --get-url → ffmpeg (fastest & most reliable)
     // Try twice with different format selection
+    setLoadingStatus(guildId, 'streaming', 65, 'Стратегия 1: получение ссылки на аудио...', { songTitle: song.title });
     for (const fmt of ['bestaudio[ext=webm]/bestaudio/best', 'bestaudio']) {
       if (resource) break;
       try {
         const directUrl = await getYtDlpDirectUrl(song.url, fmt);
+        setLoadingStatus(guildId, 'streaming', 75, 'Запуск аудиопотока через ffmpeg...', { songTitle: song.title });
         resource = await streamViaFfmpeg(directUrl);
         strategyUsed = 'yt-dlp URL + ffmpeg';
         console.log(`[Music] ✅ Strategy 1 (yt-dlp URL + ffmpeg, fmt=${fmt}) for "${song.title}"`);
@@ -188,6 +211,7 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
 
     // Strategy 2: yt-dlp pipe → ffmpeg → player
     if (!resource) {
+      setLoadingStatus(guildId, 'streaming', 78, 'Стратегия 2: прямой поток...', { songTitle: song.title });
       try {
         resource = await getYtDlpPipeResource(song.url);
         strategyUsed = 'yt-dlp pipe + ffmpeg';
@@ -199,6 +223,7 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
 
     // Strategy 3: play-dl stream
     if (!resource) {
+      setLoadingStatus(guildId, 'streaming', 82, 'Стратегия 3: play-dl...', { songTitle: song.title });
       try {
         const stream = await withTimeout(play.stream(song.url), 12000, 'play-dl stream');
         resource = createAudioResource(stream.stream, {
@@ -216,6 +241,8 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       throw new Error('Все стратегии стриминга не сработали');
     }
 
+    setLoadingStatus(guildId, 'streaming', 90, 'Запуск плеера...', { songTitle: song.title });
+
     // Set volume
     if (resource.volume) {
       resource.volume.setVolume(q.volume / 100);
@@ -229,6 +256,7 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       await entersState(q.player, AudioPlayerStatus.Playing, 5_000);
       q.isPlaying = true;
       q.isPaused = false;
+      setLoadingStatus(guildId, 'playing', 100, `Играет: ${song.title}`, { songTitle: song.title });
       console.log(`[Music] ▶️ Confirmed playing: "${song.title}" via ${strategyUsed} in guild ${guildId}`);
       
       if (q.textChannel) {
@@ -243,6 +271,7 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
     }
   } catch (error: any) {
     console.error(`[Music] All stream strategies failed for "${song.title}":`, error.message);
+    setLoadingStatus(guildId, 'error', 0, `Не удалось: ${error.message}`, { songTitle: song.title, errorDetail: error.message });
     if (q.textChannel) {
       q.textChannel.send(`❌ Не удалось воспроизвести: ${song.title}\n${error.message?.substring(0, 150)}`).catch(() => {});
     }
@@ -529,6 +558,8 @@ export async function addSong(
   try {
     if (!botClient) throw new Error('Music system не инициализирован');
 
+    setLoadingStatus(guild.id, 'resolving', 10, 'Получение информации о треке...', { songTitle: query.substring(0, 60) });
+
     // Resolve query → song info
     let songInfo: Song;
 
@@ -603,25 +634,35 @@ export async function addSong(
       };
     }
 
+    setLoadingStatus(guild.id, 'resolving', 30, `Найден: ${songInfo.title}`, { songTitle: songInfo.title });
+
     // Connect to voice
+    setLoadingStatus(guild.id, 'connecting', 40, 'Подключение к голосовому каналу...', { songTitle: songInfo.title });
     const q = getOrCreateQueue(guild.id);
     q.textChannel = textChannel;
     const connection = await connectToVoice(guild, voiceChannel);
     q.connection = connection;
     connection.subscribe(q.player);
 
+    setLoadingStatus(guild.id, 'connecting', 50, 'Подключено! Добавляю в очередь...', { songTitle: songInfo.title });
+
     // Add song to queue
     q.songs.push(songInfo);
 
     // If this is the only song, start playing and verify it works
     if (q.songs.length === 1) {
+      setLoadingStatus(guild.id, 'streaming', 60, 'Запуск воспроизведения...', { songTitle: songInfo.title });
       const playResult = await playSong(guild.id);
       if (!playResult.success) {
+        setLoadingStatus(guild.id, 'error', 0, `Ошибка: ${playResult.error}`, { songTitle: songInfo.title, errorDetail: playResult.error });
         return {
           success: false,
           message: `❌ Не удалось воспроизвести: ${playResult.error || 'Неизвестная ошибка'}`,
         };
       }
+      setLoadingStatus(guild.id, 'playing', 100, `Играет: ${songInfo.title}`, { songTitle: songInfo.title });
+    } else {
+      setLoadingStatus(guild.id, 'playing', 100, `Добавлено в очередь: ${songInfo.title}`, { songTitle: songInfo.title });
     }
 
     return {
@@ -639,6 +680,7 @@ export async function addSong(
     };
   } catch (error: any) {
     console.error('[Music] addSong error:', error);
+    setLoadingStatus(guild.id, 'error', 0, `Ошибка: ${error.message}`, { errorDetail: error.message });
 
     let message = `❌ Ошибка: ${error.message || 'Не удалось добавить трек'}`;
 
@@ -745,9 +787,35 @@ export async function toggleLoop(guildId: string): Promise<{ success: boolean; m
   }
 }
 
-export async function getCurrentSong(guildId: string): Promise<{ success: boolean; message?: string; song?: any; isPaused?: boolean }> {
+export async function getCurrentSong(guildId: string): Promise<{ success: boolean; message?: string; song?: any; isPaused?: boolean; loading?: LoadingStatus }> {
   try {
+    const loadingStatus = getLoadingStatus(guildId);
     const q = queues.get(guildId);
+    
+    // If loading is in progress, return loading state even if not yet playing
+    if (loadingStatus.state !== 'idle' && loadingStatus.state !== 'playing' && loadingStatus.state !== 'error') {
+      return {
+        success: true,
+        loading: loadingStatus,
+        song: q?.songs[0] ? {
+          title: q.songs[0].title,
+          duration: q.songs[0].duration,
+          url: q.songs[0].url,
+          thumbnail: q.songs[0].thumbnail,
+          requestedBy: q.songs[0].requestedBy,
+        } : undefined,
+      };
+    }
+    
+    // If there was an error recently (last 30s), return it
+    if (loadingStatus.state === 'error' && (Date.now() - loadingStatus.timestamp) < 30000) {
+      return {
+        success: false,
+        message: loadingStatus.message,
+        loading: loadingStatus,
+      };
+    }
+    
     if (!q || q.songs.length === 0 || (!q.isPlaying && !q.isPaused)) {
       return { success: false, message: '❌ Ничего не играет' };
     }

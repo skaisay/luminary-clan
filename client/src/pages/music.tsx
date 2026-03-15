@@ -19,7 +19,8 @@ import {
   Plus,
   Bot,
   LogIn,
-  ExternalLink
+  ExternalLink,
+  AlertTriangle
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,11 +66,21 @@ interface QueueSong {
   isPlaying: boolean;
 }
 
+interface LoadingStatus {
+  state: 'idle' | 'resolving' | 'connecting' | 'streaming' | 'playing' | 'error';
+  progress: number;
+  message: string;
+  songTitle?: string;
+  errorDetail?: string;
+  timestamp: number;
+}
+
 interface NowPlayingResult {
   success: boolean;
   message?: string;
   song?: SongInfo;
   isPaused?: boolean;
+  loading?: LoadingStatus;
 }
 
 interface QueueResult {
@@ -101,6 +112,13 @@ export default function MusicPage() {
   const { data: nowPlaying, isLoading: nowPlayingLoading } = useQuery<NowPlayingResult>({
     queryKey: ["/api/music/now-playing"],
     refetchInterval: 2000,
+    retry: false,
+  });
+
+  // Fetch loading status (polls faster when loading)
+  const { data: loadingStatus } = useQuery<LoadingStatus>({
+    queryKey: ["/api/music/loading-status"],
+    refetchInterval: 1500,
     retry: false,
   });
 
@@ -253,8 +271,10 @@ export default function MusicPage() {
     volumeMutation.mutate(newVolume);
   };
 
-  const isPlaying = nowPlaying?.success && nowPlaying?.song;
+  const isPlaying = nowPlaying?.success && nowPlaying?.song && !nowPlaying?.loading;
   const isPaused = isPlaying && nowPlaying?.isPaused;
+  const isLoading = loadingStatus && ['resolving', 'connecting', 'streaming'].includes(loadingStatus.state);
+  const isError = loadingStatus?.state === 'error' && loadingStatus.timestamp && (Date.now() - loadingStatus.timestamp) < 30000;
   const isUnauthorized = channelsError && (channelsError as any)?.message?.includes?.("401");
 
   // Not logged in
@@ -458,7 +478,7 @@ export default function MusicPage() {
           {/* Now Playing */}
           <Card className={`glass glass-border overflow-hidden relative ${isPlaying ? 'ring-1 ring-primary/30' : ''}`}>
             {/* Animated background when playing */}
-            {isPlaying && (
+            {isPlaying && !isPaused && (
               <div className="absolute inset-0 opacity-[0.03]">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary via-transparent to-[hsl(var(--accent))] animate-pulse" />
               </div>
@@ -466,7 +486,17 @@ export default function MusicPage() {
             
             <CardHeader className="pb-3 relative">
               <CardTitle className="text-base flex items-center gap-2">
-                {isPlaying ? (
+                {isLoading ? (
+                  <div className="flex items-center gap-1.5">
+                    <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                    <span className="text-primary">Загрузка...</span>
+                  </div>
+                ) : isError ? (
+                  <div className="flex items-center gap-1.5">
+                    <AlertTriangle className="h-4 w-4 text-destructive" />
+                    <span className="text-destructive">Ошибка</span>
+                  </div>
+                ) : isPlaying ? (
                   <div className="flex items-center gap-1.5">
                     <span className="flex gap-[2px] items-end h-4">
                       <span className="w-[3px] bg-primary rounded-full animate-bounce" style={{ height: '60%', animationDelay: '0ms', animationDuration: '600ms' }} />
@@ -492,6 +522,50 @@ export default function MusicPage() {
                     <Skeleton className="h-5 w-3/4" />
                     <Skeleton className="h-4 w-1/3" />
                   </div>
+                </div>
+              ) : isLoading ? (
+                /* Loading state with progress bar */
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <Loader2 className="h-7 w-7 text-primary animate-spin" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-sm leading-tight line-clamp-2">
+                        {loadingStatus?.songTitle || 'Загрузка трека...'}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {loadingStatus?.message}
+                      </p>
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>{loadingStatus?.message}</span>
+                      <span>{loadingStatus?.progress || 0}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-muted/30 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-primary to-[hsl(var(--accent))] rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${loadingStatus?.progress || 0}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : isError ? (
+                /* Error state */
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
+                    <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-destructive">Не удалось загрузить трек</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                        {loadingStatus?.errorDetail || loadingStatus?.message}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center">Попробуйте другой трек или прямую ссылку YouTube</p>
                 </div>
               ) : isPlaying ? (
                 <div className="space-y-5">
