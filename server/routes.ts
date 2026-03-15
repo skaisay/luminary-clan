@@ -803,8 +803,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Debug logs endpoint — shows last 100 music system log entries
-  app.get("/api/music/debug-logs", requireMusicAuth, async (req, res) => {
+  // Debug logs endpoint — public for diagnostics
+  app.get("/api/music/debug-logs", async (req, res) => {
     try {
       const logs = getDebugLogs();
       res.json({ logs, count: logs.length });
