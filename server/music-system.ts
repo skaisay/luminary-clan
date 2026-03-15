@@ -14,10 +14,11 @@ import {
 } from '@discordjs/voice';
 import play from 'play-dl';
 import { spawn } from 'child_process';
-
-// Проверяем наличие системного FFmpeg, затем ffmpeg-static как запасной вариант
 import { execSync } from 'child_process';
+import https from 'https';
+import http from 'http';
 
+// ========= FFmpeg detection =========
 let ffmpegPath: string | null = null;
 try {
   const systemFfmpeg = execSync('which ffmpeg 2>/dev/null || where ffmpeg 2>nul', { encoding: 'utf8' }).trim();
@@ -41,6 +42,22 @@ if (!ffmpegPath) {
     console.log('⚠️ FFmpeg не найден! Музыка может не работать.');
   }
 }
+
+// ========= Invidious/Piped instances for YouTube proxy =========
+const INVIDIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://invidious.fdn.fr',
+  'https://vid.puffyan.us',
+  'https://invidious.nerdvpn.de',
+  'https://iv.ggtyler.dev',
+  'https://invidious.privacyredirect.com',
+];
+
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://api-piped.mha.fi',
+];
 
 // ========= Типы =========
 interface Song {
@@ -167,32 +184,48 @@ async function playSong(guildId: string) {
   if (!q || q.songs.length === 0) return;
 
   const song = q.songs[0];
+  const videoId = extractVideoId(song.url);
 
   try {
-    // Strategy 1: try play-dl stream
     let resource;
-    try {
-      const stream = await withTimeout(play.stream(song.url), 15000, 'play-dl stream');
-      resource = createAudioResource(stream.stream, {
-        inputType: stream.type,
-        inlineVolume: true,
-      });
-      console.log(`[Music] Stream via play-dl for "${song.title}"`);
-    } catch (pdlErr: any) {
-      console.log(`[Music] play-dl stream failed: ${pdlErr.message}, trying yt-dlp...`);
-      
-      // Strategy 2: use yt-dlp via FFmpeg subprocess
-      // yt-dlp is available on most Linux systems; we fall back to ffmpeg raw URL
+    
+    // Strategy 1: Invidious/Piped proxy (most reliable for cloud hosting)
+    if (videoId) {
+      try {
+        const directUrl = await getDirectAudioUrl(videoId);
+        resource = await streamFromDirectUrl(directUrl);
+        console.log(`[Music] ✅ Strategy 1 (Invidious/Piped proxy) for "${song.title}"`);
+      } catch (proxyErr: any) {
+        console.log(`[Music] Strategy 1 (proxy) failed: ${proxyErr.message}`);
+      }
+    }
+
+    // Strategy 2: yt-dlp subprocess (works if installed & not blocked)
+    if (!resource) {
       try {
         resource = await getYtDlpResource(song.url);
-        console.log(`[Music] Stream via yt-dlp for "${song.title}"`);
+        console.log(`[Music] ✅ Strategy 2 (yt-dlp) for "${song.title}"`);
       } catch (ytdlpErr: any) {
-        console.log(`[Music] yt-dlp failed: ${ytdlpErr.message}, trying ffmpeg direct...`);
-        
-        // Strategy 3: try ffmpeg directly with the URL (works sometimes)
-        resource = await getFfmpegResource(song.url);
-        console.log(`[Music] Stream via ffmpeg for "${song.title}"`);
+        console.log(`[Music] Strategy 2 (yt-dlp) failed: ${ytdlpErr.message}`);
       }
+    }
+
+    // Strategy 3: play-dl stream (rarely works on cloud, but worth trying)
+    if (!resource) {
+      try {
+        const stream = await withTimeout(play.stream(song.url), 12000, 'play-dl stream');
+        resource = createAudioResource(stream.stream, {
+          inputType: stream.type,
+          inlineVolume: true,
+        });
+        console.log(`[Music] ✅ Strategy 3 (play-dl) for "${song.title}"`);
+      } catch (pdlErr: any) {
+        console.log(`[Music] Strategy 3 (play-dl) failed: ${pdlErr.message}`);
+      }
+    }
+
+    if (!resource) {
+      throw new Error('Все стратегии стриминга не сработали');
     }
 
     // Set volume
@@ -223,14 +256,152 @@ async function playSong(guildId: string) {
   }
 }
 
+/** Extract YouTube video ID from various URL formats */
+function extractVideoId(url: string): string | null {
+  const match = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/v\/)([a-zA-Z0-9_-]{11})/);
+  return match?.[1] || null;
+}
+
+/** Fetch JSON from a URL with timeout */
+function fetchJson(url: string, timeoutMs: number = 8000): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error(`Timeout fetching ${url}`));
+    }, timeoutMs);
+    
+    const req = protocol.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      if (res.statusCode && (res.statusCode >= 300 && res.statusCode < 400) && res.headers.location) {
+        // Follow redirect
+        clearTimeout(timer);
+        fetchJson(res.headers.location, timeoutMs).then(resolve).catch(reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        clearTimeout(timer);
+        reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+        return;
+      }
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        clearTimeout(timer);
+        try { resolve(JSON.parse(data)); }
+        catch { reject(new Error(`Invalid JSON from ${url}`)); }
+      });
+      res.on('error', (e) => { clearTimeout(timer); reject(e); });
+    });
+    req.on('error', (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+/** Get direct audio URL via Invidious or Piped proxy instances */
+async function getDirectAudioUrl(videoId: string): Promise<string> {
+  const errors: string[] = [];
+
+  // Try Invidious instances
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const data = await fetchJson(`${instance}/api/v1/videos/${videoId}?fields=adaptiveFormats`, 8000);
+      if (data?.adaptiveFormats) {
+        // Find best audio-only format
+        const audioFormats = data.adaptiveFormats
+          .filter((f: any) => f.type?.startsWith('audio/') && f.url)
+          .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+        
+        if (audioFormats.length > 0) {
+          console.log(`[Music] Got direct audio URL from Invidious (${instance}), bitrate: ${audioFormats[0].bitrate}`);
+          return audioFormats[0].url;
+        }
+      }
+    } catch (e: any) {
+      errors.push(`${instance}: ${e.message}`);
+    }
+  }
+
+  // Try Piped instances
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      const data = await fetchJson(`${instance}/streams/${videoId}`, 8000);
+      if (data?.audioStreams) {
+        const audioStreams = data.audioStreams
+          .filter((s: any) => s.url)
+          .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+        
+        if (audioStreams.length > 0) {
+          console.log(`[Music] Got direct audio URL from Piped (${instance}), bitrate: ${audioStreams[0].bitrate}`);
+          return audioStreams[0].url;
+        }
+      }
+    } catch (e: any) {
+      errors.push(`${instance}: ${e.message}`);
+    }
+  }
+
+  throw new Error(`No proxy instance returned audio URL. Errors: ${errors.slice(0, 3).join('; ')}`);
+}
+
+/** Stream from a direct audio URL using ffmpeg → AudioResource */
+async function streamFromDirectUrl(directUrl: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const ffmpegCmd = ffmpegPath || 'ffmpeg';
+    
+    const ffmpeg = spawn(ffmpegCmd, [
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '5',
+      '-i', directUrl,
+      '-vn',
+      '-acodec', 'libopus',
+      '-f', 'opus',
+      '-ar', '48000',
+      '-ac', '2',
+      '-b:a', '96k',
+      'pipe:1',
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    let stderrData = '';
+    ffmpeg.stderr.on('data', (chunk: Buffer) => { stderrData += chunk.toString(); });
+
+    ffmpeg.on('error', (err: any) => {
+      reject(new Error(`ffmpeg not available: ${err.message}`));
+    });
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        ffmpeg.kill();
+        reject(new Error(`ffmpeg stream timeout (15s). stderr: ${stderrData.substring(0, 200)}`));
+      }
+    }, 15000);
+
+    let resolved = false;
+    ffmpeg.stdout.once('data', () => {
+      resolved = true;
+      clearTimeout(timeout);
+      const resource = createAudioResource(ffmpeg.stdout, {
+        inputType: StreamType.OggOpus,
+        inlineVolume: true,
+      });
+      resolve(resource);
+    });
+
+    ffmpeg.on('close', (code: number) => {
+      clearTimeout(timeout);
+      if (!resolved) {
+        reject(new Error(`ffmpeg exited ${code}: ${stderrData.substring(0, 300)}`));
+      }
+    });
+  });
+}
+
 /** Get audio resource using yt-dlp subprocess */
 async function getYtDlpResource(url: string) {
   return new Promise<any>((resolve, reject) => {
     try {
-      // Try yt-dlp first, then youtube-dl
       const ytdlp = spawn('yt-dlp', [
         '-f', 'bestaudio[ext=webm]/bestaudio/best',
-        '-o', '-',  // output to stdout
+        '-o', '-',
         '--no-playlist',
         '--no-check-certificates',
         url,
@@ -243,11 +414,10 @@ async function getYtDlpResource(url: string) {
         reject(new Error(`yt-dlp not available: ${err.message}`));
       });
 
-      // Give it 2 seconds to start producing data
       const timeout = setTimeout(() => {
         if (!resolved) {
           ytdlp.kill();
-          reject(new Error('yt-dlp timeout'));
+          reject(new Error(`yt-dlp timeout (15s). stderr: ${stderrData.substring(0, 200)}`));
         }
       }, 15000);
 
@@ -265,61 +435,7 @@ async function getYtDlpResource(url: string) {
       ytdlp.on('close', (code: number) => {
         clearTimeout(timeout);
         if (!resolved) {
-          reject(new Error(`yt-dlp exited with code ${code}: ${stderrData.substring(0, 200)}`));
-        }
-      });
-    } catch (err: any) {
-      reject(err);
-    }
-  });
-}
-
-/** Get audio resource using ffmpeg directly (for direct stream URLs) */
-async function getFfmpegResource(url: string) {
-  return new Promise<any>((resolve, reject) => {
-    try {
-      const ffmpeg = spawn('ffmpeg', [
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-i', url,
-        '-vn',              // no video
-        '-acodec', 'libopus',
-        '-f', 'opus',
-        '-ar', '48000',
-        '-ac', '2',
-        'pipe:1',           // output to stdout
-      ], { stdio: ['pipe', 'pipe', 'pipe'] });
-
-      let stderrData = '';
-      ffmpeg.stderr.on('data', (chunk: Buffer) => { stderrData += chunk.toString(); });
-
-      ffmpeg.on('error', (err: any) => {
-        reject(new Error(`ffmpeg not available: ${err.message}`));
-      });
-
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          ffmpeg.kill();
-          reject(new Error('ffmpeg stream timeout'));
-        }
-      }, 15000);
-
-      let resolved = false;
-      ffmpeg.stdout.once('data', () => {
-        resolved = true;
-        clearTimeout(timeout);
-        const resource = createAudioResource(ffmpeg.stdout, {
-          inputType: StreamType.OggOpus,
-          inlineVolume: true,
-        });
-        resolve(resource);
-      });
-
-      ffmpeg.on('close', (code: number) => {
-        clearTimeout(timeout);
-        if (!resolved) {
-          reject(new Error(`ffmpeg exited with code ${code}: ${stderrData.substring(0, 200)}`));
+          reject(new Error(`yt-dlp exited ${code}: ${stderrData.substring(0, 200)}`));
         }
       });
     } catch (err: any) {
@@ -820,4 +936,40 @@ export async function clearQueue(guildId: string): Promise<{ success: boolean; m
 // Функция для совместимости со старым кодом
 export async function initializePlayDl() {
   console.log('✅ play-dl music system ready');
+}
+
+/** Diagnostic: test each streaming strategy and return results */
+export async function testStreaming(videoId: string): Promise<any> {
+  const results: any = { videoId, strategies: {} };
+  
+  // Test Invidious/Piped proxy
+  try {
+    const t0 = Date.now();
+    const directUrl = await getDirectAudioUrl(videoId);
+    results.strategies.proxy = {
+      success: true,
+      timeMs: Date.now() - t0,
+      urlPreview: directUrl.substring(0, 120) + '...',
+    };
+  } catch (e: any) {
+    results.strategies.proxy = { success: false, error: e.message };
+  }
+
+  // Test yt-dlp availability
+  try {
+    const version = execSync('yt-dlp --version 2>/dev/null', { encoding: 'utf8', timeout: 5000 }).trim();
+    results.strategies.ytdlp = { available: true, version };
+  } catch {
+    results.strategies.ytdlp = { available: false, error: 'yt-dlp not found in PATH' };
+  }
+
+  // Test ffmpeg availability
+  try {
+    const version = execSync(`${ffmpegPath || 'ffmpeg'} -version 2>/dev/null | head -1`, { encoding: 'utf8', timeout: 5000 }).trim();
+    results.strategies.ffmpeg = { available: true, version: version.substring(0, 100) };
+  } catch {
+    results.strategies.ffmpeg = { available: false, error: 'ffmpeg not found' };
+  }
+
+  return results;
 }

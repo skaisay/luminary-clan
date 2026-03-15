@@ -56,7 +56,8 @@ import {
   setVolume,
   searchSongs,
   addPlaylist,
-  getDistube
+  getDistube,
+  testStreaming
 } from "./music-system";
 
 // Расширяем тип Session для поддержки returnTo
@@ -965,6 +966,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const result = await searchSongs(query, limit);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Debug endpoint: test streaming strategies
+  app.get("/api/music/debug-stream/:videoId", requireMusicAuth, async (req, res) => {
+    try {
+      const result = await testStreaming(req.params.videoId);
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
