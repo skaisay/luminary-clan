@@ -252,119 +252,59 @@ function cleanYouTubeUrl(url: string): string {
   } catch { return url; }
 }
 
-// ========= Strategy 0: Direct YouTube Innertube API (Node.js fetch) =========
-/** 
- * Call YouTube's internal player API directly with different client configurations.
- * This has a completely different fingerprint from yt-dlp/ytdl-core binaries.
+// ========= SoundCloud Fallback Strategy =========
+/**
+ * Search SoundCloud for a song by title and stream it.
+ * SoundCloud doesn't block cloud datacenter IPs like YouTube does.
  */
-async function getInnertubeAudioUrl(videoId: string): Promise<string> {
-  const clients = [
-    {
-      name: 'IOS',
-      clientName: 'IOS',
-      clientVersion: '19.29.1',
-      key: 'AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc',
-      userAgent: 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
-      headers: { 'X-Youtube-Client-Name': '5', 'X-Youtube-Client-Version': '19.29.1' },
-      extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '17.5.1.21F90' },
-    },
-    {
-      name: 'ANDROID',
-      clientName: 'ANDROID',
-      clientVersion: '19.29.37',
-      key: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
-      userAgent: 'com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US) gzip',
-      headers: { 'X-Youtube-Client-Name': '3', 'X-Youtube-Client-Version': '19.29.37' },
-      extra: { androidSdkVersion: 34, osName: 'Android', osVersion: '14', platform: 'MOBILE' },
-    },
-    {
-      name: 'TV_EMBEDDED',
-      clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-      clientVersion: '2.0',
-      key: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
-      userAgent: 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 (KHTML, like Gecko) 94.0.4606.31/7.0 TV Safari/537.36',
-      headers: { 'X-Youtube-Client-Name': '85', 'X-Youtube-Client-Version': '2.0' },
-      extra: {},
-      thirdParty: { embedUrl: 'https://www.youtube.com/' },
-    },
-  ];
-
-  for (const cl of clients) {
-    try {
-      musicLog(`S0(innertube/${cl.name}): requesting player data for ${videoId}...`);
-      const body: any = {
-        videoId,
-        context: {
-          client: {
-            clientName: cl.clientName,
-            clientVersion: cl.clientVersion,
-            hl: 'en',
-            gl: 'US',
-            ...cl.extra,
-          },
-        },
-        contentCheckOk: true,
-        racyCheckOk: true,
-      };
-      if (cl.thirdParty) body.context.thirdParty = cl.thirdParty;
-
-      const controller = new AbortController();
-      const abortTimer = setTimeout(() => controller.abort(), 12000);
-
-      const response = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${cl.key}&prettyPrint=false`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': cl.userAgent,
-          ...cl.headers,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      clearTimeout(abortTimer);
-
-      if (!response.ok) {
-        musicLog(`S0(innertube/${cl.name}): HTTP ${response.status}`);
-        continue;
-      }
-
-      const data: any = await response.json();
-      const status = data.playabilityStatus?.status;
-      if (status !== 'OK') {
-        musicLog(`S0(innertube/${cl.name}): ${status} — ${data.playabilityStatus?.reason || data.playabilityStatus?.messages?.[0] || 'no reason'}`);
-        continue;
-      }
-
-      const formats = [
-        ...(data.streamingData?.adaptiveFormats || []),
-        ...(data.streamingData?.formats || []),
-      ];
-
-      // Prefer audio-only formats, sorted by bitrate
-      const audioFormats = formats
-        .filter((f: any) => f.url && (f.mimeType?.startsWith('audio/') || f.audioQuality))
-        .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-
-      if (audioFormats.length > 0) {
-        const best = audioFormats[0];
-        musicLog(`S0(innertube/${cl.name}): ✅ got audio URL (${best.mimeType}, ${Math.round((best.bitrate || 0) / 1000)}kbps, ${audioFormats.length} formats)`);
-        return best.url;
-      }
-
-      // Check for formats with signatureCipher (can't use directly)
-      const ciphered = formats.filter((f: any) => f.signatureCipher && !f.url);
-      if (ciphered.length > 0) {
-        musicLog(`S0(innertube/${cl.name}): ${ciphered.length} formats with signatureCipher (can't decode), skipping`);
-        continue;
-      }
-
-      musicLog(`S0(innertube/${cl.name}): no usable audio formats in ${formats.length} total formats`);
-    } catch (err: any) {
-      musicLog(`S0(innertube/${cl.name}): ${err.name === 'AbortError' ? 'timeout 12s' : err.message}`);
-    }
+async function streamFromSoundCloud(songTitle: string): Promise<{ resource: any; scUrl: string; scTitle: string }> {
+  musicLog(`SC: searching SoundCloud for "${songTitle}"...`);
+  const results = await withTimeout(
+    play.search(songTitle, { limit: 3, source: { soundcloud: 'tracks' } }),
+    12000, 'sc-search'
+  );
+  
+  if (!results || results.length === 0) {
+    throw new Error('Не найдено на SoundCloud');
   }
+  
+  const track = results[0];
+  const scTitle = track.name || track.title || songTitle;
+  const scUrl = track.url;
+  musicLog(`SC: found "${scTitle}" (${scUrl})`);
+  
+  // Stream via play-dl
+  const stream = await withTimeout(
+    play.stream(scUrl),
+    20000, 'sc-stream'
+  );
+  
+  const resource = createAudioResource(stream.stream, {
+    inputType: stream.type,
+    inlineVolume: true,
+  });
+  
+  musicLog(`SC: ✅ stream ready for "${scTitle}"`);
+  return { resource, scUrl, scTitle };
+}
 
-  throw new Error('Innertube: все клиенты не сработали');
+// ========= Spotify URL Resolution =========
+/** Extract song title from a Spotify URL via oEmbed API */
+async function resolveSpotifyTitle(spotifyUrl: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const data: any = await resp.json();
+    // oEmbed returns: { title: "Song Name - Artist" }
+    return data.title || null;
+  } catch {
+    return null;
+  }
 }
 
 async function playSong(guildId: string): Promise<{ success: boolean; error?: string }> {
@@ -391,52 +331,51 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
       let resource;
       let strategyUsed = '';
       
-      // Strategy 0: Direct Innertube API (fast, different fingerprint from yt-dlp)
-      // Only works if we have a video ID and get a direct URL (no cipher)
-      if (!resource && videoId) {
-        setLoadingStatus(guildId, 'streaming', 58 + attempt * 3, 'Получение аудио (innertube)...', { songTitle: song.title });
-        try {
-          const audioUrl = await getInnertubeAudioUrl(videoId);
-          musicLog(`S0: innertube got URL (${audioUrl.length} chars), starting ffmpeg...`);
-          setLoadingStatus(guildId, 'streaming', 70, 'Запуск аудиопотока...', { songTitle: song.title });
-          resource = await streamViaFfmpeg(audioUrl);
-          strategyUsed = 'innertube + ffmpeg';
-          musicLog(`✅ S0 OK (innertube)`);
-        } catch (s0Err: any) {
-          const msg = `S0(innertube): ${s0Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
-        }
-      }
-      
-      // Strategy 1: yt-dlp --get-url → ffmpeg (single format, no custom player_client)
+      // Strategy 0: yt-dlp --get-url → ffmpeg (with web_creator client)
       if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 65 + attempt * 5, 'Получение ссылки (yt-dlp)...', { songTitle: song.title });
+        setLoadingStatus(guildId, 'streaming', 58 + attempt * 5, 'Получение ссылки (yt-dlp)...', { songTitle: song.title });
         try {
-          musicLog(`S1: yt-dlp --get-url fmt=bestaudio/best...`);
+          musicLog(`S0: yt-dlp --get-url fmt=bestaudio/best...`);
           const directUrl = await getYtDlpDirectUrl(song.url, 'bestaudio/best');
-          musicLog(`S1: got URL (${directUrl.length} chars), starting ffmpeg...`);
-          setLoadingStatus(guildId, 'streaming', 78, 'Запуск аудиопотока (ffmpeg)...', { songTitle: song.title });
+          musicLog(`S0: got URL (${directUrl.length} chars), starting ffmpeg...`);
+          setLoadingStatus(guildId, 'streaming', 72, 'Запуск аудиопотока...', { songTitle: song.title });
           resource = await streamViaFfmpeg(directUrl);
           strategyUsed = 'yt-dlp URL + ffmpeg';
-          musicLog(`✅ S1 OK`);
-        } catch (s1Err: any) {
-          const msg = `S1(yt-dlp): ${s1Err.message}`;
+          musicLog(`✅ S0 OK`);
+        } catch (s0Err: any) {
+          const msg = `S0(yt-dlp): ${s0Err.message}`;
           errors.push(msg);
           musicLog(msg);
         }
       }
 
-      // Strategy 2: yt-dlp pipe → ffmpeg
+      // Strategy 1: yt-dlp pipe → ffmpeg
       if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 82, 'Прямой поток (yt-dlp pipe)...', { songTitle: song.title });
+        setLoadingStatus(guildId, 'streaming', 78, 'Прямой поток (yt-dlp pipe)...', { songTitle: song.title });
         try {
-          musicLog('S2: yt-dlp pipe...');
+          musicLog('S1: yt-dlp pipe...');
           resource = await getYtDlpPipeResource(song.url);
           strategyUsed = 'yt-dlp pipe + ffmpeg';
-          musicLog('✅ S2 OK');
+          musicLog('✅ S1 OK');
+        } catch (s1Err: any) {
+          const msg = `S1: ${s1Err.message}`;
+          errors.push(msg);
+          musicLog(msg);
+        }
+      }
+
+      // Strategy 2: SoundCloud fallback — search by song title and stream
+      // SoundCloud doesn't block cloud datacenter IPs like YouTube does
+      if (!resource && song.title && song.title !== 'YouTube видео') {
+        setLoadingStatus(guildId, 'streaming', 85, 'Поиск на SoundCloud...', { songTitle: song.title });
+        try {
+          musicLog(`S2: SoundCloud fallback for "${song.title}"...`);
+          const sc = await streamFromSoundCloud(song.title);
+          resource = sc.resource;
+          strategyUsed = `SoundCloud: ${sc.scTitle}`;
+          musicLog(`✅ S2 OK (SoundCloud: "${sc.scTitle}")`);
         } catch (s2Err: any) {
-          const msg = `S2: ${s2Err.message}`;
+          const msg = `S2(SoundCloud): ${s2Err.message}`;
           errors.push(msg);
           musicLog(msg);
         }
@@ -532,6 +471,7 @@ function getYtDlpDirectUrl(url: string, format: string = 'bestaudio/best'): Prom
       '--no-warnings',
       '--socket-timeout', '15',
       '--force-ipv4',
+      '--extractor-args', 'youtube:player_client=web_creator',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -630,6 +570,7 @@ function getYtDlpPipeResource(url: string): Promise<any> {
       '--no-check-certificates',
       '--force-ipv4',
       '--socket-timeout', '15',
+      '--extractor-args', 'youtube:player_client=web_creator',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -800,7 +741,53 @@ export async function addSong(
     // Check if URL or search query
     const validated = play.yt_validate(cleanedQuery) || play.yt_validate(query);
 
-    if (validated === 'video') {
+    // Handle Spotify URLs — extract track name and search YouTube
+    const isSpotify = /open\.spotify\.com\/(track|album|playlist)\//.test(query);
+    if (isSpotify) {
+      musicLog(`addSong: detected Spotify URL, resolving title...`);
+      const spotifyTitle = await resolveSpotifyTitle(query);
+      if (spotifyTitle) {
+        musicLog(`addSong: Spotify title = "${spotifyTitle}"`);
+        // Search YouTube for the Spotify track
+        const results = await withTimeout(
+          play.search(spotifyTitle, { limit: 1, source: { youtube: 'video' } }),
+          15000, 'spotify-yt-search'
+        );
+        if (results?.length) {
+          const video = results[0];
+          songInfo = {
+            title: video.title || spotifyTitle,
+            url: video.url,
+            duration: formatDuration(video.durationInSec || 0),
+            durationSec: video.durationInSec || 0,
+            thumbnail: video.thumbnails?.[0]?.url,
+            requestedBy,
+          };
+        } else {
+          // YouTube search failed — try SoundCloud directly
+          musicLog(`addSong: YouTube search failed for Spotify track, trying SoundCloud...`);
+          const scResults = await withTimeout(
+            play.search(spotifyTitle, { limit: 1, source: { soundcloud: 'tracks' } }),
+            12000, 'spotify-sc-search'
+          );
+          if (scResults?.length) {
+            const track = scResults[0];
+            songInfo = {
+              title: track.name || track.title || spotifyTitle,
+              url: track.url,
+              duration: formatDuration(track.durationInSec || 0),
+              durationSec: track.durationInSec || 0,
+              thumbnail: track.thumbnail || undefined,
+              requestedBy,
+            };
+          } else {
+            return { success: false, message: `❌ Не удалось найти "${spotifyTitle}" на YouTube и SoundCloud` };
+          }
+        }
+      } else {
+        return { success: false, message: '❌ Не удалось получить информацию о треке из Spotify' };
+      }
+    } else if (validated === 'video') {
       // Direct YouTube URL — use youtube-sr for metadata (play.video_info times out on cloud)
       try {
         const YouTube = await import('youtube-sr');
