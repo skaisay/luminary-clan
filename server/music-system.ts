@@ -447,17 +447,17 @@ async function connectToVoice(guild: Guild, voiceChannel: VoiceBasedChannel): Pr
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: true,
+    debug: true,
   });
 
   // Log all state transitions for debugging
   connection.on('stateChange', (oldState: any, newState: any) => {
     console.log(`[Voice] State: ${oldState.status} → ${newState.status}`);
-    // ===== UDP keepAlive workaround for cloud hosting =====
-    const networking = Reflect.get(newState, 'networking');
-    networking?.on?.('stateChange', (_: any, ns: any) => {
-      const udp = Reflect.get(ns, 'udp');
-      if (udp) clearInterval(udp.keepAliveInterval);
-    });
+    // NOTE: Removed UDP keepAlive workaround — it was killing connections prematurely
+  });
+
+  connection.on('debug', (msg: string) => {
+    console.log(`[Voice Debug] ${msg}`);
   });
 
   // Auto-reconnect on disconnect
@@ -1053,13 +1053,19 @@ export async function testAudioEndToEnd(
       guildId: guild.id,
       adapterCreator: wrappedAdapterCreator as any,
       selfDeaf: true,
+      debug: true,
     });
 
-    // Track state changes
+    // Track state changes and debug messages
     const stateLog: string[] = [];
+    const debugLog: string[] = [];
     connection.on('stateChange', (oldState: any, newState: any) => {
       stateLog.push(`${oldState.status}→${newState.status}`);
       console.log(`[AudioTest] Voice state: ${oldState.status} → ${newState.status}`);
+    });
+    connection.on('debug', (msg: string) => {
+      debugLog.push(msg.substring(0, 200));
+      console.log(`[AudioTest Debug] ${msg}`);
     });
     connection.on('error', (err: any) => {
       stateLog.push(`error:${err?.message}`);
@@ -1076,6 +1082,7 @@ export async function testAudioEndToEnd(
       state: connState,
       sendPayloadResult: adapterSendPayloadResult,
       stateTransitions: stateLog,
+      debugMessages: debugLog.slice(0, 20),
     });
     if (connState !== VoiceConnectionStatus.Ready) {
       return { success: false, message: `Voice connection not ready: ${connState}`, steps };
