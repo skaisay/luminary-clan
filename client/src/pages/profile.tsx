@@ -192,7 +192,7 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0">
+      <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] flex flex-col p-0 bg-background/80 backdrop-blur-xl border-white/10">
         <DialogHeader className="px-6 pt-6 pb-2">
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-purple-400" />
@@ -215,7 +215,7 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
 
         {/* Items grid */}
         <ScrollArea className="flex-1 px-6 pb-6 pt-2">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
             {sorted.map(dec => {
               const myOwned = ownedMap.get(dec.id);
               const isOwned = !!myOwned;
@@ -223,9 +223,9 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
               const isSoldOut = dec.maxOwners !== null && dec.maxOwners > 0 && dec.currentOwners >= dec.maxOwners;
 
               return (
-                <div key={dec.id} className={`relative rounded-xl border p-3 transition-all hover:scale-[1.02] ${
+                <div key={dec.id} className={`relative rounded-xl border p-3 transition-colors ${
                   rarityColors[dec.rarity] || "border-border/40"
-                } ${isOwned ? "bg-muted/20" : "bg-background/50 opacity-70"}`}>
+                } ${isOwned ? "bg-white/5 backdrop-blur-sm" : "bg-background/30 backdrop-blur-sm opacity-70"}`}>
                   {/* Emoji / icon */}
                   <div className="text-2xl mb-1">{dec.emoji || typeIcons[dec.type] || "✦"}</div>
 

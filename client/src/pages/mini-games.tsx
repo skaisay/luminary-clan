@@ -846,22 +846,7 @@ function SlotMachine() {
         </Button>
       </div>
 
-      {/* Paytable */}
-      <div className="mt-4 p-3 rounded-xl bg-muted/10 border border-border/30">
-        <p className="text-xs text-muted-foreground mb-2 font-semibold">{isRu ? 'Выплаты (средняя линия):' : 'Payouts (middle row):'}</p>
-        <div className="grid grid-cols-3 gap-1 text-xs">
-          <span>🎰🎰🎰 = x50</span>
-          <span>7️⃣7️⃣7️⃣ = x25</span>
-          <span>💎💎💎 = x15</span>
-          <span>⭐⭐⭐ = x10</span>
-          <span>🔔🔔🔔 = x7</span>
-          <span>🍇🍇🍇 = x5</span>
-          <span>🍊🍊🍊 = x4</span>
-          <span>🍋🍋🍋 = x3</span>
-          <span>🍒🍒🍒 = x2</span>
-        </div>
-        <p className="text-[10px] text-muted-foreground mt-1">{isRu ? '2 совпадения = x0.5 | Диагональ = +x1.5' : '2 match = x0.5 | Diagonal = +x1.5'}</p>
-      </div>
+
     </div>
   );
 }

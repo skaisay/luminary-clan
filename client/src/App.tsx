@@ -61,28 +61,28 @@ function MainRouter() {
   return (
     <Switch>
       <Route path="/login" component={LoginPage} />
-      <Route path="/" component={() => <MaintenanceGate pageId="dashboard"><Dashboard /></MaintenanceGate>} />
-      <Route path="/statistics" component={() => <MaintenanceGate pageId="statistics"><Statistics /></MaintenanceGate>} />
-      <Route path="/leaderboard" component={() => <MaintenanceGate pageId="leaderboard"><Leaderboard /></MaintenanceGate>} />
-      <Route path="/members" component={() => <MaintenanceGate pageId="members"><Members /></MaintenanceGate>} />
-      <Route path="/news" component={() => <MaintenanceGate pageId="news"><NewsPage /></MaintenanceGate>} />
-      <Route path="/shop" component={() => <MaintenanceGate pageId="shop"><Shop /></MaintenanceGate>} />
-      <Route path="/decorations" component={() => <DecorationShop />} />
-      <Route path="/inventory" component={() => <MaintenanceGate pageId="inventory"><Inventory /></MaintenanceGate>} />
-      <Route path="/convert" component={() => <MaintenanceGate pageId="convert"><ConvertPage /></MaintenanceGate>} />
-      <Route path="/requests" component={() => <MaintenanceGate pageId="requests"><RequestsPage /></MaintenanceGate>} />
-      <Route path="/forum" component={() => <MaintenanceGate pageId="forum"><ForumPage /></MaintenanceGate>} />
-      <Route path="/about" component={() => <MaintenanceGate pageId="about"><About /></MaintenanceGate>} />
-      <Route path="/roblox-tracker" component={() => <RobloxTracker />} />
-      <Route path="/music" component={() => <MusicPage />} />
-      <Route path="/achievements" component={() => <MaintenanceGate pageId="achievements"><AchievementsPage /></MaintenanceGate>} />
-      <Route path="/quests" component={() => <MaintenanceGate pageId="quests"><QuestsPage /></MaintenanceGate>} />
-      <Route path="/trading" component={() => <MaintenanceGate pageId="trading"><TradingPage /></MaintenanceGate>} />
-      <Route path="/boosters" component={() => <MaintenanceGate pageId="boosters"><BoostersPage /></MaintenanceGate>} />
-      <Route path="/daily-rewards" component={() => <MaintenanceGate pageId="daily-rewards"><DailyRewardsPage /></MaintenanceGate>} />
-      <Route path="/profile/:discordId?" component={() => <MaintenanceGate pageId="profile"><ProfilePage /></MaintenanceGate>} />
-      <Route path="/mini-games" component={() => <MaintenanceGate pageId="mini-games"><MiniGamesPage /></MaintenanceGate>} />
-      <Route path="/clan-wars" component={() => <MaintenanceGate pageId="clan-wars"><ClanWarsPage /></MaintenanceGate>} />
+      <Route path="/"><MaintenanceGate pageId="dashboard"><Dashboard /></MaintenanceGate></Route>
+      <Route path="/statistics"><MaintenanceGate pageId="statistics"><Statistics /></MaintenanceGate></Route>
+      <Route path="/leaderboard"><MaintenanceGate pageId="leaderboard"><Leaderboard /></MaintenanceGate></Route>
+      <Route path="/members"><MaintenanceGate pageId="members"><Members /></MaintenanceGate></Route>
+      <Route path="/news"><MaintenanceGate pageId="news"><NewsPage /></MaintenanceGate></Route>
+      <Route path="/shop"><MaintenanceGate pageId="shop"><Shop /></MaintenanceGate></Route>
+      <Route path="/decorations"><DecorationShop /></Route>
+      <Route path="/inventory"><MaintenanceGate pageId="inventory"><Inventory /></MaintenanceGate></Route>
+      <Route path="/convert"><MaintenanceGate pageId="convert"><ConvertPage /></MaintenanceGate></Route>
+      <Route path="/requests"><MaintenanceGate pageId="requests"><RequestsPage /></MaintenanceGate></Route>
+      <Route path="/forum"><MaintenanceGate pageId="forum"><ForumPage /></MaintenanceGate></Route>
+      <Route path="/about"><MaintenanceGate pageId="about"><About /></MaintenanceGate></Route>
+      <Route path="/roblox-tracker"><RobloxTracker /></Route>
+      <Route path="/music"><MusicPage /></Route>
+      <Route path="/achievements"><MaintenanceGate pageId="achievements"><AchievementsPage /></MaintenanceGate></Route>
+      <Route path="/quests"><MaintenanceGate pageId="quests"><QuestsPage /></MaintenanceGate></Route>
+      <Route path="/trading"><MaintenanceGate pageId="trading"><TradingPage /></MaintenanceGate></Route>
+      <Route path="/boosters"><MaintenanceGate pageId="boosters"><BoostersPage /></MaintenanceGate></Route>
+      <Route path="/daily-rewards"><MaintenanceGate pageId="daily-rewards"><DailyRewardsPage /></MaintenanceGate></Route>
+      <Route path="/profile/:discordId?"><MaintenanceGate pageId="profile"><ProfilePage /></MaintenanceGate></Route>
+      <Route path="/mini-games"><MaintenanceGate pageId="mini-games"><MiniGamesPage /></MaintenanceGate></Route>
+      <Route path="/clan-wars"><MaintenanceGate pageId="clan-wars"><ClanWarsPage /></MaintenanceGate></Route>
       <Route component={NotFound} />
     </Switch>
   );
@@ -118,7 +118,7 @@ function VideoPlatformRouter() {
         <Route path="/video-platform/admin" component={VideoPlatformAdmin} />
         {/* Короткий URL для видео */}
         <Route path="/v/:id" component={VideoWatch} />
-        <Route component={() => <VideoPlatformHome />} />
+        <Route><VideoPlatformHome /></Route>
       </Switch>
     </VideoPlatformLayout>
   );

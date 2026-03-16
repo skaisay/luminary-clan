@@ -59,22 +59,10 @@ export async function ensureProductionData() {
 
     console.log("[Production] Initial data check complete");
 
-    // Seed default profile decorations
+    // Seed default profile decorations (additive — only inserts missing ones)
     const existingDecorations = await db.select().from(profileDecorations);
-    if (existingDecorations.length < 50) {
-      // Delete old seed data and re-insert (only if nobody purchased yet)
-      if (existingDecorations.length > 0 && existingDecorations.length < 50) {
-        const { memberDecorations: mdTable } = await import("@shared/schema");
-        const ownedCount = await db.select().from(mdTable).limit(1);
-        if (ownedCount.length === 0) {
-          // No purchases yet — safe to reset decorations
-          await db.delete(profileDecorations);
-          console.log("[Production] Cleared old decorations for re-seed...");
-        } else {
-          console.log("[Production] Decorations already purchased, skipping re-seed.");
-          return;
-        }
-      }
+    const existingNames = new Set(existingDecorations.map(d => d.name));
+    {
       console.log("[Production] Creating default profile decorations...");
       const defaultDecorations = [
         // ==================== BADGES (40 items) ====================
@@ -210,14 +198,20 @@ export async function ensureProductionData() {
         { name: "Вселенная", description: "Бескрайний космос у тебя на профиле", type: "banner", emoji: "🪐", cssEffect: "linear-gradient(135deg, #0f0520, #1e1b4b, #312e81, #1e1b4b, #0f0520); background-size: 200%;", color: "#312e81", rarity: "legendary", price: 60000, category: "limited", maxOwners: 7 },
       ];
 
-      for (const d of defaultDecorations) {
-        try {
-          await db.insert(profileDecorations).values(d as any);
-        } catch (e) {
-          console.error(`[Production] Error inserting decoration ${d.name}:`, e);
+      const toInsert = defaultDecorations.filter(d => !existingNames.has(d.name));
+      if (toInsert.length > 0) {
+        console.log(`[Production] Inserting ${toInsert.length} new decorations...`);
+        for (const d of toInsert) {
+          try {
+            await db.insert(profileDecorations).values(d as any);
+          } catch (e) {
+            console.error(`[Production] Error inserting decoration ${d.name}:`, e);
+          }
         }
+        console.log(`[Production] Done. Total decorations: ${existingDecorations.length + toInsert.length}`);
+      } else {
+        console.log(`[Production] All ${existingDecorations.length} decorations already exist.`);
       }
-      console.log(`[Production] Created ${defaultDecorations.length} default decorations`);
     }
   } catch (error) {
     console.error("[Production] Error ensuring initial data:", error);
