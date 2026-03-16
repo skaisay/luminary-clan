@@ -4635,8 +4635,8 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       }
       res.json({ success: true });
     } catch (e: any) {
-      console.error('profile-custom POST error:', e.message);
-      res.status(500).json({ error: 'Failed to save' });
+      console.error('profile-custom POST error:', e.message, e.stack);
+      res.status(500).json({ error: 'Failed to save', detail: e.message });
     }
   });
 

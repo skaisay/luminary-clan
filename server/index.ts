@@ -89,6 +89,73 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Ensure new tables exist (drizzle-kit push may fail silently during build)
+  try {
+    const { pool: dbPool } = await import("./db");
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS profile_decorations (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'badge',
+        emoji TEXT,
+        image_url TEXT,
+        css_effect TEXT,
+        color TEXT,
+        rarity TEXT NOT NULL DEFAULT 'common',
+        price INTEGER NOT NULL DEFAULT 100,
+        category TEXT NOT NULL DEFAULT 'general',
+        is_available BOOLEAN NOT NULL DEFAULT true,
+        max_owners INTEGER DEFAULT -1,
+        current_owners INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS member_decorations (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        member_id VARCHAR NOT NULL,
+        decoration_id VARCHAR NOT NULL,
+        discord_id TEXT NOT NULL,
+        is_equipped BOOLEAN NOT NULL DEFAULT false,
+        acquired_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS game_history (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        discord_id TEXT NOT NULL,
+        game TEXT NOT NULL,
+        bet INTEGER NOT NULL,
+        reward INTEGER NOT NULL,
+        result TEXT NOT NULL,
+        played_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS profile_customs (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        discord_id TEXT NOT NULL UNIQUE,
+        banner_color_1 TEXT DEFAULT '',
+        banner_color_2 TEXT DEFAULT '',
+        card_color TEXT DEFAULT '',
+        bio TEXT DEFAULT '',
+        custom_avatar TEXT DEFAULT '',
+        banner_image TEXT DEFAULT '',
+        hidden_sections JSONB DEFAULT '[]',
+        roblox_username TEXT DEFAULT '',
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS ad_spots (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        discord_id TEXT NOT NULL,
+        roblox_username TEXT NOT NULL,
+        roblox_avatar_url TEXT,
+        paid_amount INTEGER NOT NULL DEFAULT 500000,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `);
+    console.log('[DB] Ensured all custom tables exist');
+  } catch (e: any) {
+    console.error('[DB] Failed to ensure tables:', e.message);
+  }
+
   if (process.env.NODE_ENV === "production") {
     const { ensureProductionData } = await import("./production-seed");
     await ensureProductionData();
