@@ -53,6 +53,7 @@ interface ChatMsg {
   text: string;
   navPath?: string;
   loading?: boolean;
+  retryable?: string; // original user text to retry
 }
 
 // ==================== ACTION EXECUTOR ====================
@@ -456,20 +457,33 @@ export function AiAssistant() {
         role: m.role, content: m.text,
       }));
 
-      const resp = await fetch('/api/ai-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          messages: history,
-          language,
-          currentPage: pageName(location),
-        }),
-      });
+      const doFetch = async () => {
+        const resp = await fetch('/api/ai-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            messages: history,
+            language,
+            currentPage: pageName(location),
+          }),
+        });
+        if (!resp.ok) throw new Error('fail');
+        return await resp.json();
+      };
 
-      if (!resp.ok) throw new Error('fail');
-      const data = await resp.json();
-      const { clean, steps, firstNav } = parseSteps(data.reply || txt.error);
+      // Try once, auto-retry once on failure
+      let data: any;
+      try {
+        data = await doFetch();
+      } catch {
+        await new Promise(r => setTimeout(r, 1500));
+        data = await doFetch();
+      }
+
+      const reply = data.reply || txt.error;
+      const isFallback = data.provider === 'fallback';
+      const { clean, steps, firstNav } = parseSteps(reply);
 
       // Start multi-step execution
       if (steps.length > 0) {
@@ -480,11 +494,11 @@ export function AiAssistant() {
       }
 
       setMsgs(prev => prev.map(m =>
-        m.id === placeholder.id ? { ...m, text: clean, loading: false, navPath: firstNav } : m
+        m.id === placeholder.id ? { ...m, text: clean, loading: false, navPath: firstNav, retryable: isFallback ? content : undefined } : m
       ));
     } catch {
       setMsgs(prev => prev.map(m =>
-        m.id === placeholder.id ? { ...m, text: txt.error, loading: false } : m
+        m.id === placeholder.id ? { ...m, text: txt.error, loading: false, retryable: content } : m
       ));
     }
     setLoading(false);
@@ -663,6 +677,17 @@ export function AiAssistant() {
                           >
                             <ArrowUpRight className="w-3 h-3" />
                             {pageName(msg.navPath)}
+                          </button>
+                        )}
+                        {msg.retryable && !loading && (
+                          <button
+                            onClick={() => {
+                              setMsgs(prev => prev.filter(m => m.id !== msg.id));
+                              send(msg.retryable);
+                            }}
+                            className="mt-1.5 flex items-center gap-1 text-[11px] text-amber-300 hover:text-amber-200 transition-colors"
+                          >
+                            🔄 {isRu ? 'Повторить' : 'Retry'}
                           </button>
                         )}
                       </>

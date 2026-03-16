@@ -192,119 +192,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
         shopInfo = 'данные недоступны';
       }
 
-      const pageContext = currentPage ? `Пользователь на: ${currentPage}.` : '';
+      const pageContext = currentPage ? `Юзер на: ${currentPage}.` : '';
 
-      const siteKnowledgeRu = `Ты — Luminary AI, ИИ-ассистент сайта клана Luminary. ${pageContext}
-РАЗДЕЛЫ: / (Главная), /statistics, /leaderboard, /members (${memberCount}), /news, /about, /shop, /inventory, /convert, /requests, /forum, /roblox-tracker, /music, /achievements, /quests, /trading, /boosters, /daily-rewards, /profile, /mini-games, /clan-wars, /admin/login, /admin
+      // Build page-specific field info (only include relevant pages to reduce tokens)
+      const cp = (currentPage || '').toLowerCase();
+      function getFieldsRu(): string {
+        let f = '';
+        // Always include admin fields if on admin, plus a few common pages
+        if (cp.includes('admin')) {
+          f += `/admin: tab-settings, tab-members, tab-shop, tab-news, tab-discord, tab-convert, tab-pages, tab-requests, tab-forum, tab-stats, tab-monitoring, tab-transactions, tab-bans, tab-decorations
+tab-shop: создать: button-create-shop-item → input-item-name, input-item-description, input-item-price, input-item-stock, select-item-type, select-item-rarity → button-submit-shop-item. Ред: edit-Имя → поля → измени → button-submit-shop-item. Удалить: delete-Имя.
+tab-members: button-add-member → input-new-username, input-new-discord-id, input-new-role. Ред: edit-Имя → save-Имя. Удалить: delete-Имя.
+tab-settings: input-clan-name, input-clan-tag, textarea-description, input-hero-image, input-logo, input-splash-image, input-primary-color, input-accent-color, select-seasonal-theme → button-save-settings\n`;
+        }
+        if (cp.includes('trading') || !cp.includes('admin')) f += `trading: new-offer (ПЕРВЫМ!) → target-user, offer-coins, request-coins, trade-message, send-trade\n`;
+        if (cp.includes('profile') || !cp.includes('admin')) f += `profile: profile-edit → profile-bio, profile-avatar, profile-banner, profile-section-* → profile-save\n`;
+        if (cp.includes('music') || !cp.includes('admin')) f += `music: music-search, music-play\n`;
+        if (cp.includes('roblox') || !cp.includes('admin')) f += `roblox-tracker: roblox-search, roblox-find\n`;
+        if (cp.includes('convert')) f += `convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion\n`;
+        if (cp.includes('forum')) f += `forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic\n`;
+        if (cp.includes('request')) f += `requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request\n`;
+        if (!cp.includes('admin')) f += `admin/login: input-username, input-password, button-login\n`;
+        return f.trim();
+      }
+      function getFieldsEn(): string {
+        let f = '';
+        if (cp.includes('admin')) {
+          f += `/admin: tab-settings, tab-members, tab-shop, tab-news, tab-discord, tab-convert, tab-pages, tab-requests, tab-forum, tab-stats, tab-monitoring, tab-transactions, tab-bans, tab-decorations
+tab-shop: create: button-create-shop-item → input-item-name, input-item-description, input-item-price, input-item-stock, select-item-type, select-item-rarity → button-submit-shop-item. Edit: edit-Name → fields → change → button-submit-shop-item. Delete: delete-Name.
+tab-members: button-add-member → input-new-username, input-new-discord-id, input-new-role. Edit: edit-Name → save-Name. Delete: delete-Name.
+tab-settings: input-clan-name, input-clan-tag, textarea-description, input-hero-image, input-logo, input-splash-image, input-primary-color, input-accent-color, select-seasonal-theme → button-save-settings\n`;
+        }
+        if (cp.includes('trading') || !cp.includes('admin')) f += `trading: new-offer (FIRST!) → target-user, offer-coins, request-coins, trade-message, send-trade\n`;
+        if (cp.includes('profile') || !cp.includes('admin')) f += `profile: profile-edit → profile-bio, profile-avatar, profile-banner, profile-section-* → profile-save\n`;
+        if (cp.includes('music') || !cp.includes('admin')) f += `music: music-search, music-play\n`;
+        if (cp.includes('roblox') || !cp.includes('admin')) f += `roblox-tracker: roblox-search, roblox-find\n`;
+        if (cp.includes('convert')) f += `convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion\n`;
+        if (cp.includes('forum')) f += `forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic\n`;
+        if (cp.includes('request')) f += `requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request\n`;
+        if (!cp.includes('admin')) f += `admin/login: input-username, input-password, button-login\n`;
+        return f.trim();
+      }
 
-ПОЛЯ И КНОПКИ:
-/convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion
-/requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request
-/forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic
-/roblox-tracker: roblox-search, roblox-find
-/music: music-search, music-play
-/trading: new-offer (ПЕРВЫМ!) → target-user, offer-coins, request-coins, trade-message, send-trade
-/profile: profile-edit → profile-bio, profile-avatar, profile-banner, profile-section-* (чекбоксы) → profile-save
-/admin/login: input-username, input-password, button-login
-/admin: tab-settings, tab-members, tab-shop, tab-news, tab-discord, tab-convert, tab-pages, tab-requests, tab-forum, tab-stats, tab-monitoring, tab-transactions, tab-bans, tab-decorations
-/admin tab-shop: создать: button-create-shop-item → input-item-name, input-item-description, input-item-price, input-item-stock, select-item-type, select-item-rarity → button-submit-shop-item. Редактировать: edit-ИмяТовара (кнопка-карандаш рядом с товаром) → поля заполняются → измени нужное → button-submit-shop-item. Удалить: delete-ИмяТовара.
-/admin tab-members: button-add-member → input-new-username, input-new-discord-id, input-new-role. Редактировать: edit-ИмяУчастника → поля-в-строке → save-ИмяУчастника. Удалить: delete-ИмяУчастника.
-/admin tab-settings: input-clan-name, input-clan-tag, textarea-description, input-hero-image, input-logo, input-splash-image, input-discord-server, input-discord-token, input-primary-color, input-accent-color, select-seasonal-theme → button-save-settings
-
-ТОП: ${topMembersInfo || 'нет данных'}
+      const siteKnowledgeRu = `Luminary AI — ассистент клана. ${pageContext}
+Разделы: /, /statistics, /leaderboard, /members(${memberCount}), /news, /about, /shop, /inventory, /convert, /requests, /forum, /roblox-tracker, /music, /achievements, /quests, /trading, /boosters, /daily-rewards, /profile, /mini-games, /clan-wars, /admin/login, /admin
+${getFieldsRu()}
+ТОП: ${topMembersInfo || 'нет'}
 ТОВАРЫ: ${shopInfo}
-ВАЛЮТА: LumiCoins (LC)
+Теги: [NAV:/путь], [DO:fill|поле|знач], [DO:click|кнопка], [DO:wait|_|мс], [STEP:N]
+Если юзер УЖЕ на странице — БЕЗ [NAV:]. [DO:wait|_|500] после смены таба/клика edit.
+Примеры: "100 LC Test123"→"💰[STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
+"Создай Корона 500"→"👑[STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Корона][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
+"Измени цену Корона→200"(на /admin)→"✏️[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Корона][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
+"Сделай stock=1 для Корона"→"[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Корона][DO:wait|_|500][DO:fill|input-item-stock|1][DO:click|button-submit-shop-item]"
+Кратко(1-2 предл), эмодзи, по-русски. Разные формулировки="измени/поставь/сделай"→edit→fill→submit. Придумывай красивые названия если просят. input-item-stock=сколько можно купить(1=один человек,-1=бесконечно).`;
 
-ТЕГИ: [NAV:/путь] навигация, [DO:fill|поле|значение] заполнить, [DO:click|кнопка] нажать, [DO:wait|_|мс] ждать, [STEP:N] многошаг
-
-ВАЖНО: Если пользователь УЖЕ на нужной странице — НЕ добавляй [NAV:], сразу [DO:]. Пример: пользователь на /admin и просит изменить товар → не нужен [NAV:/admin], сразу [DO:click|tab-shop].
-
-ПРИМЕРЫ:
-- "Отправь 100 LC Test123": "💰 [STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
-- "Найди Steve в Roblox": "🔍 [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find]"
-- "Включи Imagine Dragons": "🎵 [STEP:1][NAV:/music][DO:fill|music-search|Imagine Dragons][DO:click|music-play]"
-- "Войди в админку admin/12345": "🔐 [STEP:1][NAV:/admin/login][DO:fill|input-username|admin][DO:fill|input-password|12345][DO:click|button-login]"
-- "Создай предмет Корона за 500": "👑 [STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Корона][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
-- "Измени цену Корона на 200" (уже в админке): "✏️ [STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Корона][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
-- "Измени цену роли Корона на 200" (не в админке): "✏️ [STEP:1][NAV:/admin][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Корона][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
-- "Удали участника TestUser": "[STEP:1][NAV:/admin][DO:click|tab-members][DO:wait|_|500][DO:click|delete-TestUser]"
-- "Поменяй имя клана на NewName": "[STEP:1][NAV:/admin][DO:click|tab-settings][DO:fill|input-clan-name|NewName][DO:click|button-save-settings]"
-- "Кто самый активный?" — используй ТОП из контекста, назови имя.
-
-ПРАВИЛА:
-- Отвечай кратко (1-3 предложения), дружелюбно, с эмодзи, по-русски.
-- Действия = [STEP:N][NAV:][DO:]. Каждая ДРУГАЯ страница = новый STEP.
-- Если юзер уже на нужной странице — [STEP:1][DO:...] БЕЗ [NAV:].
-- Перед редактированием товара/участника используй [DO:wait|_|500] после переключения таба и после клика edit.
-- Пользователь может описывать действия по-разному: "измени цену", "поставь цену", "сделай стоимость", "редактируй роль" — всё это = click edit → fill поле → submit.
-- Магазин — только РЕАЛЬНЫЕ товары из списка выше.`;
-
-      const siteKnowledgeEn = `You are Luminary AI, assistant for the Luminary clan website. ${pageContext}
-PAGES: / (Dashboard), /statistics, /leaderboard, /members (${memberCount}), /news, /about, /shop, /inventory, /convert, /requests, /forum, /roblox-tracker, /music, /achievements, /quests, /trading, /boosters, /daily-rewards, /profile, /mini-games, /clan-wars, /admin/login, /admin
-
-FIELDS & BUTTONS:
-/convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion
-/requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request
-/forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic
-/roblox-tracker: roblox-search, roblox-find
-/music: music-search, music-play
-/trading: new-offer (FIRST!) → target-user, offer-coins, request-coins, trade-message, send-trade
-/profile: profile-edit → profile-bio, profile-avatar, profile-banner, profile-section-* (checkboxes) → profile-save
-/admin/login: input-username, input-password, button-login
-/admin: tab-settings, tab-members, tab-shop, tab-news, tab-discord, tab-convert, tab-pages, tab-requests, tab-forum, tab-stats, tab-monitoring, tab-transactions, tab-bans, tab-decorations
-/admin tab-shop: create: button-create-shop-item → input-item-name, input-item-description, input-item-price, input-item-stock, select-item-type, select-item-rarity → button-submit-shop-item. Edit: edit-ItemName (pencil button next to item) → fields fill → change needed field → button-submit-shop-item. Delete: delete-ItemName.
-/admin tab-members: button-add-member → input-new-username, input-new-discord-id, input-new-role. Edit: edit-Username → inline fields → save-Username. Delete: delete-Username.
-/admin tab-settings: input-clan-name, input-clan-tag, textarea-description, input-hero-image, input-logo, input-splash-image, input-discord-server, input-discord-token, input-primary-color, input-accent-color, select-seasonal-theme → button-save-settings
-
-TOP: ${topMembersInfo || 'no data'}
+      const siteKnowledgeEn = `Luminary AI — clan assistant. ${pageContext}
+Pages: /, /statistics, /leaderboard, /members(${memberCount}), /news, /about, /shop, /inventory, /convert, /requests, /forum, /roblox-tracker, /music, /achievements, /quests, /trading, /boosters, /daily-rewards, /profile, /mini-games, /clan-wars, /admin/login, /admin
+${getFieldsEn()}
+TOP: ${topMembersInfo || 'none'}
 SHOP: ${shopInfo}
-CURRENCY: LumiCoins (LC)
-
-TAGS: [NAV:/path] navigate, [DO:fill|field|value] fill, [DO:click|button] click, [DO:wait|_|ms] wait, [STEP:N] multi-step
-
-IMPORTANT: If user is ALREADY on the needed page — DON'T add [NAV:], just [DO:]. Example: user on /admin and asks to edit item → no [NAV:/admin], just [DO:click|tab-shop].
-
-EXAMPLES:
-- "Send 100 LC to Test123": "💰 [STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
-- "Find Steve on Roblox": "🔍 [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find]"
-- "Login admin admin/12345": "🔐 [STEP:1][NAV:/admin/login][DO:fill|input-username|admin][DO:fill|input-password|12345][DO:click|button-login]"
-- "Create item Crown 500LC": "👑 [STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Crown][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
-- "Change Crown price to 200" (already on admin): "✏️ [STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Crown][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
-- "Delete member TestUser": "[STEP:1][NAV:/admin][DO:click|tab-members][DO:wait|_|500][DO:click|delete-TestUser]"
-- "Change clan name to NewName": "[STEP:1][NAV:/admin][DO:click|tab-settings][DO:fill|input-clan-name|NewName][DO:click|button-save-settings]"
-- "Who is most active?" — use TOP data, name them.
-
-RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][NAV:][DO:]. Different page = new STEP. If user already on page — [STEP:1][DO:...] WITHOUT [NAV:]. Use [DO:wait|_|500] after tab switch and after edit click. User may phrase actions differently: "change price", "set price", "edit role", "make it cost" — all = click edit → fill field → submit. Shop = REAL items only.`;
+Tags: [NAV:/path], [DO:fill|field|val], [DO:click|btn], [DO:wait|_|ms], [STEP:N]
+If user ALREADY on page — NO [NAV:]. [DO:wait|_|500] after tab switch/edit click.
+Examples: "100 LC Test123"→"💰[STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
+"Create Crown 500"→"👑[STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Crown][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
+"Change Crown price→200"(on /admin)→"✏️[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Crown][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
+"Set stock=1 for Crown"→"[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Crown][DO:wait|_|500][DO:fill|input-item-stock|1][DO:click|button-submit-shop-item]"
+Concise(1-2 sent), emojis, English. Various phrasings="change/set/make"→edit→fill→submit. Invent nice names if asked. input-item-stock=how many can buy(1=one person,-1=unlimited).`;
 
       const systemPrompt = language === 'ru' ? siteKnowledgeRu : siteKnowledgeEn;
 
       // Limit history to keep token count manageable for free providers
-      const recentMessages = messages.slice(-6);
+      const recentMessages = messages.slice(-4);
       const chatMessages = [
         { role: 'system', content: systemPrompt },
         ...recentMessages,
       ];
       const lastUserMsg = recentMessages.filter((m: any) => m.role === 'user').pop()?.content || '';
 
-      // Helper: try a provider with timeout + retry
-      async function tryProvider(name: string, fn: () => Promise<string | null>): Promise<string | null> {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const result = await fn();
-            if (result && result.length > 3 && !result.includes('<!DOCTYPE')) {
-              console.log(`[AI] ${name} success (attempt ${attempt + 1})`);
-              return result;
-            }
-          } catch (e: any) {
-            console.log(`[AI] ${name} attempt ${attempt + 1} failed:`, e.message);
+      // Helper: try a provider once (no retries = faster fallthrough)
+      async function tryProvider(name: string, timeoutMs: number, fn: () => Promise<string | null>): Promise<string | null> {
+        try {
+          const result = await fn();
+          if (result && result.length > 3 && !result.includes('<!DOCTYPE')) {
+            console.log(`[AI] ${name} success`);
+            return result;
           }
-          if (attempt === 0) await new Promise(r => setTimeout(r, 500)); // Brief pause before retry
+        } catch (e: any) {
+          console.log(`[AI] ${name} failed:`, e.message?.substring(0, 80));
         }
         return null;
       }
 
       // Provider 1: Pollinations OpenAI-compatible (most reliable)
-      let reply = await tryProvider('Pollinations-OpenAI', async () => {
+      let reply = await tryProvider('Pollinations-OpenAI', 18000, async () => {
         const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -314,7 +295,7 @@ RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][
             max_tokens: 800,
             temperature: 0.7,
           }),
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(18000),
         });
         if (!resp.ok) return null;
         const data = await resp.json();
@@ -323,7 +304,7 @@ RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][
       if (reply) return res.json({ reply, provider: 'pollinations' });
 
       // Provider 2: Pollinations with different model
-      reply = await tryProvider('Pollinations-Mistral', async () => {
+      reply = await tryProvider('Pollinations-Mistral', 15000, async () => {
         const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -333,7 +314,7 @@ RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][
             max_tokens: 800,
             temperature: 0.7,
           }),
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(15000),
         });
         if (!resp.ok) return null;
         const data = await resp.json();
@@ -342,7 +323,7 @@ RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][
       if (reply) return res.json({ reply, provider: 'pollinations-mistral' });
 
       // Provider 3: Blackbox AI
-      reply = await tryProvider('Blackbox', async () => {
+      reply = await tryProvider('Blackbox', 12000, async () => {
         const resp = await fetch('https://api.blackbox.ai/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -354,7 +335,7 @@ RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][
             model: 'gpt-4o-mini',
             max_tokens: 800,
           }),
-          signal: AbortSignal.timeout(25000),
+          signal: AbortSignal.timeout(12000),
         });
         if (!resp.ok) return null;
         const text = await resp.text();
@@ -363,12 +344,12 @@ RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][
       if (reply) return res.json({ reply, provider: 'blackbox' });
 
       // Provider 4: Pollinations simple text (compact prompt for URL length)
-      reply = await tryProvider('Pollinations-Text', async () => {
+      reply = await tryProvider('Pollinations-Text', 12000, async () => {
         // Use compact prompt to avoid URL length issues
         const compactPrompt = `You are Luminary AI for a clan site. Use [NAV:/path], [DO:fill|field|val], [DO:click|btn], [STEP:N] for actions. Reply ${language === 'ru' ? 'in Russian' : 'in English'}, concise, with emojis.`;
         const seed = Math.floor(Math.random() * 100000);
         const resp = await fetch(`https://text.pollinations.ai/${encodeURIComponent(compactPrompt + '\n\nUser: ' + lastUserMsg + '\nAssistant:')}?seed=${seed}&model=openai`, {
-          signal: AbortSignal.timeout(25000),
+          signal: AbortSignal.timeout(12000),
         });
         if (!resp.ok) return null;
         const text = await resp.text();
@@ -377,7 +358,7 @@ RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][
       if (reply) return res.json({ reply, provider: 'pollinations-text' });
 
       // Provider 5: HuggingFace Zephyr (last resort)
-      reply = await tryProvider('HuggingFace', async () => {
+      reply = await tryProvider('HuggingFace', 15000, async () => {
         const resp = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -385,7 +366,7 @@ RULES: Reply concise (1-3 sentences), friendly, with emojis. Actions = [STEP:N][
             inputs: `<|system|>\n${systemPrompt}</s>\n<|user|>\n${lastUserMsg}</s>\n<|assistant|>\n`,
             parameters: { max_new_tokens: 400, temperature: 0.7 },
           }),
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(15000),
         });
         if (!resp.ok) return null;
         const data = await resp.json();
