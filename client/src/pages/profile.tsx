@@ -193,6 +193,8 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
       if (data.newBalance !== undefined) updateBalance(data.newBalance);
       queryClient.invalidateQueries({ queryKey: ["/api/decorations/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/decorations"] });
+      // Refresh profile balance too
+      queryClient.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith('/api/profile/') });
       toast({ title: isRu ? "Куплено!" : "Purchased!", description: data.message });
     },
     onError: (err: any) => {
@@ -211,10 +213,11 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
       setEquippingId(null);
       queryClient.invalidateQueries({ queryKey: ["/api/decorations/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/decorations/all-equipped"] });
+      toast({ title: isRu ? "✅ Готово!" : "✅ Done!" });
     },
-    onError: () => {
+    onError: (err: any) => {
       setEquippingId(null);
-      toast({ title: isRu ? "Ошибка" : "Error", variant: "destructive" });
+      toast({ title: isRu ? "Ошибка" : "Error", description: err?.message || "Failed", variant: "destructive" });
     },
   });
 
@@ -537,6 +540,8 @@ export default function ProfilePage() {
   const { data: profile, isLoading: loadingProfile } = useQuery<MemberProfile>({
     queryKey: [`/api/profile/${targetDiscordId}`],
     enabled: !!targetDiscordId,
+    staleTime: 10_000,
+    refetchOnMount: 'always',
   });
 
   const { data: achievements, isLoading: loadingAchievements } = useQuery<ProfileAchievement[]>({

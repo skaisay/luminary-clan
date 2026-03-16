@@ -47,7 +47,7 @@ export const clanMembers = pgTable("clan_members", {
   kills: integer("kills").default(0),
   deaths: integer("deaths").default(0),
   assists: integer("assists").default(0),
-  lumiCoins: integer("lumi_coins").default(0),
+  lumiCoins: bigint("lumi_coins", { mode: "number" }).default(0),
   experience: integer("experience").default(0).notNull(),
   level: integer("level").default(1).notNull(),
   equippedTitle: text("equipped_title"),

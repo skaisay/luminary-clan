@@ -2876,41 +2876,52 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   // PLAYER: Мои декорации (с информацией о декорации)
   app.get("/api/decorations/my", requireDiscordAuth, async (req, res) => {
     try {
+      const { db } = await import("./db");
+      const { eq, inArray } = await import("drizzle-orm");
+      const { clanMembers } = await import("@shared/schema");
       const discordId = (req as any).user?.discordId;
       if (!discordId) return res.status(401).json({ error: "Не авторизован" });
 
-      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
-      if (member.length === 0) return res.json([]);
+      // Query member decorations directly by discordId (no join)
+      const myDecs = await db.select().from(memberDecorations)
+        .where(eq(memberDecorations.discordId, discordId));
 
-      const rows = await db.select()
-        .from(memberDecorations)
-        .innerJoin(profileDecorations, eq(memberDecorations.decorationId, profileDecorations.id))
-        .where(eq(memberDecorations.memberId, member[0].id));
+      if (myDecs.length === 0) return res.json([]);
 
-      // Transform Drizzle join result into the shape client expects
-      const results = rows.map(r => ({
-        memberDecorationId: r.member_decorations.id,
-        decorationId: r.member_decorations.decorationId,
-        isEquipped: r.member_decorations.isEquipped,
-        decoration: {
-          id: r.profile_decorations.id,
-          name: r.profile_decorations.name,
-          description: r.profile_decorations.description,
-          type: r.profile_decorations.type,
-          emoji: r.profile_decorations.emoji,
-          imageUrl: r.profile_decorations.imageUrl,
-          cssEffect: r.profile_decorations.cssEffect,
-          color: r.profile_decorations.color,
-          rarity: r.profile_decorations.rarity,
-          price: r.profile_decorations.price,
-          category: r.profile_decorations.category,
-          maxOwners: r.profile_decorations.maxOwners,
-          currentOwners: r.profile_decorations.currentOwners,
-        },
-      }));
+      // Batch-fetch all decoration details
+      const decIds = myDecs.map(d => d.decorationId);
+      const allDecs = await db.select().from(profileDecorations)
+        .where(inArray(profileDecorations.id, decIds));
+      const decMap = new Map(allDecs.map(d => [d.id, d]));
+
+      const results = myDecs.map(md => {
+        const dec = decMap.get(md.decorationId);
+        if (!dec) return null;
+        return {
+          memberDecorationId: md.id,
+          decorationId: md.decorationId,
+          isEquipped: md.isEquipped,
+          decoration: {
+            id: dec.id,
+            name: dec.name,
+            description: dec.description,
+            type: dec.type,
+            emoji: dec.emoji,
+            imageUrl: dec.imageUrl,
+            cssEffect: dec.cssEffect,
+            color: dec.color,
+            rarity: dec.rarity,
+            price: dec.price,
+            category: dec.category,
+            maxOwners: dec.maxOwners,
+            currentOwners: dec.currentOwners,
+          },
+        };
+      }).filter(Boolean);
 
       res.json(results);
     } catch (error: any) {
+      console.error('/api/decorations/my error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -4575,6 +4586,8 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   // ============================================================
   app.get("/api/profile-custom/:discordId", async (req, res) => {
     try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
       const rows = await db.select().from(profileCustoms).where(eq(profileCustoms.discordId, req.params.discordId)).limit(1);
       if (rows.length === 0) return res.json({});
       const r = rows[0];
@@ -4600,6 +4613,8 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       return res.status(403).json({ error: "Forbidden" });
     }
     try {
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
       const { bannerColor1, bannerColor2, cardColor, bio, customAvatar, hiddenSections, bannerImage, robloxUsername } = req.body;
       const data = {
         bannerColor1: bannerColor1 || '',
@@ -4667,6 +4682,8 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   // ============================================================
   app.get("/api/ad-spots", async (_req, res) => {
     try {
+      const { db } = await import("./db");
+      const { sql } = await import("drizzle-orm");
       const spots = await db.select().from(adSpots)
         .where(sql`${adSpots.expiresAt} > NOW()`)
         .orderBy(adSpots.createdAt);
@@ -4682,9 +4699,18 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const user = req.user;
       if (!user?.discordId) return res.status(401).json({ error: "Not authorized" });
 
-      const { robloxUsername } = req.body;
-      if (!robloxUsername || typeof robloxUsername !== 'string') {
-        return res.status(400).json({ error: "Roblox username required" });
+      // Auto-read robloxUsername from request body OR profile_customs
+      let robloxUsername = req.body?.robloxUsername;
+      if (!robloxUsername) {
+        try {
+          const { db: _db } = await import("./db");
+          const { eq: _eq } = await import("drizzle-orm");
+          const [pc] = await _db.select().from(profileCustoms).where(_eq(profileCustoms.discordId, user.discordId)).limit(1);
+          robloxUsername = pc?.robloxUsername;
+        } catch {}
+      }
+      if (!robloxUsername || typeof robloxUsername !== 'string' || robloxUsername.trim().length === 0) {
+        return res.status(400).json({ error: "Укажите Roblox никнейм в настройках профиля" });
       }
 
       const cost = 500000;
