@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   User, Trophy, Coins, Zap, Shield, Star, Clock, BarChart3,
   Loader2, Flame, Medal, Crown, Package, Award, TrendingUp,
-  Search, ArrowLeftRight, ArrowLeft, ExternalLink, Copy, Check, Pencil, Save, X as XIcon
+  Search, ArrowLeftRight, ArrowLeft, ExternalLink, Copy, Check, Pencil, Save, X as XIcon, Upload
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useParams } from "wouter";
 import { Link, useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 
 interface MemberProfile {
   id: string;
@@ -87,6 +88,8 @@ export default function ProfilePage() {
   const [searchInput, setSearchInput] = useState("");
   const [copiedId, setCopiedId] = useState(false);
   const [editing, setEditing] = useState(false);
+  const { toast } = useToast();
+  const bannerFileRef = useRef<HTMLInputElement>(null);
 
   interface CustomProfileData {
     bannerColor1: string;
@@ -136,12 +139,45 @@ export default function ProfilePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/profile-custom/${targetDiscordId}`] });
       setEditing(false);
+      toast({ title: language === 'ru' ? '✅ Профиль сохранён' : '✅ Profile saved' });
+    },
+    onError: (error: any) => {
+      toast({ title: language === 'ru' ? '❌ Ошибка сохранения' : '❌ Save error', description: error.message, variant: 'destructive' });
     },
   });
 
   const saveCustomProfile = () => {
     if (targetDiscordId) {
       saveMutation.mutate(editData);
+    } else {
+      toast({ title: language === 'ru' ? '❌ Не авторизован' : '❌ Not authorized', variant: 'destructive' });
+    }
+  };
+
+  // Upload banner image
+  const handleBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: language === 'ru' ? '❌ Макс. размер 5MB' : '❌ Max size 5MB', variant: 'destructive' });
+      return;
+    }
+    const formData = new FormData();
+    formData.append('banner', file);
+    try {
+      const resp = await fetch(`/api/profile-banner-upload/${targetDiscordId}`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      if (data.url) {
+        setEditData(d => ({ ...d, bannerImage: data.url }));
+        toast({ title: language === 'ru' ? '✅ Баннер загружен' : '✅ Banner uploaded' });
+      }
+    } catch (err: any) {
+      toast({ title: language === 'ru' ? '❌ Ошибка загрузки' : '❌ Upload error', description: err.message, variant: 'destructive' });
     }
   };
 
@@ -260,17 +296,6 @@ export default function ProfilePage() {
 
       {/* Profile Header */}
       <Card className="glass glass-border overflow-hidden mb-6 relative" style={cd.cardColor ? { borderColor: cd.cardColor + '40' } : undefined}>
-        {isOwnProfile && !editing && (
-          <Button
-            size="icon"
-            variant="secondary"
-            className="absolute top-3 right-3 h-8 w-8 rounded-full opacity-80 hover:opacity-100 z-20 shadow-lg"
-            onClick={() => setEditing(true)}
-            title={t('profile.editProfile')}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-        )}
         <div
           className="h-32 relative"
           style={cd.bannerColor1 && !cd.bannerImage
@@ -300,6 +325,17 @@ export default function ProfilePage() {
                 <h1 className="text-2xl font-bold">{profile.username}</h1>
                 {profile.equippedTitle && (
                   <Badge variant="secondary" className="text-xs">{profile.equippedTitle}</Badge>
+                )}
+                {isOwnProfile && !editing && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0 rounded-full opacity-60 hover:opacity-100"
+                    onClick={() => setEditing(true)}
+                    title={t('profile.editProfile')}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
                 )}
               </div>
               <div className="flex items-center gap-3 mt-1 flex-wrap">
@@ -398,12 +434,30 @@ export default function ProfilePage() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">{t('profile.bannerImage')}</label>
-                <Input
-                  value={editData.bannerImage}
-                  onChange={e => setEditData(d => ({ ...d, bannerImage: e.target.value }))}
-                  placeholder={t('profile.bannerImagePlaceholder')}
-                  className="glass glass-border"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    value={editData.bannerImage}
+                    onChange={e => setEditData(d => ({ ...d, bannerImage: e.target.value }))}
+                    placeholder={t('profile.bannerImagePlaceholder')}
+                    className="glass glass-border flex-1"
+                  />
+                  <input
+                    ref={bannerFileRef}
+                    type="file"
+                    accept="image/*,.gif"
+                    className="hidden"
+                    onChange={handleBannerUpload}
+                  />
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => bannerFileRef.current?.click()}
+                    title={language === 'ru' ? 'Загрузить файл' : 'Upload file'}
+                  >
+                    <Upload className="h-4 w-4" />
+                  </Button>
+                </div>
                 <p className="text-[10px] text-muted-foreground mt-1">{t('profile.bannerImageHint')}</p>
               </div>
               <div>
@@ -432,8 +486,8 @@ export default function ProfilePage() {
                 <Button size="sm" variant="outline" className="gap-1" onClick={cancelEditing}>
                   <XIcon className="h-3 w-3" /> {t('profile.back')}
                 </Button>
-                <Button size="sm" className="gap-1" onClick={saveCustomProfile}>
-                  <Save className="h-3 w-3" /> {t('profile.saveProfile')}
+                <Button size="sm" className="gap-1" onClick={saveCustomProfile} disabled={saveMutation.isPending}>
+                  {saveMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} {t('profile.saveProfile')}
                 </Button>
               </div>
             </div>

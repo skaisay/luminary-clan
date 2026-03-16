@@ -66,7 +66,13 @@ interface GuildQueue {
   playStartedAt: number;      // timestamp when current song started playing
   currentStrategy: string;    // which strategy is currently playing
   streamRetryCount: number;   // how many times we retried the current song due to premature end
+  isJumping: boolean;         // flag to prevent handleNextSong during jump
 }
+
+// ========= Strategy Cache =========
+// Remember which strategy worked last to try it first next time
+let lastSuccessfulStrategy: string = ''; // 'soundcloud', 'piped', 'invidious', 'cobalt', 'play-dl', 'yt-dlp'
+let strategySuccessCount: Record<string, number> = {};
 
 // ========= Loading Status =========
 interface LoadingStatus {
@@ -145,6 +151,7 @@ function getOrCreateQueue(guildId: string): GuildQueue {
       playStartedAt: 0,
       currentStrategy: '',
       streamRetryCount: 0,
+      isJumping: false,
     };
 
     // Когда трек закончился — переходим к следующему
@@ -177,6 +184,13 @@ function getOrCreateQueue(guildId: string): GuildQueue {
 async function handleNextSong(guildId: string) {
   const q = queues.get(guildId);
   if (!q) return;
+
+  // If we're in a jump operation, ignore this Idle event
+  if (q.isJumping) {
+    musicLog(`handleNextSong: skipping (isJumping=true) guild=${guildId}`);
+    q.isJumping = false;
+    return;
+  }
 
   const currentSong = q.songs[0];
   const playDuration = q.playStartedAt > 0 ? (Date.now() - q.playStartedAt) / 1000 : 0;
@@ -635,159 +649,138 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
   const videoId = extractVideoId(song.url);
   musicLog(`▶ playSong start: "${song.title}" (url=${song.url}, videoId=${videoId})`);
 
-  // Retry loop: 2 attempts with 5s cooldown
+  // Retry loop: 2 attempts with 3s cooldown
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) {
-      musicLog(`Retry attempt ${attempt + 1} for "${song.title}" (5s cooldown)`);
+      musicLog(`Retry attempt ${attempt + 1} for "${song.title}" (3s cooldown)`);
       setLoadingStatus(guildId, 'streaming', 55, `Повторная попытка (${attempt + 1}/2)...`, { songTitle: song.title });
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 3000));
     }
 
     try {
       let resource;
       let strategyUsed = '';
 
-      // Strategy P1: Piped API — public YouTube proxy (works from cloud IPs)
+      // ============================================================
+      // PHASE 1: If SoundCloud worked before, try it FIRST (fastest path)
+      // ============================================================
+      if (!resource && lastSuccessfulStrategy === 'soundcloud' && song.title && song.title !== 'YouTube видео') {
+        setLoadingStatus(guildId, 'streaming', 60, 'SoundCloud (кэш)...', { songTitle: song.title });
+        try {
+          musicLog(`FAST: SoundCloud (cached strategy) for "${song.title.substring(0, 50)}"...`);
+          const sc = await streamFromSoundCloud(song.title);
+          resource = sc.resource;
+          strategyUsed = `SoundCloud: ${sc.scTitle}`;
+          lastSuccessfulStrategy = 'soundcloud';
+          strategySuccessCount['soundcloud'] = (strategySuccessCount['soundcloud'] || 0) + 1;
+          musicLog(`✅ FAST SoundCloud OK ("${sc.scTitle}")`);
+        } catch (scErr: any) {
+          musicLog(`FAST SoundCloud failed: ${scErr.message}`);
+        }
+      }
+
+      // ============================================================
+      // PHASE 2: Run fast API strategies in PARALLEL (P1+P2+P3)
+      // These are quick HTTP calls — run simultaneously, take first success
+      // ============================================================
       if (!resource && videoId) {
-        setLoadingStatus(guildId, 'streaming', 56 + attempt * 5, 'Piped API...', { songTitle: song.title });
+        setLoadingStatus(guildId, 'streaming', 60, 'Быстрые API...', { songTitle: song.title });
         try {
-          musicLog(`P1: Piped API for videoId=${videoId}...`);
-          const audioUrl = await getPipedAudioUrl(videoId);
-          musicLog(`P1: got audio URL (${audioUrl.length} chars), starting ffmpeg...`);
-          setLoadingStatus(guildId, 'streaming', 68, 'Запуск аудиопотока (Piped)...', { songTitle: song.title });
-          resource = await streamViaFfmpeg(audioUrl);
-          strategyUsed = 'Piped API + ffmpeg';
-          musicLog(`✅ P1 OK`);
-        } catch (p1Err: any) {
-          const msg = `P1(Piped): ${p1Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
+          musicLog(`PARALLEL: Running P1(Piped)+P2(Invidious)+P3(Cobalt) simultaneously...`);
+          const winner = await Promise.any([
+            getPipedAudioUrl(videoId).then(url => ({ url, name: 'Piped' })),
+            getInvidiousAudioUrl(videoId).then(url => ({ url, name: 'Invidious' })),
+            getCobaltAudioUrl(videoId).then(url => ({ url, name: 'Cobalt' })),
+          ]);
+          musicLog(`PARALLEL: ${winner.name} won! Starting ffmpeg...`);
+          setLoadingStatus(guildId, 'streaming', 72, `Аудиопоток (${winner.name})...`, { songTitle: song.title });
+          resource = await streamViaFfmpeg(winner.url);
+          strategyUsed = `${winner.name} API + ffmpeg`;
+          lastSuccessfulStrategy = winner.name.toLowerCase();
+          musicLog(`✅ PARALLEL OK via ${winner.name}`);
+        } catch (parallelErr: any) {
+          errors.push(`PARALLEL(P1+P2+P3): All fast APIs failed`);
+          musicLog(`PARALLEL: All fast APIs failed`);
         }
       }
 
-      // Strategy P2: Invidious API — another public YouTube proxy
-      if (!resource && videoId) {
-        setLoadingStatus(guildId, 'streaming', 62 + attempt * 5, 'Invidious API...', { songTitle: song.title });
-        try {
-          musicLog(`P2: Invidious API for videoId=${videoId}...`);
-          const audioUrl = await getInvidiousAudioUrl(videoId);
-          musicLog(`P2: got audio URL (${audioUrl.length} chars), starting ffmpeg...`);
-          setLoadingStatus(guildId, 'streaming', 72, 'Запуск аудиопотока (Invidious)...', { songTitle: song.title });
-          resource = await streamViaFfmpeg(audioUrl);
-          strategyUsed = 'Invidious API + ffmpeg';
-          musicLog(`✅ P2 OK`);
-        } catch (p2Err: any) {
-          const msg = `P2(Invidious): ${p2Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
-        }
-      }
-
-      // Strategy P3: Cobalt API — public media download API
-      if (!resource && videoId) {
-        setLoadingStatus(guildId, 'streaming', 65 + attempt * 5, 'Cobalt API...', { songTitle: song.title });
-        try {
-          musicLog(`P3: Cobalt API for videoId=${videoId}...`);
-          const audioUrl = await getCobaltAudioUrl(videoId);
-          musicLog(`P3: got audio URL, starting ffmpeg...`);
-          setLoadingStatus(guildId, 'streaming', 73, 'Запуск аудиопотока (Cobalt)...', { songTitle: song.title });
-          resource = await streamViaFfmpeg(audioUrl);
-          strategyUsed = 'Cobalt API + ffmpeg';
-          musicLog(`✅ P3 OK`);
-        } catch (p3Err: any) {
-          const msg = `P3(Cobalt): ${p3Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
-        }
-      }
-
-      // Strategy P4: play-dl direct — uses YouTube Innertube API internally
+      // ============================================================
+      // PHASE 3: SoundCloud — fast and reliable from cloud IPs
+      // Try BEFORE slow yt-dlp strategies
+      // ============================================================
       if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 68 + attempt * 5, 'play-dl (YouTube)...', { songTitle: song.title });
+        setLoadingStatus(guildId, 'streaming', 75, 'Поиск на SoundCloud...', { songTitle: song.title });
         try {
-          musicLog(`P4: play-dl direct for ${song.url}...`);
-          resource = await getPlayDlYouTubeResource(song.url);
-          strategyUsed = 'play-dl YouTube direct';
-          musicLog(`✅ P4 OK`);
-        } catch (p4Err: any) {
-          const msg = `P4(play-dl): ${p4Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
-        }
-      }
-      
-      // Strategy 0: yt-dlp --get-url → ffmpeg (tries multiple client types)
-      if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 58 + attempt * 5, 'Получение ссылки (yt-dlp)...', { songTitle: song.title });
-        try {
-          musicLog(`S0: yt-dlp --get-url fmt=bestaudio/best...`);
-          const directUrl = await getYtDlpDirectUrl(song.url, 'bestaudio/best');
-          musicLog(`S0: got URL (${directUrl.length} chars), starting ffmpeg...`);
-          setLoadingStatus(guildId, 'streaming', 72, 'Запуск аудиопотока...', { songTitle: song.title });
-          resource = await streamViaFfmpeg(directUrl);
-          strategyUsed = 'yt-dlp URL + ffmpeg';
-          musicLog(`✅ S0 OK`);
-        } catch (s0Err: any) {
-          const msg = `S0(yt-dlp): ${s0Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
-        }
-      }
-
-      // Strategy 1: yt-dlp pipe → ffmpeg
-      if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 78, 'Прямой поток (yt-dlp pipe)...', { songTitle: song.title });
-        try {
-          musicLog('S1: yt-dlp pipe...');
-          resource = await getYtDlpPipeResource(song.url);
-          strategyUsed = 'yt-dlp pipe + ffmpeg';
-          musicLog('✅ S1 OK');
-        } catch (s1Err: any) {
-          const msg = `S1: ${s1Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
-        }
-      }
-
-      // Strategy 2: SoundCloud fallback — search by song title and stream
-      // SoundCloud doesn't block cloud datacenter IPs like YouTube does
-      if (!resource) {
-        setLoadingStatus(guildId, 'streaming', 85, 'Поиск на SoundCloud...', { songTitle: song.title });
-        try {
-          // If title is generic "YouTube видео", try to resolve real title via oEmbed
           let searchTitle = song.title;
           if (searchTitle === 'YouTube видео' && videoId) {
-            musicLog('S2: resolving title via YouTube oEmbed...');
             try {
-              const controller = new AbortController();
-              const timer = setTimeout(() => controller.abort(), 6000);
-              const oembedResp = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
-                signal: controller.signal,
-              });
-              clearTimeout(timer);
-              if (oembedResp.ok) {
-                const oembedData: any = await oembedResp.json();
-                if (oembedData.title) {
-                  searchTitle = oembedData.title;
-                  musicLog(`S2: oEmbed title = "${searchTitle}"`);
-                }
-              }
-            } catch { /* oEmbed failed, use fallback */ }
+              const ctrl = new AbortController();
+              const tmr = setTimeout(() => ctrl.abort(), 5000);
+              const resp = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, { signal: ctrl.signal });
+              clearTimeout(tmr);
+              if (resp.ok) { const d: any = await resp.json(); if (d.title) searchTitle = d.title; }
+            } catch {}
           }
-          
           if (searchTitle && searchTitle !== 'YouTube видео') {
-            musicLog(`S2: SoundCloud fallback for "${searchTitle}"...`);
+            musicLog(`SC: SoundCloud for "${searchTitle.substring(0, 50)}"...`);
             const sc = await streamFromSoundCloud(searchTitle);
             resource = sc.resource;
             strategyUsed = `SoundCloud: ${sc.scTitle}`;
-            musicLog(`✅ S2 OK (SoundCloud: "${sc.scTitle}")`);
-          } else {
-            musicLog('S2: no title available for SoundCloud search, skipping');
+            lastSuccessfulStrategy = 'soundcloud';
+            musicLog(`✅ SC OK ("${sc.scTitle}")`);
           }
-        } catch (s2Err: any) {
-          const msg = `S2(SoundCloud): ${s2Err.message}`;
-          errors.push(msg);
-          musicLog(msg);
+        } catch (scErr: any) {
+          errors.push(`SC: ${scErr.message}`);
+          musicLog(`SC failed: ${scErr.message}`);
+        }
+      }
+
+      // ============================================================
+      // PHASE 4: play-dl direct — YouTube Innertube
+      // ============================================================
+      if (!resource) {
+        setLoadingStatus(guildId, 'streaming', 80, 'play-dl (YouTube)...', { songTitle: song.title });
+        try {
+          musicLog(`P4: play-dl for ${song.url}...`);
+          resource = await getPlayDlYouTubeResource(song.url);
+          strategyUsed = 'play-dl YouTube';
+          lastSuccessfulStrategy = 'play-dl';
+          musicLog(`✅ P4 OK`);
+        } catch (p4Err: any) {
+          errors.push(`P4: ${p4Err.message}`);
+          musicLog(`P4 failed: ${p4Err.message}`);
+        }
+      }
+
+      // ============================================================
+      // PHASE 5: yt-dlp (slowest, skip on retry)
+      // ============================================================
+      if (!resource && attempt === 0) {
+        setLoadingStatus(guildId, 'streaming', 85, 'yt-dlp (резерв)...', { songTitle: song.title });
+        try {
+          musicLog(`S0: yt-dlp --get-url...`);
+          const directUrl = await getYtDlpDirectUrl(song.url, 'bestaudio/best');
+          resource = await streamViaFfmpeg(directUrl);
+          strategyUsed = 'yt-dlp + ffmpeg';
+          lastSuccessfulStrategy = 'yt-dlp';
+          musicLog(`✅ S0 OK`);
+        } catch (s0Err: any) {
+          errors.push(`S0: ${s0Err.message}`);
+          musicLog(`S0 failed: ${s0Err.message}`);
+        }
+      }
+
+      if (!resource && attempt === 0) {
+        setLoadingStatus(guildId, 'streaming', 90, 'yt-dlp pipe...', { songTitle: song.title });
+        try {
+          musicLog('S1: yt-dlp pipe...');
+          resource = await getYtDlpPipeResource(song.url);
+          strategyUsed = 'yt-dlp pipe';
+          lastSuccessfulStrategy = 'yt-dlp';
+          musicLog('✅ S1 OK');
+        } catch (s1Err: any) {
+          errors.push(`S1: ${s1Err.message}`);
+          musicLog(`S1 failed: ${s1Err.message}`);
         }
       }
 
@@ -1660,19 +1653,26 @@ export async function jumpToSong(guildId: string, position: number): Promise<{ s
       return { success: true, message: `▶️ Уже играет: **${q.songs[0].title}**` };
     }
 
-    // Move the target to position 0, keeping all other songs in queue
+    // Move the target to position 0, keeping ALL other songs (including currently playing)
     const target = q.songs[position - 1];
     q.songs.splice(position - 1, 1);  // remove target from its current position
-    q.songs[0] = target;               // replace current playing song with target
-    // The previously playing song is dropped (already played/heard)
+    q.songs.unshift(target);            // insert target at position 0, old songs shift down
+    
+    // Set jumping flag to prevent handleNextSong from firing when player switches
+    q.isJumping = true;
     
     // Reset retry state for the new song
     q.streamRetryCount = 0;
     q.playStartedAt = 0;
     q.currentStrategy = '';
     
-    // Directly start playing the new songs[0] — do NOT use stop() because
-    // that triggers handleNextSong which would shift() the target song away
+    // Stop current player (will trigger Idle → handleNextSong sees isJumping and returns)
+    q.player.stop();
+    
+    // Small delay to ensure Idle event is processed
+    await new Promise(r => setTimeout(r, 100));
+    
+    // Start playing the new song
     const playResult = await playSong(guildId);
     if (!playResult.success) {
       return { success: false, message: `❌ Не удалось воспроизвести: ${playResult.error}` };

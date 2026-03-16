@@ -53,6 +53,7 @@ import ProfilePage from "@/pages/profile";
 import MiniGamesPage from "@/pages/mini-games";
 import ClanWarsPage from "@/pages/clan-wars";
 import NotFound from "@/pages/not-found";
+import { AiAssistant } from "@/components/AiAssistant";
 
 function MainRouter() {
   return (
@@ -128,6 +129,7 @@ function MainLayout() {
         <MainRouter />
       </main>
       <ScrollToTop />
+      <AiAssistant />
     </>
   );
 }

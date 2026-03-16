@@ -147,6 +147,10 @@ async function generateVideoThumbnail(videoPath: string, outputPath: string, fil
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Serve uploaded files (banners, etc.)
+  const express = await import('express');
+  app.use('/uploads', express.default.static(path.join(process.cwd(), 'uploads')));
+
   // Health endpoint for keep-alive pings and monitoring
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date().toISOString() });
@@ -4021,6 +4025,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
     saveProfileCustoms();
     res.json({ success: true });
+  });
+
+  // Banner image upload endpoint
+  const bannerUpload = (await import('multer')).default({
+    storage: (await import('multer')).default.diskStorage({
+      destination: (_req: any, _file: any, cb: any) => {
+        const dir = path.join(process.cwd(), 'uploads', 'banners');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      },
+      filename: (_req: any, file: any, cb: any) => {
+        const ext = path.extname(file.originalname) || '.jpg';
+        cb(null, `banner_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`);
+      },
+    }),
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+    fileFilter: (_req: any, file: any, cb: any) => {
+      if (file.mimetype.startsWith('image/')) cb(null, true);
+      else cb(new Error('Only images allowed'), false);
+    },
+  });
+
+  app.post("/api/profile-banner-upload/:discordId", requireDiscordAuth, bannerUpload.single('banner'), (req: any, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user || (user.discordId !== req.params.discordId && user.type !== 'admin')) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      const url = `/uploads/banners/${req.file.filename}`;
+      res.json({ success: true, url });
+    } catch (err: any) {
+      console.error('Banner upload error:', err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   const httpServer = createServer(app);
