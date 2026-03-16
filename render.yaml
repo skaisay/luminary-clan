@@ -2,8 +2,9 @@ services:
   - type: web
     name: luminary-clan
     runtime: node
-    buildCommand: npm install && npm run build
+    buildCommand: apt-get update && apt-get install -y ffmpeg python3-pip || true && pip3 install --break-system-packages yt-dlp || true && npm install --include=dev && npx drizzle-kit push --force || true && npm run build
     startCommand: npm run start
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: NODE_ENV
         value: production

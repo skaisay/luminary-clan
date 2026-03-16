@@ -44,6 +44,14 @@ import Liked from "@/pages/video-platform/Liked";
 import ChannelManagement from "@/pages/video-platform/ChannelManagement";
 import RobloxTracker from "@/pages/roblox-tracker";
 import MusicPage from "@/pages/music";
+import AchievementsPage from "@/pages/achievements";
+import QuestsPage from "@/pages/quests";
+import TradingPage from "@/pages/trading";
+import BoostersPage from "@/pages/boosters";
+import DailyRewardsPage from "@/pages/daily-rewards";
+import ProfilePage from "@/pages/profile";
+import MiniGamesPage from "@/pages/mini-games";
+import ClanWarsPage from "@/pages/clan-wars";
 import NotFound from "@/pages/not-found";
 
 function MainRouter() {
@@ -63,6 +71,14 @@ function MainRouter() {
       <Route path="/about" component={() => <MaintenanceGate pageId="about"><About /></MaintenanceGate>} />
       <Route path="/roblox-tracker" component={() => <RobloxTracker />} />
       <Route path="/music" component={() => <MusicPage />} />
+      <Route path="/achievements" component={() => <MaintenanceGate pageId="achievements"><AchievementsPage /></MaintenanceGate>} />
+      <Route path="/quests" component={() => <MaintenanceGate pageId="quests"><QuestsPage /></MaintenanceGate>} />
+      <Route path="/trading" component={() => <MaintenanceGate pageId="trading"><TradingPage /></MaintenanceGate>} />
+      <Route path="/boosters" component={() => <MaintenanceGate pageId="boosters"><BoostersPage /></MaintenanceGate>} />
+      <Route path="/daily-rewards" component={() => <MaintenanceGate pageId="daily-rewards"><DailyRewardsPage /></MaintenanceGate>} />
+      <Route path="/profile/:discordId?" component={() => <MaintenanceGate pageId="profile"><ProfilePage /></MaintenanceGate>} />
+      <Route path="/mini-games" component={() => <MaintenanceGate pageId="mini-games"><MiniGamesPage /></MaintenanceGate>} />
+      <Route path="/clan-wars" component={() => <MaintenanceGate pageId="clan-wars"><ClanWarsPage /></MaintenanceGate>} />
       <Route component={NotFound} />
     </Switch>
   );

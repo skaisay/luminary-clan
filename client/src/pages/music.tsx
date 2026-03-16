@@ -20,7 +20,9 @@ import {
   Bot,
   LogIn,
   ExternalLink,
-  AlertTriangle
+  AlertTriangle,
+  Copy,
+  Check
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -131,6 +133,7 @@ export default function MusicPage() {
 
   // Debug logs (poll less frequently)
   const [showDebugLogs, setShowDebugLogs] = useState(false);
+  const [logsCopied, setLogsCopied] = useState(false);
   const { data: debugLogs } = useQuery<{ logs: { time: string; msg: string }[]; count: number }>({
     queryKey: ["/api/music/debug-logs"],
     refetchInterval: showDebugLogs ? 3000 : false,
@@ -796,9 +799,25 @@ export default function MusicPage() {
           {showDebugLogs && debugLogs?.logs && (
             <Card className="mt-2 bg-black/50 border-muted/20">
               <CardContent className="p-3">
-                <div className="max-h-[300px] overflow-y-auto font-mono text-[10px] leading-relaxed space-y-0.5">
+                <div className="flex justify-end mb-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      const text = debugLogs.logs.slice(-50).map(e => `${e.time} ${e.msg}`).join('\n');
+                      navigator.clipboard.writeText(text).then(() => {
+                        setLogsCopied(true);
+                        setTimeout(() => setLogsCopied(false), 2000);
+                      });
+                    }}
+                  >
+                    {logsCopied ? <><Check className="h-3 w-3" /> Скопировано</> : <><Copy className="h-3 w-3" /> Копировать логи</>}
+                  </Button>
+                </div>
+                <div className="max-h-[300px] overflow-y-auto font-mono text-[10px] leading-relaxed space-y-0.5 select-text">
                   {debugLogs.logs.slice(-50).map((entry, i) => (
-                    <div key={i} className={`${
+                    <div key={i} className={`select-text ${
                       entry.msg.includes('✅') ? 'text-green-400' :
                       entry.msg.includes('❌') ? 'text-red-400' :
                       entry.msg.includes('⚠️') ? 'text-yellow-400' :

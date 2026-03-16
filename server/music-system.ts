@@ -28,16 +28,19 @@ try {
 }
 
 if (!ffmpegPath) {
-  try {
-    const ffmpegStatic = await import('ffmpeg-static');
-    if (ffmpegStatic.default) {
-      ffmpegPath = ffmpegStatic.default;
-      process.env.FFMPEG_PATH = ffmpegStatic.default;
-      console.log('✅ ffmpeg-static найден:', ffmpegStatic.default);
+  (async () => {
+    try {
+      const ffmpegStatic = (await import('ffmpeg-static') as any);
+      const ffmpegBin: string | null = ffmpegStatic.default ?? ffmpegStatic;
+      if (ffmpegBin) {
+        ffmpegPath = ffmpegBin;
+        process.env.FFMPEG_PATH = ffmpegBin;
+        console.log('✅ ffmpeg-static найден:', ffmpegBin);
+      }
+    } catch {
+      console.log('⚠️ FFmpeg не найден! Музыка может не работать.');
     }
-  } catch {
-    console.log('⚠️ FFmpeg не найден! Музыка может не работать.');
-  }
+  })();
 }
 
 // ========= Типы =========
@@ -257,7 +260,24 @@ function cleanYouTubeUrl(url: string): string {
  * Search SoundCloud for a song by title and stream it.
  * SoundCloud doesn't block cloud datacenter IPs like YouTube does.
  */
+let scInitialized = false;
+async function ensureSoundCloudInit() {
+  if (scInitialized) return;
+  try {
+    const clientId = await play.getFreeClientID();
+    if (clientId) {
+      await play.setToken({ soundcloud: { client_id: clientId } });
+      scInitialized = true;
+      musicLog('SoundCloud client_id initialized');
+    }
+  } catch (err: any) {
+    musicLog(`SoundCloud init error: ${err.message}`);
+  }
+}
+
 async function streamFromSoundCloud(songTitle: string): Promise<{ resource: any; scUrl: string; scTitle: string }> {
+  await ensureSoundCloudInit();
+  
   musicLog(`SC: searching SoundCloud for "${songTitle}"...`);
   const results = await withTimeout(
     play.search(songTitle, { limit: 3, source: { soundcloud: 'tracks' } }),
@@ -269,7 +289,7 @@ async function streamFromSoundCloud(songTitle: string): Promise<{ resource: any;
   }
   
   const track = results[0];
-  const scTitle = track.name || track.title || songTitle;
+  const scTitle = track.name || (track as any).title || songTitle;
   const scUrl = track.url;
   musicLog(`SC: found "${scTitle}" (${scUrl})`);
   
@@ -307,6 +327,121 @@ async function resolveSpotifyTitle(spotifyUrl: string): Promise<string | null> {
   }
 }
 
+// ========= Piped / Invidious YouTube Proxy APIs =========
+// These public APIs proxy YouTube and work from cloud datacenter IPs
+
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.in.projectsegfau.lt',
+  'https://api.piped.projectsegfau.lt',
+  'https://pipedapi.darkness.services',
+];
+
+const INVIDIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+  'https://invidious.privacyredirect.com',
+  'https://invidious.protokolla.fi',
+  'https://iv.datura.network',
+];
+
+/** Get direct audio URL via Piped API (public YouTube proxy) */
+async function getPipedAudioUrl(videoId: string): Promise<string> {
+  const errors: string[] = [];
+  
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      const resp = await fetch(`${instance}/streams/${videoId}`, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
+      clearTimeout(timer);
+      
+      if (!resp.ok) {
+        errors.push(`${instance}: HTTP ${resp.status}`);
+        continue;
+      }
+      
+      const data: any = await resp.json();
+      
+      // Find best audio stream
+      const audioStreams = data.audioStreams || [];
+      if (audioStreams.length === 0) {
+        errors.push(`${instance}: no audio streams`);
+        continue;
+      }
+      
+      // Sort by bitrate (highest first) and pick best one
+      const sorted = audioStreams
+        .filter((s: any) => s.url && s.mimeType?.startsWith('audio/'))
+        .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+      
+      if (sorted.length === 0) {
+        errors.push(`${instance}: no valid audio URLs`);
+        continue;
+      }
+      
+      musicLog(`Piped(${instance}): found ${sorted.length} audio streams, best=${sorted[0].bitrate}bps`);
+      return sorted[0].url;
+    } catch (err: any) {
+      errors.push(`${instance}: ${err.message}`);
+    }
+  }
+  
+  throw new Error(`All Piped instances failed: ${errors.join('; ')}`);
+}
+
+/** Get direct audio URL via Invidious API (another YouTube proxy) */
+async function getInvidiousAudioUrl(videoId: string): Promise<string> {
+  const errors: string[] = [];
+  
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      const resp = await fetch(`${instance}/api/v1/videos/${videoId}`, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
+      clearTimeout(timer);
+      
+      if (!resp.ok) {
+        errors.push(`${instance}: HTTP ${resp.status}`);
+        continue;
+      }
+      
+      const data: any = await resp.json();
+      
+      // Invidious provides adaptiveFormats with audio-only streams
+      const adaptiveFormats = data.adaptiveFormats || [];
+      const audioFormats = adaptiveFormats
+        .filter((f: any) => f.type?.startsWith('audio/') && f.url)
+        .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+      
+      if (audioFormats.length > 0) {
+        musicLog(`Invidious(${instance}): found ${audioFormats.length} audio streams, best=${audioFormats[0].bitrate}bps`);
+        return audioFormats[0].url;
+      }
+      
+      // Fallback: try formatStreams (combined audio+video, lowest quality)  
+      const formatStreams = data.formatStreams || [];
+      if (formatStreams.length > 0 && formatStreams[0].url) {
+        musicLog(`Invidious(${instance}): using combined format stream`);
+        return formatStreams[0].url;
+      }
+      
+      errors.push(`${instance}: no audio formats found`);
+    } catch (err: any) {
+      errors.push(`${instance}: ${err.message}`);
+    }
+  }
+  
+  throw new Error(`All Invidious instances failed: ${errors.join('; ')}`);
+}
+
 async function playSong(guildId: string): Promise<{ success: boolean; error?: string }> {
   const q = queues.get(guildId);
   if (!q || q.songs.length === 0) return { success: false, error: 'No songs' };
@@ -330,6 +465,42 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
     try {
       let resource;
       let strategyUsed = '';
+
+      // Strategy P1: Piped API — public YouTube proxy (works from cloud IPs)
+      if (!resource && videoId) {
+        setLoadingStatus(guildId, 'streaming', 56 + attempt * 5, 'Piped API...', { songTitle: song.title });
+        try {
+          musicLog(`P1: Piped API for videoId=${videoId}...`);
+          const audioUrl = await getPipedAudioUrl(videoId);
+          musicLog(`P1: got audio URL (${audioUrl.length} chars), starting ffmpeg...`);
+          setLoadingStatus(guildId, 'streaming', 68, 'Запуск аудиопотока (Piped)...', { songTitle: song.title });
+          resource = await streamViaFfmpeg(audioUrl);
+          strategyUsed = 'Piped API + ffmpeg';
+          musicLog(`✅ P1 OK`);
+        } catch (p1Err: any) {
+          const msg = `P1(Piped): ${p1Err.message}`;
+          errors.push(msg);
+          musicLog(msg);
+        }
+      }
+
+      // Strategy P2: Invidious API — another public YouTube proxy
+      if (!resource && videoId) {
+        setLoadingStatus(guildId, 'streaming', 62 + attempt * 5, 'Invidious API...', { songTitle: song.title });
+        try {
+          musicLog(`P2: Invidious API for videoId=${videoId}...`);
+          const audioUrl = await getInvidiousAudioUrl(videoId);
+          musicLog(`P2: got audio URL (${audioUrl.length} chars), starting ffmpeg...`);
+          setLoadingStatus(guildId, 'streaming', 72, 'Запуск аудиопотока (Invidious)...', { songTitle: song.title });
+          resource = await streamViaFfmpeg(audioUrl);
+          strategyUsed = 'Invidious API + ffmpeg';
+          musicLog(`✅ P2 OK`);
+        } catch (p2Err: any) {
+          const msg = `P2(Invidious): ${p2Err.message}`;
+          errors.push(msg);
+          musicLog(msg);
+        }
+      }
       
       // Strategy 0: yt-dlp --get-url → ffmpeg (with web_creator client)
       if (!resource) {
@@ -366,14 +537,39 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
 
       // Strategy 2: SoundCloud fallback — search by song title and stream
       // SoundCloud doesn't block cloud datacenter IPs like YouTube does
-      if (!resource && song.title && song.title !== 'YouTube видео') {
+      if (!resource) {
         setLoadingStatus(guildId, 'streaming', 85, 'Поиск на SoundCloud...', { songTitle: song.title });
         try {
-          musicLog(`S2: SoundCloud fallback for "${song.title}"...`);
-          const sc = await streamFromSoundCloud(song.title);
-          resource = sc.resource;
-          strategyUsed = `SoundCloud: ${sc.scTitle}`;
-          musicLog(`✅ S2 OK (SoundCloud: "${sc.scTitle}")`);
+          // If title is generic "YouTube видео", try to resolve real title via oEmbed
+          let searchTitle = song.title;
+          if (searchTitle === 'YouTube видео' && videoId) {
+            musicLog('S2: resolving title via YouTube oEmbed...');
+            try {
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), 6000);
+              const oembedResp = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+                signal: controller.signal,
+              });
+              clearTimeout(timer);
+              if (oembedResp.ok) {
+                const oembedData: any = await oembedResp.json();
+                if (oembedData.title) {
+                  searchTitle = oembedData.title;
+                  musicLog(`S2: oEmbed title = "${searchTitle}"`);
+                }
+              }
+            } catch { /* oEmbed failed, use fallback */ }
+          }
+          
+          if (searchTitle && searchTitle !== 'YouTube видео') {
+            musicLog(`S2: SoundCloud fallback for "${searchTitle}"...`);
+            const sc = await streamFromSoundCloud(searchTitle);
+            resource = sc.resource;
+            strategyUsed = `SoundCloud: ${sc.scTitle}`;
+            musicLog(`✅ S2 OK (SoundCloud: "${sc.scTitle}")`);
+          } else {
+            musicLog('S2: no title available for SoundCloud search, skipping');
+          }
         } catch (s2Err: any) {
           const msg = `S2(SoundCloud): ${s2Err.message}`;
           errors.push(msg);
@@ -773,7 +969,7 @@ export async function addSong(
           if (scResults?.length) {
             const track = scResults[0];
             songInfo = {
-              title: track.name || track.title || spotifyTitle,
+              title: track.name || (track as any).title || spotifyTitle,
               url: track.url,
               duration: formatDuration(track.durationInSec || 0),
               durationSec: track.durationInSec || 0,
@@ -1255,9 +1451,20 @@ export async function clearQueue(guildId: string): Promise<{ success: boolean; m
   }
 }
 
-// Функция для совместимости со старым кодом
+// Функция для инициализации play-dl с SoundCloud support
 export async function initializePlayDl() {
-  console.log('✅ play-dl music system ready');
+  try {
+    // Initialize SoundCloud client_id for play-dl
+    const clientId = await play.getFreeClientID();
+    if (clientId) {
+      await play.setToken({ soundcloud: { client_id: clientId } });
+      console.log('✅ play-dl + SoundCloud ready (client_id obtained)');
+    } else {
+      console.log('⚠️ play-dl ready, SoundCloud client_id not available');
+    }
+  } catch (err: any) {
+    console.log('⚠️ play-dl init warning:', err.message, '— SoundCloud fallback may not work');
+  }
 }
 
 /** Diagnostic: test each streaming strategy and return results */

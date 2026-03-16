@@ -3513,6 +3513,429 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============================================================
+  // PROFILE API
+  // ============================================================
+  app.get("/api/profile/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, req.params.discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      res.json(member[0]);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // QUESTS API
+  // ============================================================
+  app.get("/api/quests", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { quests } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const allQuests = await db.select().from(quests).where(eq(quests.isActive, true));
+      res.json(allQuests);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/quests/user/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { userQuests, quests, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, req.params.discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      const uq = await db.select({
+        id: userQuests.id,
+        questId: userQuests.questId,
+        progress: userQuests.progress,
+        isCompleted: userQuests.isCompleted,
+        completedAt: userQuests.completedAt,
+        claimedAt: userQuests.claimedAt,
+        startedAt: userQuests.startedAt,
+        quest: quests,
+      }).from(userQuests)
+        .innerJoin(quests, eq(userQuests.questId, quests.id))
+        .where(eq(userQuests.memberId, member[0].id));
+      res.json(uq);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/quests/accept", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { userQuests, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { discordId, questId } = req.body;
+      if (!discordId || !questId) return res.status(400).json({ error: "discordId and questId required" });
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      const [uq] = await db.insert(userQuests).values({
+        memberId: member[0].id,
+        questId,
+        progress: {},
+        isCompleted: false,
+      }).returning();
+      res.json(uq);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/quests/claim", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { userQuests, quests, clanMembers } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const { discordId, userQuestId } = req.body;
+      if (!discordId || !userQuestId) return res.status(400).json({ error: "discordId and userQuestId required" });
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      const [uq] = await db.select().from(userQuests).where(and(eq(userQuests.id, userQuestId), eq(userQuests.memberId, member[0].id))).limit(1) as any[];
+      if (!uq) return res.status(404).json({ error: "Quest not found" });
+      if (!uq.isCompleted) return res.status(400).json({ error: "Quest not completed yet" });
+      if (uq.claimedAt) return res.status(400).json({ error: "Already claimed" });
+      const [quest] = await db.select().from(quests).where(eq(quests.id, uq.questId)).limit(1);
+      const rewards = quest?.rewards as any || { coins: 0 };
+      if (rewards.coins) {
+        await db.update(clanMembers).set({ lumiCoins: (member[0].lumiCoins || 0) + rewards.coins }).where(eq(clanMembers.id, member[0].id));
+      }
+      const [updated] = await db.update(userQuests).set({ claimedAt: new Date() }).where(eq(userQuests.id, userQuestId)).returning();
+      res.json({ ...updated, reward: rewards });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // TRADES API
+  // ============================================================
+  app.get("/api/trades/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { trades, clanMembers } = await import("@shared/schema");
+      const { eq, or } = await import("drizzle-orm");
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, req.params.discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      const allTrades = await db.select().from(trades).where(
+        or(eq(trades.fromMemberId, member[0].id), eq(trades.toMemberId, member[0].id))
+      );
+      res.json(allTrades);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/trades", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { trades, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { fromDiscordId, toDiscordId, offerItems, offerCoins, requestItems, requestCoins, message } = req.body;
+      if (!fromDiscordId || !toDiscordId) return res.status(400).json({ error: "Both discord IDs required" });
+      const fromMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, fromDiscordId)).limit(1);
+      const toMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, toDiscordId)).limit(1);
+      if (!fromMember[0] || !toMember[0]) return res.status(404).json({ error: "Member not found" });
+      const [trade] = await db.insert(trades).values({
+        fromMemberId: fromMember[0].id,
+        toMemberId: toMember[0].id,
+        offerItems: offerItems || [],
+        offerCoins: offerCoins || 0,
+        requestItems: requestItems || [],
+        requestCoins: requestCoins || 0,
+        message: message || null,
+        status: "pending",
+      }).returning();
+      res.json(trade);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/trades/:id/respond", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { trades, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { action, discordId } = req.body; // action: "accept" | "reject"
+      if (!action || !discordId) return res.status(400).json({ error: "action and discordId required" });
+      const [trade] = await db.select().from(trades).where(eq(trades.id, req.params.id)).limit(1);
+      if (!trade) return res.status(404).json({ error: "Trade not found" });
+      if (trade.status !== "pending") return res.status(400).json({ error: "Trade already resolved" });
+      const newStatus = action === "accept" ? "accepted" : "rejected";
+      if (action === "accept") {
+        // Transfer coins
+        const fromMember = await db.select().from(clanMembers).where(eq(clanMembers.id, trade.fromMemberId)).limit(1);
+        const toMember = await db.select().from(clanMembers).where(eq(clanMembers.id, trade.toMemberId)).limit(1);
+        if (fromMember[0] && toMember[0]) {
+          await db.update(clanMembers).set({ lumiCoins: (fromMember[0].lumiCoins || 0) - trade.offerCoins + trade.requestCoins }).where(eq(clanMembers.id, fromMember[0].id));
+          await db.update(clanMembers).set({ lumiCoins: (toMember[0].lumiCoins || 0) + trade.offerCoins - trade.requestCoins }).where(eq(clanMembers.id, toMember[0].id));
+        }
+      }
+      const [updated] = await db.update(trades).set({ status: newStatus, updatedAt: new Date() }).where(eq(trades.id, req.params.id)).returning();
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/trades/:id/cancel", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { trades } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const [trade] = await db.select().from(trades).where(eq(trades.id, req.params.id)).limit(1);
+      if (!trade) return res.status(404).json({ error: "Trade not found" });
+      if (trade.status !== "pending") return res.status(400).json({ error: "Trade already resolved" });
+      const [updated] = await db.update(trades).set({ status: "cancelled", updatedAt: new Date() }).where(eq(trades.id, req.params.id)).returning();
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // BOOSTS API
+  // ============================================================
+  app.get("/api/boosts/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { activeBoosts, items, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, req.params.discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      const boosts = await db.select({
+        id: activeBoosts.id,
+        boostType: activeBoosts.boostType,
+        multiplier: activeBoosts.multiplier,
+        activatedAt: activeBoosts.activatedAt,
+        expiresAt: activeBoosts.expiresAt,
+        item: items,
+      }).from(activeBoosts)
+        .innerJoin(items, eq(activeBoosts.itemId, items.id))
+        .where(eq(activeBoosts.memberId, member[0].id));
+      res.json(boosts);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // DAILY REWARDS API
+  // ============================================================
+  app.get("/api/daily-reward/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { dailyRewards, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, req.params.discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      const [reward] = await db.select().from(dailyRewards).where(eq(dailyRewards.memberId, member[0].id)).limit(1);
+      const now = new Date();
+      const lastClaim = reward?.lastClaimDate ? new Date(reward.lastClaimDate) : null;
+      const canClaim = !lastClaim || (now.getTime() - lastClaim.getTime() > 24 * 60 * 60 * 1000);
+      const isStreakBroken = lastClaim && (now.getTime() - lastClaim.getTime() > 48 * 60 * 60 * 1000);
+      res.json({
+        streakDays: isStreakBroken ? 0 : (reward?.streakDays || 0),
+        totalClaims: reward?.totalClaims || 0,
+        lastClaimDate: reward?.lastClaimDate || null,
+        canClaim,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/daily-reward/claim", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { dailyRewards, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { discordId } = req.body;
+      if (!discordId) return res.status(400).json({ error: "discordId required" });
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      const [existing] = await db.select().from(dailyRewards).where(eq(dailyRewards.memberId, member[0].id)).limit(1);
+      const now = new Date();
+      const lastClaim = existing?.lastClaimDate ? new Date(existing.lastClaimDate) : null;
+      if (lastClaim && (now.getTime() - lastClaim.getTime() < 24 * 60 * 60 * 1000)) {
+        return res.status(400).json({ error: "Already claimed today" });
+      }
+      const isStreakBroken = lastClaim && (now.getTime() - lastClaim.getTime() > 48 * 60 * 60 * 1000);
+      const newStreak = isStreakBroken ? 1 : ((existing?.streakDays || 0) + 1);
+      const dayInCycle = ((newStreak - 1) % 7) + 1;
+      const baseReward = [10, 15, 20, 30, 40, 60, 100];
+      const coinReward = baseReward[dayInCycle - 1] || 10;
+      if (existing) {
+        await db.update(dailyRewards).set({
+          lastClaimDate: now,
+          streakDays: newStreak,
+          totalClaims: (existing.totalClaims || 0) + 1,
+        }).where(eq(dailyRewards.id, existing.id));
+      } else {
+        await db.insert(dailyRewards).values({
+          memberId: member[0].id,
+          lastClaimDate: now,
+          streakDays: 1,
+          totalClaims: 1,
+        });
+      }
+      await db.update(clanMembers).set({ lumiCoins: (member[0].lumiCoins || 0) + coinReward }).where(eq(clanMembers.id, member[0].id));
+      res.json({ reward: coinReward, streakDays: newStreak, totalClaims: (existing?.totalClaims || 0) + 1 });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // INVENTORY API
+  // ============================================================
+  app.get("/api/inventory/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { userInventory, items, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, req.params.discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      const inv = await db.select({
+        id: userInventory.id,
+        quantity: userInventory.quantity,
+        isEquipped: userInventory.isEquipped,
+        name: items.name,
+        category: items.category,
+        rarity: items.rarity,
+      }).from(userInventory)
+        .innerJoin(items, eq(userInventory.itemId, items.id))
+        .where(eq(userInventory.memberId, member[0].id));
+      res.json(inv);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // MINI-GAMES API
+  // ============================================================
+  app.post("/api/mini-games/wheel", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { discordId, bet } = req.body;
+      if (!discordId || !bet) return res.status(400).json({ error: "discordId and bet required" });
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      if ((member[0].lumiCoins || 0) < bet) return res.status(400).json({ error: "Not enough LumiCoins" });
+      const segments = [10, 25, 50, 100, 5, 200, 0, 75, 500, 15, -1, 30];
+      const segmentIndex = Math.floor(Math.random() * segments.length);
+      const segmentValue = segments[segmentIndex];
+      let reward = 0;
+      if (segmentValue === -1) {
+        reward = bet * 2; // 2x multiplier
+      } else if (segmentValue === 0) {
+        reward = -bet; // lose bet
+      } else {
+        reward = segmentValue;
+      }
+      await db.update(clanMembers).set({ lumiCoins: (member[0].lumiCoins || 0) - bet + (reward > 0 ? reward : 0) + (reward < 0 ? reward : 0) }).where(eq(clanMembers.id, member[0].id));
+      res.json({ segmentIndex, reward });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/mini-games/rps", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { discordId, choice, bet } = req.body;
+      if (!discordId || !choice || !bet) return res.status(400).json({ error: "discordId, choice, and bet required" });
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      if ((member[0].lumiCoins || 0) < bet) return res.status(400).json({ error: "Not enough LumiCoins" });
+      const choices = ["rock", "paper", "scissors"] as const;
+      const botChoice = choices[Math.floor(Math.random() * 3)];
+      let result: "win" | "lose" | "draw" = "draw";
+      if (choice !== botChoice) {
+        if ((choice === "rock" && botChoice === "scissors") ||
+            (choice === "paper" && botChoice === "rock") ||
+            (choice === "scissors" && botChoice === "paper")) {
+          result = "win";
+        } else {
+          result = "lose";
+        }
+      }
+      let reward = 0;
+      if (result === "win") reward = bet;
+      else if (result === "lose") reward = -bet;
+      await db.update(clanMembers).set({ lumiCoins: Math.max(0, (member[0].lumiCoins || 0) + reward) }).where(eq(clanMembers.id, member[0].id));
+      res.json({ botChoice, result, reward });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/mini-games/history/:discordId", async (_req, res) => {
+    // Game history not stored in DB yet - return empty
+    res.json([]);
+  });
+
+  // ============================================================
+  // TOURNAMENTS & CLAN WARS API
+  // ============================================================
+  app.get("/api/tournaments", async (_req, res) => {
+    // Tournaments table doesn't exist yet, return mock data
+    res.json([]);
+  });
+
+  app.get("/api/clan-wars", async (_req, res) => {
+    res.json([]);
+  });
+
+  app.get("/api/tournaments/leaderboard", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { clanMembers } = await import("@shared/schema");
+      const { desc } = await import("drizzle-orm");
+      const members = await db.select({
+        discordId: clanMembers.discordId,
+        username: clanMembers.username,
+        avatar: clanMembers.avatar,
+        wins: clanMembers.wins,
+        losses: clanMembers.losses,
+      }).from(clanMembers).orderBy(desc(clanMembers.wins)).limit(20);
+      const leaderboard = members.map((m, i) => ({
+        rank: i + 1,
+        username: m.username,
+        discordId: m.discordId,
+        avatar: m.avatar,
+        wins: m.wins || 0,
+        losses: m.losses || 0,
+        score: ((m.wins || 0) * 3 - (m.losses || 0)),
+      }));
+      res.json(leaderboard);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/tournaments/:id/join", async (req, res) => {
+    res.json({ success: true, message: "Joined tournament" });
+  });
+
+  app.post("/api/tournaments", async (req, res) => {
+    res.json({ success: true, message: "Tournament creation coming soon" });
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;

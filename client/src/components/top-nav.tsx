@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Home, Trophy, Newspaper, Users, Info, BarChart3, MessageSquarePlus, MessagesSquare, ShoppingBag, Package, Coins, Menu, LogOut, LogIn, User as UserIcon, Gamepad2, Music2 } from "lucide-react";
+import { Home, Trophy, Newspaper, Users, Info, BarChart3, MessageSquarePlus, MessagesSquare, ShoppingBag, Package, Coins, Menu, LogOut, LogIn, User as UserIcon, Gamepad2, Music2, Award, ScrollText, ArrowLeftRight, Zap, Gift, Swords } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { CoinBalance } from "@/components/coin-balance";
 import { DiscordFlowerButton } from "@/components/discord-flower-button";
@@ -93,6 +93,46 @@ const menuItemsConfig = [
     key: "nav.music",
     url: "/music",
     icon: Music2,
+  },
+  {
+    key: "nav.achievements",
+    url: "/achievements",
+    icon: Award,
+  },
+  {
+    key: "nav.quests",
+    url: "/quests",
+    icon: ScrollText,
+  },
+  {
+    key: "nav.trading",
+    url: "/trading",
+    icon: ArrowLeftRight,
+  },
+  {
+    key: "nav.boosters",
+    url: "/boosters",
+    icon: Zap,
+  },
+  {
+    key: "nav.dailyRewards",
+    url: "/daily-rewards",
+    icon: Gift,
+  },
+  {
+    key: "nav.profile",
+    url: "/profile",
+    icon: UserIcon,
+  },
+  {
+    key: "nav.miniGames",
+    url: "/mini-games",
+    icon: Gamepad2,
+  },
+  {
+    key: "nav.clanWars",
+    url: "/clan-wars",
+    icon: Swords,
   },
 ];
 
