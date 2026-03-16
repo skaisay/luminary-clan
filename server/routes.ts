@@ -317,7 +317,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         }).then(r => { if (!r) throw new Error('no result'); return r; }),
 
         // Group B: Pollinations Mistral (fast alternative)
-        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 2000)).then(() =>
+        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 1500)).then(() =>
           tryProvider('mistral', async () => {
             const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
               method: 'POST',
@@ -336,8 +336,28 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
           }).then(r => { if (!r) throw new Error('no result'); return r; })
         ),
 
-        // Group C: Blackbox (starts after 4s delay as backup)
-        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 4000)).then(() =>
+        // Group C: Pollinations DeepSeek (strong for structured output)
+        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 1000)).then(() =>
+          tryProvider('deepseek', async () => {
+            const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'deepseek',
+                messages: chatMessages,
+                max_tokens: 2000,
+                temperature: 0.7,
+              }),
+              signal: AbortSignal.timeout(20000),
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            return data.choices?.[0]?.message?.content?.trim() || null;
+          }).then(r => { if (!r) throw new Error('no result'); return r; })
+        ),
+
+        // Group D: Blackbox (starts after 3s delay)
+        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 3000)).then(() =>
           tryProvider('blackbox', async () => {
             const resp = await fetch('https://api.blackbox.ai/api/chat', {
               method: 'POST',
@@ -355,6 +375,26 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
             if (!resp.ok) return null;
             const text = await resp.text();
             return text?.trim() || null;
+          }).then(r => { if (!r) throw new Error('no result'); return r; })
+        ),
+
+        // Group E: Pollinations Llama (extra backup)
+        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 2500)).then(() =>
+          tryProvider('llama', async () => {
+            const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'llama',
+                messages: chatMessages,
+                max_tokens: 2000,
+                temperature: 0.7,
+              }),
+              signal: AbortSignal.timeout(18000),
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            return data.choices?.[0]?.message?.content?.trim() || null;
           }).then(r => { if (!r) throw new Error('no result'); return r; })
         ),
       ]).catch(() => null);

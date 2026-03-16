@@ -212,7 +212,121 @@ function parseSteps(text: string): { clean: string; steps: AiStep[]; firstNav?: 
   return { clean, steps, firstNav };
 }
 
-// ==================== COMPONENT ====================
+// ==================== TASK SPLITTER & LOCAL HANDLER ====================
+
+// Split a multi-task user message into individual sub-tasks
+function splitTasks(text: string): string[] {
+  // Delimiters: "после этого", "потом", "затем", "далее", "и ещё", "и еще", "а также", "а потом", "после", "then", "after that", "also", "and then", "next"
+  const delimiters = /(?:\s+(?:после\s+этого|потом|затем|далее|и\s+ещ[её]|а\s+также|а\s+потом|после\s+чего|и\s+также|плюс|ну\s+и|then|after\s+that|and\s+then|also|next|afterwards)\s*[,.]?\s*)/gi;
+  const parts = text.split(delimiters).map(s => s.trim()).filter(s => s.length > 2);
+  // If no split happened, return original
+  return parts.length > 0 ? parts : [text];
+}
+
+// Try to handle a sub-task entirely locally without AI. Returns step commands string or null.
+function tryLocalAction(text: string, isRu: boolean, currentPath: string): string | null {
+  const lower = text.toLowerCase().trim();
+
+  // --- Navigation patterns ---
+  for (const [path, names] of Object.entries(NAV_ROUTES)) {
+    const ru = names.ru.toLowerCase();
+    const en = names.en.toLowerCase();
+    const ruStems = [ru, ru.replace(/а$|у$|ы$|е$|и$|ю$/,'')];
+    const navWords = isRu
+      ? ['открой', 'перейди в', 'перейди на', 'зайди в', 'зайди на', 'покажи', 'перейти в', 'перейти на', 'на страницу', 'в раздел', 'вкладк']
+      : ['open', 'go to', 'show', 'navigate to', 'visit', 'switch to'];
+    const matchesNav = navWords.some(w => {
+      return ruStems.some(stem => lower.includes(`${w} ${stem}`)) || lower.includes(`${w} ${en}`);
+    }) || lower === ru || lower === en || ruStems.some(s => lower === s);
+
+    if (matchesNav) {
+      const emoji = path.includes('music') ? '🎵' : path.includes('shop') ? '🛒' : path.includes('admin') && !path.includes('login') ? '🔐' : path.includes('trading') ? '💰' : path.includes('stat') ? '📊' : path.includes('leader') ? '🏆' : path.includes('profile') ? '👤' : path.includes('game') ? '🎮' : path.includes('roblox') ? '🔍' : '📄';
+      const label = isRu ? names.ru : names.en;
+      if (currentPath === path) {
+        return `${emoji} ${isRu ? 'Уже на' : 'Already on'} **${label}**!`;
+      }
+      return `${emoji} ${isRu ? 'Открываю' : 'Opening'} **${label}**! [STEP:1][NAV:${path}]`;
+    }
+  }
+
+  // --- Admin tab patterns ---
+  const adminTabMap: Record<string, string[]> = {
+    'tab-settings': ['настройки', 'настроек', 'settings'],
+    'tab-members': ['участник', 'мембер', 'members', 'участников'],
+    'tab-shop': ['магазин', 'шоп', 'товар', 'shop'],
+    'tab-news': ['новост', 'news'],
+    'tab-discord': ['discord', 'дискорд'],
+    'tab-convert': ['конверт', 'convert'],
+    'tab-pages': ['страниц', 'pages'],
+    'tab-requests': ['запрос', 'заявк', 'requests'],
+    'tab-forum': ['форум', 'forum'],
+    'tab-stats': ['статистик', 'stats', 'стат'],
+    'tab-monitoring': ['мониторинг', 'monitoring'],
+    'tab-transactions': ['транзакц', 'transactions'],
+    'tab-bans': ['бан', 'bans'],
+    'tab-decorations': ['декор', 'украш', 'decorations'],
+  };
+  for (const [tabId, keywords] of Object.entries(adminTabMap)) {
+    if (keywords.some(k => lower.includes(k)) && (lower.includes('таб') || lower.includes('вкладк') || lower.includes('tab') || lower.includes('раздел') || lower.includes('открой') || lower.includes('покажи') || lower.includes('перейди') || lower.includes('зайди') || lower.includes('посмотр') || lower.includes('дай') || lower.includes('show') || lower.includes('open'))) {
+      const emoji = tabId.includes('shop') ? '🛒' : tabId.includes('member') ? '👥' : tabId.includes('monitor') ? '📡' : tabId.includes('stat') ? '📊' : tabId.includes('news') ? '📰' : '⚙️';
+      const isOnAdmin = currentPath.includes('/admin') && !currentPath.includes('login');
+      if (isOnAdmin) {
+        return `${emoji} ${isRu ? 'Переключаю на' : 'Switching to'} **${tabId.replace('tab-','')}** [STEP:1][DO:click|${tabId}]`;
+      } else {
+        return `${emoji} ${isRu ? 'Открываю' : 'Opening'} **${tabId.replace('tab-','')}** [STEP:1][NAV:/admin][DO:click|${tabId}]`;
+      }
+    }
+  }
+
+  // --- Music patterns ---
+  const musicPatterns = isRu
+    ? ['поставь музыку', 'включи музыку', 'найди музыку', 'поставь трек', 'включи трек', 'найди трек', 'поставь песню', 'включи песню', 'найди песню', 'сыграй', 'проиграй', 'воспроизведи', 'послушать', 'поставь мне']
+    : ['play music', 'find music', 'play song', 'find song', 'play track', 'search music'];
+  for (const pat of musicPatterns) {
+    if (lower.includes(pat)) {
+      // Extract what comes after the pattern
+      const afterIdx = lower.indexOf(pat) + pat.length;
+      let query = text.substring(afterIdx).trim().replace(/^[,.:!]\s*/, '');
+      if (!query) query = text.replace(new RegExp(pat, 'i'), '').trim();
+      if (query && query.length > 1) {
+        const onMusic = currentPath === '/music';
+        if (onMusic) {
+          return `🎵 ${isRu ? 'Ищу' : 'Searching'} **${query}** [STEP:1][DO:fill|music-search|${query}][DO:wait|_|300][DO:click|music-play]`;
+        }
+        return `🎵 ${isRu ? 'Ищу' : 'Searching'} **${query}** [STEP:1][NAV:/music][DO:fill|music-search|${query}][DO:wait|_|300][DO:click|music-play]`;
+      }
+    }
+  }
+
+  // --- Roblox search ---
+  const robloxPatterns = isRu
+    ? ['найди игрока', 'найди пользовател', 'поищи игрока', 'поиск игрока', 'найди в roblox', 'найди в роблокс']
+    : ['find player', 'search player', 'find user', 'search user', 'find in roblox'];
+  for (const pat of robloxPatterns) {
+    if (lower.includes(pat)) {
+      const afterIdx = lower.indexOf(pat) + pat.length;
+      let query = text.substring(afterIdx).trim().replace(/^[,.:!]\s*/, '');
+      if (!query) query = text.replace(new RegExp(pat, 'i'), '').trim();
+      if (query && query.length > 1) {
+        const onRoblox = currentPath === '/roblox-tracker';
+        if (onRoblox) {
+          return `🔍 ${isRu ? 'Ищу' : 'Searching'} **${query}** [STEP:1][DO:fill|roblox-search|${query}][DO:wait|_|300][DO:click|roblox-find]`;
+        }
+        return `🔍 ${isRu ? 'Ищу' : 'Searching'} **${query}** [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|${query}][DO:wait|_|300][DO:click|roblox-find]`;
+      }
+    }
+  }
+
+  // --- Return to main/home ---
+  if ((isRu && (lower.includes('верн') && (lower.includes('главн') || lower.includes('домой') || lower.includes('на глав')))) ||
+      (!isRu && (lower.includes('go home') || lower.includes('go back') || lower.includes('return home') || lower.includes('back to main')))) {
+    if (currentPath === '/') return `🏠 ${isRu ? 'Уже на главной!' : 'Already on home!'}`;
+    return `🏠 ${isRu ? 'Возвращаюсь на' : 'Returning to'} **${isRu ? 'Главную' : 'Home'}**! [STEP:1][NAV:/]`;
+  }
+
+  return null; // Can't handle locally — send to AI
+}
+
 export function AiAssistant() {
   const [open, setOpen] = useState(() => {
     try { return sessionStorage.getItem('ai-chat-open') === '1'; } catch { return false; }
@@ -403,24 +517,84 @@ export function AiAssistant() {
   }, [pendingActions, stepQueue, currentStepIdx, processStep]);
 
   // Fast local navigation check — avoid API call for simple "open X" requests
+  // (Legacy — now mostly handled by tryLocalAction, kept as thin wrapper)
   function tryLocalNav(text: string): string | null {
-    const lower = text.toLowerCase().trim();
-    for (const [path, names] of Object.entries(NAV_ROUTES)) {
-      const ru = names.ru.toLowerCase();
-      const en = names.en.toLowerCase();
-      // Match patterns like "открой музыку", "go to shop", "зайди в магазин", "open members"
-      const patterns = [
-        `открой ${ru}`, `открой ${en}`, `перейди в ${ru}`, `перейди на ${ru}`,
-        `зайди в ${ru}`, `зайди на ${ru}`, `покажи ${ru}`, `go to ${en}`,
-        `open ${en}`, `show ${en}`, `открой ${ru.replace(/а$|у$|ы$/,'')}`
-      ];
-      if (patterns.some(p => lower.includes(p)) || lower === ru || lower === en) {
-        const emoji = path.includes('music') ? '🎵' : path.includes('shop') ? '🛒' : path.includes('admin') ? '🔐' : path.includes('trading') ? '💰' : '📄';
-        const label = isRu ? names.ru : names.en;
-        return `${emoji} ${isRu ? 'Открываю' : 'Opening'} **${label}**! [STEP:1][NAV:${path}]`;
+    return tryLocalAction(text, isRu, location);
+  }
+
+  // ==================== MULTI-TASK CHAIN ====================
+  // Process a chain of sub-tasks: handle locally where possible, AI for the rest
+  async function processTaskChain(tasks: string[], placeholderId: number, originalText: string) {
+    const allSteps: AiStep[] = [];
+    const responseTexts: string[] = [];
+    let currentPagePath = location; // track where we are as we chain
+
+    for (let i = 0; i < tasks.length; i++) {
+      const task = tasks[i].trim();
+      if (!task || task.length < 2) continue;
+
+      // Try local handling first (instant, no API call)
+      const localResult = tryLocalAction(task, isRu, currentPagePath);
+      if (localResult) {
+        const { clean, steps } = parseSteps(localResult);
+        responseTexts.push(clean);
+        for (const s of steps) {
+          allSteps.push(s);
+          if (s.nav) currentPagePath = s.nav; // track navigation
+        }
+        continue;
       }
+
+      // Complex task — send to AI
+      try {
+        const resp = await fetch('/api/ai-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: task }],
+            language,
+            currentPage: currentPagePath,
+          }),
+        });
+        if (!resp.ok) throw new Error('fail');
+        const data = await resp.json();
+        const reply = data.reply || '';
+        const { clean, steps } = parseSteps(reply);
+        responseTexts.push(clean);
+        for (const s of steps) {
+          allSteps.push(s);
+          if (s.nav) currentPagePath = s.nav;
+        }
+      } catch {
+        responseTexts.push(isRu ? `⚠️ Не удалось: "${task}"` : `⚠️ Failed: "${task}"`);
+      }
+
+      // Update placeholder with partial progress
+      setMsgs(prev => prev.map(m =>
+        m.id === placeholderId
+          ? { ...m, text: responseTexts.join('\n'), loading: i < tasks.length - 1 }
+          : m
+      ));
     }
-    return null;
+
+    // Final update
+    const finalText = responseTexts.join('\n') || (isRu ? 'Готово!' : 'Done!');
+    setMsgs(prev => prev.map(m =>
+      m.id === placeholderId
+        ? { ...m, text: finalText, loading: false, navPath: allSteps[0]?.nav }
+        : m
+    ));
+
+    // Execute all collected steps
+    if (allSteps.length > 0) {
+      setStepQueue(allSteps);
+      setTotalSteps(allSteps.length);
+      setCurrentStepIdx(0);
+      processStep(allSteps, 0);
+    }
+
+    setLoading(false);
   }
 
   // Send message
@@ -437,7 +611,16 @@ export function AiAssistant() {
     setLoading(true);
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
-    // Try fast local navigation first
+    // Split into sub-tasks
+    const tasks = splitTasks(content);
+
+    // If multiple tasks detected, use the chain processor
+    if (tasks.length > 1) {
+      processTaskChain(tasks, placeholder.id, content);
+      return;
+    }
+
+    // Single task — try local first, then AI
     const localReply = tryLocalNav(content);
     if (localReply) {
       const { clean, steps } = parseSteps(localReply);
