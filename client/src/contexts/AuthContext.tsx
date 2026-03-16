@@ -18,6 +18,8 @@ type AuthContextType = {
   isLoading: boolean;
   logout: () => void;
   setGuestMode: () => void;
+  refreshUser: () => void;
+  updateBalance: (newBalance: number) => void;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -51,6 +53,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsGuest(true);
   };
 
+  const refreshUser = () => {
+    queryClient.invalidateQueries({ queryKey: ['/auth/user'] });
+  };
+
+  const updateBalance = (newBalance: number) => {
+    queryClient.setQueryData(['/auth/user'], (old: any) => {
+      if (!old?.user) return old;
+      return { ...old, user: { ...old.user, lumiCoins: newBalance } };
+    });
+  };
+
   const user = authData?.user || null;
   const isAuthenticated = !!user && user.type === 'discord';
 
@@ -63,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         logout,
         setGuestMode,
+        refreshUser,
+        updateBalance,
       }}
     >
       {children}
