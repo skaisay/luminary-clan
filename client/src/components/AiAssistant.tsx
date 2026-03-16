@@ -39,6 +39,12 @@ interface AiAction {
   ms?: number;   // ms for wait
 }
 
+// A step in a multi-step workflow
+interface AiStep {
+  nav?: string;
+  actions: AiAction[];
+}
+
 interface ChatMsg {
   id: number;
   role: 'user' | 'assistant';
@@ -134,15 +140,14 @@ async function executeActions(actions: AiAction[]): Promise<void> {
   }
 }
 
-// Parse [DO:action|target|value] tags from AI response
-function parseActions(text: string): { clean: string; nav?: string; actions: AiAction[] } {
-  let clean = text;
+// Parse [DO:action|target|value] tags from a text fragment (no step markers)
+function parseActionsFromFragment(text: string): { nav?: string; actions: AiAction[] } {
   let nav: string | undefined;
   const actions: AiAction[] = [];
 
   // Parse [NAV:/path]
-  const navMatch = clean.match(/\[NAV:(\/[^\]]*)\]/);
-  if (navMatch) { nav = navMatch[1]; clean = clean.replace(navMatch[0], '').trim(); }
+  const navMatch = text.match(/\[NAV:(\/[^\]]*)\]/);
+  if (navMatch) nav = navMatch[1];
 
   // Parse [DO:action|target|value] tags
   const doRegex = /\[DO:(\w+)\|([^\]|]+)(?:\|([^\]]*))?\]/g;
@@ -154,17 +159,54 @@ function parseActions(text: string): { clean: string; nav?: string; actions: AiA
     if (['fill', 'click', 'wait', 'type'].includes(doType)) {
       actions.push({ do: doType, ai, val, ms: doType === 'wait' ? parseInt(val || '500') : undefined });
     }
-    clean = clean.replace(m[0], '');
   }
 
   // Backwards compat: parse [TYPE:text] (single input fill)
-  const typeMatch = clean.match(/\[TYPE:([^\]]*)\]/);
+  const typeMatch = text.match(/\[TYPE:([^\]]*)\]/);
   if (typeMatch && actions.length === 0) {
     actions.push({ do: 'type', ai: '_auto_', val: typeMatch[1] });
-    clean = clean.replace(typeMatch[0], '');
   }
 
-  return { clean: clean.trim(), nav, actions };
+  return { nav, actions };
+}
+
+// Parse multi-step AI response: [STEP:1]...[STEP:2]... with [NAV:] and [DO:] inside each step
+function parseSteps(text: string): { clean: string; steps: AiStep[]; firstNav?: string } {
+  let clean = text;
+  const steps: AiStep[] = [];
+
+  // Check for [STEP:N] markers
+  const hasSteps = /\[STEP:\d+\]/.test(text);
+
+  if (hasSteps) {
+    // Split by [STEP:N] markers — each segment is one step's tags
+    const segments = text.split(/\[STEP:\d+\]/);
+    for (const seg of segments) {
+      if (!seg.trim()) continue;
+      const { nav, actions } = parseActionsFromFragment(seg);
+      if (nav || actions.length > 0) {
+        steps.push({ nav, actions });
+      }
+    }
+  } else {
+    // No [STEP:] — single step (backward compat)
+    const { nav, actions } = parseActionsFromFragment(text);
+    if (nav || actions.length > 0) {
+      steps.push({ nav, actions });
+    }
+  }
+
+  // Remove all tags from displayed text
+  clean = clean
+    .replace(/\[STEP:\d+\]/g, '')
+    .replace(/\[NAV:\/[^\]]*\]/g, '')
+    .replace(/\[DO:\w+\|[^\]]*\]/g, '')
+    .replace(/\[TYPE:[^\]]*\]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const firstNav = steps.length > 0 ? steps[0].nav : undefined;
+  return { clean, steps, firstNav };
 }
 
 // ==================== COMPONENT ====================
@@ -178,6 +220,10 @@ export function AiAssistant() {
   const [greeted, setGreeted] = useState(false);
   const [navAction, setNavAction] = useState<{ path: string; label: string } | null>(null);
   const [pendingActions, setPendingActions] = useState<AiAction[]>([]);
+  // Multi-step queue
+  const [stepQueue, setStepQueue] = useState<AiStep[]>([]);
+  const [currentStepIdx, setCurrentStepIdx] = useState(0);
+  const [totalSteps, setTotalSteps] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recogRef = useRef<any>(null);
@@ -246,24 +292,79 @@ export function AiAssistant() {
     }, 900);
   }
 
+  // Process a specific step from the queue
+  const processStep = useCallback((steps: AiStep[], idx: number) => {
+    if (idx >= steps.length) {
+      // All steps done — clean up
+      setStepQueue([]);
+      setCurrentStepIdx(0);
+      setTotalSteps(0);
+      return;
+    }
+
+    const step = steps[idx];
+    setCurrentStepIdx(idx);
+
+    if (step.nav && NAV_ROUTES[step.nav]) {
+      // Has navigation — trigger overlay, store actions for after nav
+      setPendingActions(step.actions);
+      setNavAction({ path: step.nav, label: pageName(step.nav) });
+    } else if (step.actions.length > 0) {
+      // Actions only on current page
+      setTimeout(() => {
+        executeActions(step.actions).then(() => {
+          // Advance to next step after actions complete
+          const nextIdx = idx + 1;
+          if (nextIdx < steps.length) {
+            setTimeout(() => processStep(steps, nextIdx), 600);
+          } else {
+            setStepQueue([]);
+            setCurrentStepIdx(0);
+            setTotalSteps(0);
+          }
+        });
+      }, 300);
+    } else {
+      // Empty step — skip to next
+      const nextIdx = idx + 1;
+      if (nextIdx < steps.length) {
+        setTimeout(() => processStep(steps, nextIdx), 200);
+      } else {
+        setStepQueue([]);
+        setCurrentStepIdx(0);
+        setTotalSteps(0);
+      }
+    }
+  }, []);
+
   // After navigation overlay completes
   const handleNavComplete = useCallback(() => {
-    if (pendingActions.length > 0) {
-      const actions = [...pendingActions];
-      setPendingActions([]);
-      // Execute actions after page renders
-      setTimeout(() => {
-        // Handle _auto_ type (backwards compat)
-        const autoType = actions.find(a => a.ai === '_auto_');
-        if (autoType) {
-          autoTypeIntoInput(autoType.val || '');
-        } else {
-          executeActions(actions);
-        }
-      }, 800);
-    }
+    const actions = [...pendingActions];
+    setPendingActions([]);
     setNavAction(null);
-  }, [pendingActions]);
+
+    // Execute actions for current step, then advance to next
+    setTimeout(() => {
+      const autoType = actions.find(a => a.ai === '_auto_');
+      const doActions = autoType
+        ? () => { autoTypeIntoInput(autoType.val || ''); return Promise.resolve(); }
+        : () => executeActions(actions);
+
+      doActions().then(() => {
+        // Check if there are more steps in the queue
+        if (stepQueue.length > 0) {
+          const nextIdx = currentStepIdx + 1;
+          if (nextIdx < stepQueue.length) {
+            setTimeout(() => processStep(stepQueue, nextIdx), 800);
+          } else {
+            setStepQueue([]);
+            setCurrentStepIdx(0);
+            setTotalSteps(0);
+          }
+        }
+      });
+    }, 800);
+  }, [pendingActions, stepQueue, currentStepIdx, processStep]);
 
   // Send message
   const send = useCallback(async (text?: string) => {
@@ -297,19 +398,18 @@ export function AiAssistant() {
 
       if (!resp.ok) throw new Error('fail');
       const data = await resp.json();
-      const { clean, nav, actions } = parseActions(data.reply || txt.error);
+      const { clean, steps, firstNav } = parseSteps(data.reply || txt.error);
 
-      // Navigation with visual overlay
-      if (nav && NAV_ROUTES[nav]) {
-        if (actions.length > 0) setPendingActions(actions);
-        setNavAction({ path: nav, label: pageName(nav) });
-      } else if (actions.length > 0) {
-        // Actions on current page without navigation
-        setTimeout(() => executeActions(actions), 300);
+      // Start multi-step execution
+      if (steps.length > 0) {
+        setStepQueue(steps);
+        setTotalSteps(steps.length);
+        setCurrentStepIdx(0);
+        processStep(steps, 0);
       }
 
       setMsgs(prev => prev.map(m =>
-        m.id === placeholder.id ? { ...m, text: clean, loading: false, navPath: nav } : m
+        m.id === placeholder.id ? { ...m, text: clean, loading: false, navPath: firstNav } : m
       ));
     } catch {
       setMsgs(prev => prev.map(m =>
@@ -429,6 +529,7 @@ export function AiAssistant() {
         action={navAction}
         onNavigate={(path) => setLocation(path)}
         onComplete={handleNavComplete}
+        stepInfo={totalSteps > 1 ? { current: currentStepIdx + 1, total: totalSteps } : undefined}
       />
 
       {/* Floating button */}

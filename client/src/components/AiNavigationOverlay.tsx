@@ -6,10 +6,16 @@ interface NavAction {
   label: string;
 }
 
+interface StepInfo {
+  current: number;
+  total: number;
+}
+
 interface Props {
   action: NavAction | null;
   onNavigate: (path: string) => void;
   onComplete: () => void;
+  stepInfo?: StepInfo;
 }
 
 /*
@@ -24,7 +30,7 @@ interface Props {
   7 = exit (fade out, unscale)
 */
 
-export function AiNavigationOverlay({ action, onNavigate, onComplete }: Props) {
+export function AiNavigationOverlay({ action, onNavigate, onComplete, stepInfo }: Props) {
   const [phase, setPhase] = useState(0);
 
   useEffect(() => {
@@ -238,22 +244,56 @@ export function AiNavigationOverlay({ action, onNavigate, onComplete }: Props) {
       <div style={{
         position: 'absolute', bottom: 14, left: '50%',
         transform: 'translateX(-50%)',
-        display: 'flex', alignItems: 'center', gap: 8,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
       }}>
-        <div style={{
-          width: 5, height: 5, borderRadius: '50%',
-          background: 'rgba(167,139,250,.5)',
-          boxShadow: '0 0 6px rgba(167,139,250,.3)',
-          animation: 'ainGlow 1.5s ease-in-out infinite',
-        }} />
-        <span style={{
-          fontSize: 9, fontFamily: 'monospace',
-          letterSpacing: 3,
-          color: 'rgba(167,139,250,.35)',
-          textTransform: 'uppercase',
-        }}>
-          Luminary AI • Navigation
-        </span>
+        {/* Step progress indicator */}
+        {stepInfo && stepInfo.total > 1 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            {/* Step dots */}
+            {Array.from({ length: stepInfo.total }, (_, i) => (
+              <div key={i} style={{
+                width: i + 1 === stepInfo.current ? 18 : 6,
+                height: 6,
+                borderRadius: 3,
+                background: i + 1 <= stepInfo.current
+                  ? 'rgba(167,139,250,.7)'
+                  : 'rgba(167,139,250,.15)',
+                boxShadow: i + 1 === stepInfo.current ? '0 0 8px rgba(167,139,250,.4)' : 'none',
+                transition: 'all .3s ease',
+              }} />
+            ))}
+            <span style={{
+              fontSize: 10, fontFamily: 'monospace',
+              letterSpacing: 1,
+              color: 'rgba(167,139,250,.55)',
+              marginLeft: 4,
+            }}>
+              {stepInfo.current}/{stepInfo.total}
+            </span>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{
+            width: 5, height: 5, borderRadius: '50%',
+            background: 'rgba(167,139,250,.5)',
+            boxShadow: '0 0 6px rgba(167,139,250,.3)',
+            animation: 'ainGlow 1.5s ease-in-out infinite',
+          }} />
+          <span style={{
+            fontSize: 9, fontFamily: 'monospace',
+            letterSpacing: 3,
+            color: 'rgba(167,139,250,.35)',
+            textTransform: 'uppercase',
+          }}>
+            {stepInfo && stepInfo.total > 1
+              ? `Luminary AI • Step ${stepInfo.current} of ${stepInfo.total}`
+              : 'Luminary AI • Navigation'
+            }
+          </span>
+        </div>
       </div>
     </div>,
     document.body
