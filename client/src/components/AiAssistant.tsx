@@ -214,33 +214,96 @@ function parseSteps(text: string): { clean: string; steps: AiStep[]; firstNav?: 
 
 // ==================== TASK SPLITTER & LOCAL HANDLER ====================
 
+// Detect "create N items" patterns and expand into N individual tasks
+function expandMultiCreate(text: string): string[] | null {
+  // Russian: "создай 5 ролей", "добавь 10 товаров", "сделай 3 предмета"
+  const ruMatch = text.match(/(?:создай|добавь|сделай|придумай)\s+(\d+)\s+(.+)/i);
+  if (ruMatch) {
+    const count = Math.min(parseInt(ruMatch[1]), 15); // cap at 15
+    const what = ruMatch[2].trim();
+    // Pass the full context (like "красивых" or "с английскими названиями") to each sub-task
+    return Array.from({ length: count }, (_, i) =>
+      `создай 1 ${what} (номер ${i + 1} из ${count}, придумай уникальное название)`
+    );
+  }
+  // English: "create 5 roles", "add 10 items", "make 3 products"
+  const enMatch = text.match(/(?:create|add|make)\s+(\d+)\s+(.+)/i);
+  if (enMatch) {
+    const count = Math.min(parseInt(enMatch[1]), 15);
+    const what = enMatch[2].trim();
+    return Array.from({ length: count }, (_, i) =>
+      `create 1 ${what} (number ${i + 1} of ${count}, invent a unique name)`
+    );
+  }
+  return null;
+}
+
 // Split a multi-task user message into individual sub-tasks
 function splitTasks(text: string): string[] {
-  // Delimiters: "после этого", "потом", "затем", "далее", "и ещё", "и еще", "а также", "а потом", "после", "then", "after that", "also", "and then", "next"
-  const delimiters = /(?:\s+(?:после\s+этого|потом|затем|далее|и\s+ещ[её]|а\s+также|а\s+потом|после\s+чего|и\s+также|плюс|ну\s+и|then|after\s+that|and\s+then|also|next|afterwards)\s*[,.]?\s*)/gi;
+  // First check for multi-create pattern
+  const expanded = expandMultiCreate(text);
+  if (expanded && expanded.length > 1) return expanded;
+
+  // Delimiters: "после этого", "потом", "затем", "далее", "и ещё", "а также", etc.
+  const delimiters = /(?:\s*(?:,\s*(?:потом|затем|далее|после|и|а))\s+|\s+(?:после\s+этого|потом|затем|далее|и\s+ещ[её]|а\s+также|а\s+потом|после\s+чего|и\s+также|плюс|ну\s+и|then|after\s+that|and\s+then|also|next|afterwards)\s*[,.]?\s*)/gi;
   const parts = text.split(delimiters).map(s => s.trim()).filter(s => s.length > 2);
-  // If no split happened, return original
-  return parts.length > 0 ? parts : [text];
+  if (parts.length > 1) return parts;
+
+  // Also try splitting by just commas for list-style requests like "открой музыку, статистику, магазин"
+  // Only if the text has navigation-style words
+  const hasNavWord = /(?:открой|зайди|перейди|покажи|go to|open|show|visit)/i.test(text);
+  if (hasNavWord && text.includes(',')) {
+    const commaParts = text.split(',').map(s => s.trim()).filter(s => s.length > 2);
+    if (commaParts.length > 1) {
+      // Propagate the navigation verb from the first part to subsequent parts that lack one
+      const firstPart = commaParts[0];
+      const verbMatch = firstPart.match(/^(открой|зайди в|зайди на|перейди в|перейди на|покажи|go to|open|show|visit)\s+/i);
+      if (verbMatch) {
+        const verb = verbMatch[1];
+        return commaParts.map((part, i) => {
+          if (i === 0) return part;
+          // Only add verb if part doesn't already start with one
+          if (/^(открой|зайди|перейди|покажи|go to|open|show|visit)/i.test(part)) return part;
+          return `${verb} ${part}`;
+        });
+      }
+      return commaParts;
+    }
+  }
+
+  return [text];
 }
 
 // Try to handle a sub-task entirely locally without AI. Returns step commands string or null.
 function tryLocalAction(text: string, isRu: boolean, currentPath: string): string | null {
   const lower = text.toLowerCase().trim();
 
-  // --- Navigation patterns ---
+  // --- Navigation patterns (expanded matching) ---
   for (const [path, names] of Object.entries(NAV_ROUTES)) {
     const ru = names.ru.toLowerCase();
     const en = names.en.toLowerCase();
-    const ruStems = [ru, ru.replace(/а$|у$|ы$|е$|и$|ю$/,'')];
-    const navWords = isRu
-      ? ['открой', 'перейди в', 'перейди на', 'зайди в', 'зайди на', 'покажи', 'перейти в', 'перейти на', 'на страницу', 'в раздел', 'вкладк']
-      : ['open', 'go to', 'show', 'navigate to', 'visit', 'switch to'];
-    const matchesNav = navWords.some(w => {
-      return ruStems.some(stem => lower.includes(`${w} ${stem}`)) || lower.includes(`${w} ${en}`);
-    }) || lower === ru || lower === en || ruStems.some(s => lower === s);
+    // Generate multiple stem variants for Russian morphology
+    const ruBase = ru.replace(/а$|у$|ы$|е$|и$|ю$|ой$|ий$|ей$/,'');
+    const ruStems = [ru, ruBase, ru + 'у', ru + 'е'];
+    const navWordsRu = ['открой', 'перейди в', 'перейди на', 'зайди в', 'зайди на', 'покажи', 'перейти в', 'перейти на', 'на страницу', 'в раздел', 'раздел', 'вкладк', 'на', 'в'];
+    const navWordsEn = ['open', 'go to', 'show', 'navigate to', 'visit', 'switch to', 'go'];
+
+    let matchesNav = false;
+    if (isRu) {
+      matchesNav = navWordsRu.some(w => ruStems.some(stem => lower.includes(`${w} ${stem}`)));
+      // Also match bare page name if it's the entire or most of input
+      if (!matchesNav && lower.length < 30) {
+        matchesNav = ruStems.some(s => lower === s || lower.endsWith(` ${s}`) || lower.startsWith(`${s} `));
+      }
+    } else {
+      matchesNav = navWordsEn.some(w => lower.includes(`${w} ${en}`));
+      if (!matchesNav && lower.length < 30) {
+        matchesNav = lower === en || lower.endsWith(` ${en}`) || lower.startsWith(`${en} `);
+      }
+    }
 
     if (matchesNav) {
-      const emoji = path.includes('music') ? '🎵' : path.includes('shop') ? '🛒' : path.includes('admin') && !path.includes('login') ? '🔐' : path.includes('trading') ? '💰' : path.includes('stat') ? '📊' : path.includes('leader') ? '🏆' : path.includes('profile') ? '👤' : path.includes('game') ? '🎮' : path.includes('roblox') ? '🔍' : '📄';
+      const emoji = path.includes('music') ? '🎵' : path.includes('shop') ? '🛒' : path.includes('admin') && !path.includes('login') ? '🔐' : path.includes('trading') ? '💰' : path.includes('stat') ? '📊' : path.includes('leader') ? '🏆' : path.includes('profile') ? '👤' : path.includes('game') ? '🎮' : path.includes('roblox') ? '🔍' : path.includes('news') ? '📰' : path.includes('quest') ? '⚔️' : path.includes('achieve') ? '🏅' : path.includes('forum') ? '💬' : path.includes('reward') ? '🎁' : path.includes('boost') ? '🚀' : path.includes('war') ? '⚔️' : path.includes('invent') ? '🎒' : '📄';
       const label = isRu ? names.ru : names.en;
       if (currentPath === path) {
         return `${emoji} ${isRu ? 'Уже на' : 'Already on'} **${label}**!`;

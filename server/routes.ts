@@ -286,8 +286,8 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       async function tryProvider(name: string, fn: () => Promise<string | null>): Promise<{reply: string; provider: string} | null> {
         try {
           const result = await fn();
-          if (result && result.length > 3 && !result.includes('<!DOCTYPE')) {
-            console.log(`[AI] ${name} success`);
+          if (result && result.length > 3 && !result.includes('<!DOCTYPE') && !result.includes('$@$')) {
+            console.log(`[AI] ${name} success (${result.length} chars)`);
             return { reply: result, provider: name };
           }
         } catch (e: any) {
@@ -296,131 +296,69 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         return null;
       }
 
-      // Race providers in parallel — first valid response wins
-      const raceResult = await Promise.any([
-        // Group A: Pollinations OpenAI (most capable)
-        tryProvider('pollinations', async () => {
+      // Helper: Pollinations provider factory (no delays — all start instantly)
+      function pollinationsProvider(model: string, timeout: number) {
+        return tryProvider(`poll-${model}`, async () => {
           const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'openai',
-              messages: chatMessages,
-              max_tokens: 2000,
-              temperature: 0.7,
-            }),
-            signal: AbortSignal.timeout(20000),
+            body: JSON.stringify({ model, messages: chatMessages, max_tokens: 2000, temperature: 0.7 }),
+            signal: AbortSignal.timeout(timeout),
           });
           if (!resp.ok) return null;
           const data = await resp.json();
           return data.choices?.[0]?.message?.content?.trim() || null;
-        }).then(r => { if (!r) throw new Error('no result'); return r; }),
+        }).then(r => { if (!r) throw new Error('x'); return r; });
+      }
 
-        // Group B: Pollinations Mistral (fast alternative)
-        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 1500)).then(() =>
-          tryProvider('mistral', async () => {
-            const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model: 'mistral',
-                messages: chatMessages,
-                max_tokens: 2000,
-                temperature: 0.7,
-              }),
-              signal: AbortSignal.timeout(18000),
-            });
-            if (!resp.ok) return null;
-            const data = await resp.json();
-            return data.choices?.[0]?.message?.content?.trim() || null;
-          }).then(r => { if (!r) throw new Error('no result'); return r; })
-        ),
+      // Race ALL providers simultaneously — zero delays, first response wins
+      const raceResult = await Promise.any([
+        pollinationsProvider('openai', 22000),
+        pollinationsProvider('mistral', 20000),
+        pollinationsProvider('deepseek', 22000),
+        pollinationsProvider('llama', 20000),
+        pollinationsProvider('qwen', 20000),
+        pollinationsProvider('claude-hybridspace', 22000),
 
-        // Group C: Pollinations DeepSeek (strong for structured output)
-        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 1000)).then(() =>
-          tryProvider('deepseek', async () => {
-            const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model: 'deepseek',
-                messages: chatMessages,
-                max_tokens: 2000,
-                temperature: 0.7,
-              }),
-              signal: AbortSignal.timeout(20000),
-            });
-            if (!resp.ok) return null;
-            const data = await resp.json();
-            return data.choices?.[0]?.message?.content?.trim() || null;
-          }).then(r => { if (!r) throw new Error('no result'); return r; })
-        ),
+        // Blackbox AI
+        tryProvider('blackbox', async () => {
+          const resp = await fetch('https://api.blackbox.ai/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: lastUserMsg }],
+              model: 'gpt-4o-mini',
+              max_tokens: 2000,
+            }),
+            signal: AbortSignal.timeout(18000),
+          });
+          if (!resp.ok) return null;
+          const text = await resp.text();
+          return text?.trim() || null;
+        }).then(r => { if (!r) throw new Error('x'); return r; }),
 
-        // Group D: Blackbox (starts after 3s delay)
-        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 3000)).then(() =>
-          tryProvider('blackbox', async () => {
-            const resp = await fetch('https://api.blackbox.ai/api/chat', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user', content: lastUserMsg }
-                ],
-                model: 'gpt-4o-mini',
-                max_tokens: 2000,
-              }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (!resp.ok) return null;
-            const text = await resp.text();
-            return text?.trim() || null;
-          }).then(r => { if (!r) throw new Error('no result'); return r; })
-        ),
-
-        // Group E: Pollinations Llama (extra backup)
-        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 2500)).then(() =>
-          tryProvider('llama', async () => {
-            const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model: 'llama',
-                messages: chatMessages,
-                max_tokens: 2000,
-                temperature: 0.7,
-              }),
-              signal: AbortSignal.timeout(18000),
-            });
-            if (!resp.ok) return null;
-            const data = await resp.json();
-            return data.choices?.[0]?.message?.content?.trim() || null;
-          }).then(r => { if (!r) throw new Error('no result'); return r; })
-        ),
+        // HuggingFace Zephyr (also in race, no longer last-resort)
+        tryProvider('huggingface', async () => {
+          const resp = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              inputs: `<|system|>\n${systemPrompt}</s>\n<|user|>\n${lastUserMsg}</s>\n<|assistant|>\n`,
+              parameters: { max_new_tokens: 1000, temperature: 0.7 },
+            }),
+            signal: AbortSignal.timeout(18000),
+          });
+          if (!resp.ok) return null;
+          const data = await resp.json();
+          const text = Array.isArray(data) ? data[0]?.generated_text : data?.generated_text;
+          if (!text) return null;
+          return text.split('<|assistant|>').pop()?.replace('</s>', '').trim() || null;
+        }).then(r => { if (!r) throw new Error('x'); return r; }),
       ]).catch(() => null);
 
       if (raceResult) {
         return res.json({ reply: raceResult.reply, provider: raceResult.provider });
       }
-
-      // If race failed, try HuggingFace as last resort
-      const hfResult = await tryProvider('huggingface', async () => {
-        const resp = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            inputs: `<|system|>\n${systemPrompt}</s>\n<|user|>\n${lastUserMsg}</s>\n<|assistant|>\n`,
-            parameters: { max_new_tokens: 1000, temperature: 0.7 },
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!resp.ok) return null;
-        const data = await resp.json();
-        const text = Array.isArray(data) ? data[0]?.generated_text : data?.generated_text;
-        if (!text) return null;
-        return text.split('<|assistant|>').pop()?.replace('</s>', '').trim() || null;
-      });
-      if (hfResult) return res.json(hfResult);
 
       // All providers failed — give a helpful fallback, not just an error
       const fallback = language === 'ru' 
