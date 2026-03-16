@@ -396,14 +396,32 @@ function tryLocalAction(text: string, isRu: boolean, currentPath: string): strin
     }
   }
 
+  // --- Russian word-number converter ---
+  const ruWordToNum: Record<string, number> = {
+    'один': 1, 'одну': 1, 'одна': 1, 'одно': 1,
+    'два': 2, 'две': 2, 'двух': 2,
+    'три': 3, 'трёх': 3, 'трех': 3,
+    'четыре': 4, 'четырёх': 4, 'четырех': 4,
+    'пять': 5, 'пяти': 5,
+    'шесть': 6, 'шести': 6,
+    'семь': 7, 'семи': 7,
+    'восемь': 8, 'восьми': 8,
+    'девять': 9, 'девяти': 9,
+    'десять': 10, 'десяти': 10,
+  };
+  // Replace Russian word-numbers with digits in text
+  const lowerNum = lower.replace(/(?:один[уа]?|одно|дв[ае]|двух|три|трёх|трех|четыр[её]х|четыре|пять|пяти|шесть|шести|семь|семи|восемь|восьми|девять|девяти|десять|десяти)/gi, (m) => {
+    return String(ruWordToNum[m.toLowerCase()] || m);
+  });
+
   // --- Mini-games: wheel of fortune ---
   const wheelPatterns = /(?:колес|фортун|wheel|fortune|рулетк|крути|spin|вращ)/i;
   if (wheelPatterns.test(lower) || (lower.includes('сыграй') && hasGameContext)) {
     // Extract bet amount if specified
-    const betMatch = lower.match(/(?:ставк|bet|на)\s*(\d+)/);
+    const betMatch = lowerNum.match(/(?:ставк|bet|на)\s*(\d+)/i);
     const bet = betMatch ? parseInt(betMatch[1]) : null;
-    // Extract round count
-    const roundMatch = lower.match(/(\d+)\s*(?:раз|раунд|round|time|крутк|спин)/i);
+    // Extract round count (uses word-number converted text)
+    const roundMatch = lowerNum.match(/(\d+)\s*(?:раз|раунд|round|time|крутк|спин)/i);
     const rounds = roundMatch ? Math.min(parseInt(roundMatch[1]), 50) : null;
     // Also check "несколько раз" pattern
     const severalMatch = /(?:несколько|пару|couple|few|several)\s*(?:раз|раунд|round)/i.test(lower);
@@ -420,7 +438,7 @@ function tryLocalAction(text: string, isRu: boolean, currentPath: string): strin
     // Click wheel tab + set bet
     steps.push(`[STEP:${stepNum}][DO:click|game-wheel][DO:wait|_|400]`);
     stepNum++;
-    if (bet && [10, 25, 50, 100].includes(bet)) {
+    if (bet && [100, 1000, 10000].includes(bet)) {
       steps.push(`[STEP:${stepNum}][DO:click|wheel-bet-${bet}][DO:wait|_|300]`);
       stepNum++;
     }
@@ -437,7 +455,7 @@ function tryLocalAction(text: string, isRu: boolean, currentPath: string): strin
   // --- Mini-games: rock paper scissors ---
   const rpsPatterns = /(?:камень.?ножниц|ножниц.?бумаг|rock.?paper|paper.?scissor|рпс|rps)/i;
   if (rpsPatterns.test(lower)) {
-    const betMatch = lower.match(/(?:ставк|bet|на)\s*(\d+)/);
+    const betMatch = lowerNum.match(/(?:ставк|bet|на)\s*(\d+)/i);
     const bet = betMatch ? parseInt(betMatch[1]) : null;
     const choices = ['rock', 'paper', 'scissors'];
     const randomChoice = choices[Math.floor(Math.random() * 3)];
@@ -452,7 +470,7 @@ function tryLocalAction(text: string, isRu: boolean, currentPath: string): strin
     }
     steps.push(`[STEP:${stepNum}][DO:click|game-rps][DO:wait|_|400]`);
     stepNum++;
-    if (bet && [10, 25, 50, 100].includes(bet)) {
+    if (bet && [100, 1000, 10000].includes(bet)) {
       steps.push(`[STEP:${stepNum}][DO:click|rps-bet-${bet}][DO:wait|_|300]`);
       stepNum++;
     }

@@ -212,7 +212,7 @@ tab-settings: input-clan-name, input-clan-tag, textarea-description, input-hero-
         if (cp.includes('convert')) f += `convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion\n`;
         if (cp.includes('forum')) f += `forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic\n`;
         if (cp.includes('request')) f += `requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request\n`;
-        if (cp.includes('mini-game') || !cp.includes('admin')) f += `mini-games: game-wheel(таб колесо), game-rps(таб камень-ножницы), game-history(история). wheel-bet-10/25/50/100(ставки), wheel-spin(крутить). rps-rock/rps-paper/rps-scissors(выбор), rps-bet-10/25/50/100(ставки)\n`;
+        if (cp.includes('mini-game') || !cp.includes('admin')) f += `mini-games: game-wheel(таб колесо), game-rps(таб камень-ножницы), game-coinflip(монетка), game-dice(кости), game-history(история). wheel-bet-100/1000/10000+MAX(ставки), wheel-spin(крутить). rps-rock/rps-paper/rps-scissors(выбор). coin-heads/coin-tails. dice-high/dice-low/dice-even/dice-odd\n`;
         if (!cp.includes('admin')) f += `admin/login: input-username, input-password, button-login\n`;
         return f.trim();
       }
@@ -231,7 +231,7 @@ tab-settings: input-clan-name, input-clan-tag, textarea-description, input-hero-
         if (cp.includes('convert')) f += `convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion\n`;
         if (cp.includes('forum')) f += `forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic\n`;
         if (cp.includes('request')) f += `requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request\n`;
-        if (cp.includes('mini-game') || !cp.includes('admin')) f += `mini-games: game-wheel(wheel tab), game-rps(rock-paper-scissors tab), game-history(history). wheel-bet-10/25/50/100(bets), wheel-spin(spin). rps-rock/rps-paper/rps-scissors(choice), rps-bet-10/25/50/100(bets)\n`;
+        if (cp.includes('mini-game') || !cp.includes('admin')) f += `mini-games: game-wheel(wheel tab), game-rps(rock-paper-scissors tab), game-coinflip(coin flip), game-dice(dice), game-history(history). wheel-bet-100/1000/10000+MAX(bets), wheel-spin(spin). rps-rock/rps-paper/rps-scissors(choice). coin-heads/coin-tails. dice-high/dice-low/dice-even/dice-odd\n`;
         if (!cp.includes('admin')) f += `admin/login: input-username, input-password, button-login\n`;
         return f.trim();
       }
@@ -4101,39 +4101,6 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   });
 
   // ============================================================
-  // PVP DUEL IN-MEMORY STORE
-  // ============================================================
-  interface DuelData {
-    id: string;
-    challengerId: string;
-    challengerName: string;
-    challengerAvatar: string | null;
-    opponentId: string | null;
-    opponentName: string | null;
-    opponentAvatar: string | null;
-    bet: number;
-    challengerChoice: string | null;
-    opponentChoice: string | null;
-    winnerId: string | null;
-    winnerName: string | null;
-    status: 'pending' | 'choosing' | 'resolved' | 'cancelled';
-    resultType: string | null;
-    challengerNewBalance: number | null;
-    opponentNewBalance: number | null;
-    createdAt: number;
-  }
-  const activeDuels = new Map<string, DuelData>();
-  // Cleanup old duels every 60s
-  setInterval(() => {
-    const now = Date.now();
-    for (const [id, duel] of activeDuels) {
-      if (now - duel.createdAt > 10 * 60 * 1000) activeDuels.delete(id);
-    }
-  }, 60000);
-  const GEMS = ['ruby', 'sapphire', 'emerald'];
-  const GEM_BEATS: Record<string, string> = { ruby: 'emerald', emerald: 'sapphire', sapphire: 'ruby' };
-
-  // ============================================================
   // MINI-GAMES API
   // ============================================================
   app.post("/api/mini-games/wheel", async (req, res) => {
@@ -4148,7 +4115,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
       if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
       // Multiplier-based wheel: must match client WHEEL_SEGMENTS order
-      const multipliers = [0, 0.5, 1.5, 0, 2, 0.5, 3, 1, 0.5, 1.5, 5, 1];
+      const multipliers = [0, 0.5, 0, 1, 0.5, 0, 1.5, 0.5, 0, 1, 2, 3];
       const segmentIndex = Math.floor(Math.random() * multipliers.length);
       const multiplier = multipliers[segmentIndex];
       const payout = Math.floor(betAmount * multiplier);
@@ -4278,231 +4245,6 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       res.json(history);
     } catch {
       res.json([]);
-    }
-  });
-
-  // ============================================================
-  // PVP DUEL ENDPOINTS
-  // ============================================================
-
-  // Create a duel challenge
-  app.post("/api/mini-games/duel/create", async (req, res) => {
-    try {
-      const { db } = await import("./db");
-      const { clanMembers } = await import("@shared/schema");
-      const { eq } = await import("drizzle-orm");
-      const { discordId, bet } = req.body;
-      if (!discordId || !bet || bet < 10) return res.status(400).json({ error: "discordId and bet (min 10) required" });
-      const betAmount = Math.floor(Math.max(10, Number(bet) || 0));
-      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
-      if (!member[0]) return res.status(404).json({ error: "Member not found" });
-      if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
-      // Check if player already has a pending/active duel
-      for (const d of activeDuels.values()) {
-        if ((d.challengerId === discordId || d.opponentId === discordId) && (d.status === 'pending' || d.status === 'choosing')) {
-          return res.status(400).json({ error: "You already have an active duel" });
-        }
-      }
-      // Deduct bet (escrow)
-      const newBalance = Math.max(0, (member[0].lumiCoins || 0) - betAmount);
-      await db.update(clanMembers).set({ lumiCoins: newBalance }).where(eq(clanMembers.id, member[0].id));
-      const duelId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-      const duel: DuelData = {
-        id: duelId,
-        challengerId: discordId,
-        challengerName: member[0].username || 'Player',
-        challengerAvatar: member[0].avatar || null,
-        opponentId: null,
-        opponentName: null,
-        opponentAvatar: null,
-        bet: betAmount,
-        challengerChoice: null,
-        opponentChoice: null,
-        winnerId: null,
-        winnerName: null,
-        status: 'pending',
-        resultType: null,
-        challengerNewBalance: newBalance,
-        opponentNewBalance: null,
-        createdAt: Date.now(),
-      };
-      activeDuels.set(duelId, duel);
-      res.json({ duel, newBalance });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // List open duels
-  app.get("/api/mini-games/duel/list", async (_req, res) => {
-    const duels = Array.from(activeDuels.values())
-      .filter(d => d.status === 'pending' || d.status === 'choosing')
-      .map(d => ({
-        id: d.id,
-        challengerId: d.challengerId,
-        challengerName: d.challengerName,
-        challengerAvatar: d.challengerAvatar,
-        bet: d.bet,
-        status: d.status,
-        opponentId: d.opponentId,
-        opponentName: d.opponentName,
-        opponentAvatar: d.opponentAvatar,
-        createdAt: d.createdAt,
-      }));
-    res.json(duels);
-  });
-
-  // Accept a duel
-  app.post("/api/mini-games/duel/accept", async (req, res) => {
-    try {
-      const { db } = await import("./db");
-      const { clanMembers } = await import("@shared/schema");
-      const { eq } = await import("drizzle-orm");
-      const { duelId, discordId } = req.body;
-      const duel = activeDuels.get(duelId);
-      if (!duel) return res.status(404).json({ error: "Duel not found" });
-      if (duel.status !== 'pending') return res.status(400).json({ error: "Duel already started" });
-      if (duel.challengerId === discordId) return res.status(400).json({ error: "Can't accept your own duel" });
-      // Check if player already has active duel
-      for (const d of activeDuels.values()) {
-        if ((d.challengerId === discordId || d.opponentId === discordId) && (d.status === 'pending' || d.status === 'choosing') && d.id !== duelId) {
-          return res.status(400).json({ error: "You already have an active duel" });
-        }
-      }
-      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
-      if (!member[0]) return res.status(404).json({ error: "Member not found" });
-      if ((member[0].lumiCoins || 0) < duel.bet) return res.status(400).json({ error: "Not enough LumiCoins" });
-      // Deduct bet (escrow)
-      const newBalance = Math.max(0, (member[0].lumiCoins || 0) - duel.bet);
-      await db.update(clanMembers).set({ lumiCoins: newBalance }).where(eq(clanMembers.id, member[0].id));
-      duel.opponentId = discordId;
-      duel.opponentName = member[0].username || 'Player';
-      duel.opponentAvatar = member[0].avatar || null;
-      duel.opponentNewBalance = newBalance;
-      duel.status = 'choosing';
-      res.json({ duel: { ...duel, challengerChoice: null, opponentChoice: null }, newBalance });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Submit choice in a duel
-  app.post("/api/mini-games/duel/choose", async (req, res) => {
-    try {
-      const { db } = await import("./db");
-      const { clanMembers, gameHistory } = await import("@shared/schema");
-      const { eq } = await import("drizzle-orm");
-      const { duelId, discordId, choice } = req.body;
-      if (!GEMS.includes(choice)) return res.status(400).json({ error: "Invalid choice" });
-      const duel = activeDuels.get(duelId);
-      if (!duel) return res.status(404).json({ error: "Duel not found" });
-      if (duel.status !== 'choosing') return res.status(400).json({ error: "Duel not in choosing phase" });
-      if (discordId === duel.challengerId) {
-        if (duel.challengerChoice) return res.status(400).json({ error: "Already chosen" });
-        duel.challengerChoice = choice;
-      } else if (discordId === duel.opponentId) {
-        if (duel.opponentChoice) return res.status(400).json({ error: "Already chosen" });
-        duel.opponentChoice = choice;
-      } else {
-        return res.status(403).json({ error: "Not in this duel" });
-      }
-      // If both have chosen — resolve
-      if (duel.challengerChoice && duel.opponentChoice) {
-        duel.status = 'resolved';
-        if (duel.challengerChoice === duel.opponentChoice) {
-          // Draw — return bets
-          duel.resultType = 'draw';
-          const cMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, duel.challengerId)).limit(1);
-          const oMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, duel.opponentId!)).limit(1);
-          if (cMember[0]) {
-            const nb = (cMember[0].lumiCoins || 0) + duel.bet;
-            await db.update(clanMembers).set({ lumiCoins: nb }).where(eq(clanMembers.id, cMember[0].id));
-            duel.challengerNewBalance = nb;
-          }
-          if (oMember[0]) {
-            const nb = (oMember[0].lumiCoins || 0) + duel.bet;
-            await db.update(clanMembers).set({ lumiCoins: nb }).where(eq(clanMembers.id, oMember[0].id));
-            duel.opponentNewBalance = nb;
-          }
-        } else {
-          // Determine winner: Ruby > Emerald > Sapphire > Ruby
-          const challengerWins = GEM_BEATS[duel.challengerChoice] === duel.opponentChoice;
-          const wId = challengerWins ? duel.challengerId : duel.opponentId!;
-          const lId = challengerWins ? duel.opponentId! : duel.challengerId;
-          duel.winnerId = wId;
-          duel.winnerName = challengerWins ? duel.challengerName : duel.opponentName;
-          duel.resultType = challengerWins ? 'win:challenger' : 'win:opponent';
-          // Winner gets 2*bet
-          const wMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, wId)).limit(1);
-          if (wMember[0]) {
-            const nb = (wMember[0].lumiCoins || 0) + duel.bet * 2;
-            await db.update(clanMembers).set({ lumiCoins: nb }).where(eq(clanMembers.id, wMember[0].id));
-            if (wId === duel.challengerId) duel.challengerNewBalance = nb;
-            else duel.opponentNewBalance = nb;
-          }
-          // Loser gets nothing back (already deducted)
-          const lMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, lId)).limit(1);
-          if (lMember[0]) {
-            if (lId === duel.challengerId) duel.challengerNewBalance = lMember[0].lumiCoins || 0;
-            else duel.opponentNewBalance = lMember[0].lumiCoins || 0;
-          }
-        }
-        const reward = duel.resultType === 'draw' ? 0 : duel.bet;
-        try { await db.insert(gameHistory).values({ discordId: duel.challengerId, game: 'duel', bet: duel.bet, reward: duel.resultType === 'win:challenger' ? duel.bet : duel.resultType === 'draw' ? 0 : -duel.bet, result: duel.resultType || '' }); } catch {}
-        try { await db.insert(gameHistory).values({ discordId: duel.opponentId!, game: 'duel', bet: duel.bet, reward: duel.resultType === 'win:opponent' ? duel.bet : duel.resultType === 'draw' ? 0 : -duel.bet, result: duel.resultType || '' }); } catch {}
-        // Auto-delete after 30s
-        setTimeout(() => activeDuels.delete(duelId), 30000);
-      }
-      // Return duel (hide other player's choice if not resolved)
-      const safe = { ...duel };
-      if (duel.status !== 'resolved') {
-        if (discordId === duel.challengerId) safe.opponentChoice = duel.opponentChoice ? 'hidden' : null;
-        else safe.challengerChoice = duel.challengerChoice ? 'hidden' : null;
-      }
-      res.json({ duel: safe });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Get duel status
-  app.get("/api/mini-games/duel/:id", async (req, res) => {
-    const duel = activeDuels.get(req.params.id);
-    if (!duel) return res.status(404).json({ error: "Duel not found or expired" });
-    // Hide choices if not resolved (return per-user view)
-    const discordId = req.query.discordId as string;
-    const safe = { ...duel };
-    if (duel.status !== 'resolved') {
-      if (discordId === duel.challengerId) safe.opponentChoice = duel.opponentChoice ? 'hidden' : null;
-      else if (discordId === duel.opponentId) safe.challengerChoice = duel.challengerChoice ? 'hidden' : null;
-      else { safe.challengerChoice = null; safe.opponentChoice = null; }
-    }
-    res.json({ duel: safe });
-  });
-
-  // Cancel a pending duel
-  app.post("/api/mini-games/duel/cancel", async (req, res) => {
-    try {
-      const { db } = await import("./db");
-      const { clanMembers } = await import("@shared/schema");
-      const { eq } = await import("drizzle-orm");
-      const { duelId, discordId } = req.body;
-      const duel = activeDuels.get(duelId);
-      if (!duel) return res.status(404).json({ error: "Duel not found" });
-      if (duel.challengerId !== discordId) return res.status(403).json({ error: "Only challenger can cancel" });
-      if (duel.status !== 'pending') return res.status(400).json({ error: "Can only cancel pending duels" });
-      // Return bet to challenger
-      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
-      if (member[0]) {
-        const nb = (member[0].lumiCoins || 0) + duel.bet;
-        await db.update(clanMembers).set({ lumiCoins: nb }).where(eq(clanMembers.id, member[0].id));
-        duel.challengerNewBalance = nb;
-      }
-      duel.status = 'cancelled';
-      activeDuels.delete(duelId);
-      res.json({ success: true, newBalance: duel.challengerNewBalance });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
     }
   });
 

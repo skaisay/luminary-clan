@@ -1,16 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import {
   Gamepad2, Coins, Loader2, RotateCw, Hand, Scissors,
   Circle, Square, ChevronRight, History, Dices, CircleDot,
-  ArrowUp, ArrowDown, Hash, Swords, Users, X as XIcon, Check
+  ArrowUp, ArrowDown, Hash
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiRequest } from "@/lib/queryClient";
@@ -67,16 +66,16 @@ function saveGameHistory(entry: { game: string; bet: number; reward: number; res
 const WHEEL_SEGMENTS = [
   { label: "x0", multiplier: 0, color: "#64748b" },
   { label: "x0.5", multiplier: 0.5, color: "#ef4444" },
-  { label: "x1.5", multiplier: 1.5, color: "#22c55e" },
   { label: "x0", multiplier: 0, color: "#475569" },
-  { label: "x2", multiplier: 2, color: "#eab308" },
-  { label: "x0.5", multiplier: 0.5, color: "#dc2626" },
-  { label: "x3", multiplier: 3, color: "#a855f7" },
   { label: "x1", multiplier: 1, color: "#06b6d4" },
+  { label: "x0.5", multiplier: 0.5, color: "#dc2626" },
+  { label: "x0", multiplier: 0, color: "#334155" },
+  { label: "x1.5", multiplier: 1.5, color: "#22c55e" },
   { label: "x0.5", multiplier: 0.5, color: "#f97316" },
-  { label: "x1.5", multiplier: 1.5, color: "#10b981" },
-  { label: "x5", multiplier: 5, color: "#ec4899" },
+  { label: "x0", multiplier: 0, color: "#1e293b" },
   { label: "x1", multiplier: 1, color: "#6366f1" },
+  { label: "x2", multiplier: 2, color: "#eab308" },
+  { label: "x3", multiplier: 3, color: "#a855f7" },
 ];
 
 function WheelOfFortune() {
@@ -653,408 +652,6 @@ function DiceGame() {
   );
 }
 
-// ============= PVP DUEL (BETA) =============
-
-const GEMS = [
-  { id: 'ruby', emoji: '🔴', name: { ru: 'Рубин', en: 'Ruby' }, color: 'border-red-500 bg-red-500/10 hover:bg-red-500/20', activeColor: 'border-red-500 bg-red-500/20 ring-2 ring-red-400' },
-  { id: 'sapphire', emoji: '🔵', name: { ru: 'Сапфир', en: 'Sapphire' }, color: 'border-blue-500 bg-blue-500/10 hover:bg-blue-500/20', activeColor: 'border-blue-500 bg-blue-500/20 ring-2 ring-blue-400' },
-  { id: 'emerald', emoji: '🟢', name: { ru: 'Изумруд', en: 'Emerald' }, color: 'border-green-500 bg-green-500/10 hover:bg-green-500/20', activeColor: 'border-green-500 bg-green-500/20 ring-2 ring-green-400' },
-];
-const GEM_BY_ID = Object.fromEntries(GEMS.map(g => [g.id, g]));
-
-interface DuelInfo {
-  id: string;
-  challengerId: string;
-  challengerName: string;
-  challengerAvatar: string | null;
-  opponentId: string | null;
-  opponentName: string | null;
-  opponentAvatar: string | null;
-  bet: number;
-  challengerChoice: string | null;
-  opponentChoice: string | null;
-  winnerId: string | null;
-  winnerName: string | null;
-  status: 'pending' | 'choosing' | 'resolved' | 'cancelled';
-  resultType: string | null;
-  challengerNewBalance: number | null;
-  opponentNewBalance: number | null;
-  createdAt: number;
-}
-
-function PlayerCard({ name, avatar, discordId, choice, revealed, isMe }: {
-  name: string | null; avatar: string | null; discordId: string | null;
-  choice: string | null; revealed: boolean; isMe: boolean;
-}) {
-  const gem = choice && choice !== 'hidden' ? GEM_BY_ID[choice] : null;
-  return (
-    <div className="flex flex-col items-center gap-2 min-w-[100px]">
-      <Avatar className="h-12 w-12 border-2 border-muted">
-        <AvatarImage src={avatar ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png` : undefined} />
-        <AvatarFallback className="bg-primary/20 text-primary text-sm">
-          {(name || '?').slice(0, 2).toUpperCase()}
-        </AvatarFallback>
-      </Avatar>
-      <span className="text-xs font-medium truncate max-w-[90px]">{name || '...'}</span>
-      {isMe && <Badge variant="outline" className="text-[10px] py-0">YOU</Badge>}
-      <div className={`w-14 h-14 rounded-xl border-2 flex items-center justify-center text-2xl transition-all ${
-        revealed && gem ? gem.activeColor :
-        choice === 'hidden' ? 'border-muted bg-muted/30' :
-        choice && gem ? gem.activeColor :
-        'border-muted/30 bg-muted/10'
-      }`}>
-        {revealed && gem ? gem.emoji :
-         choice === 'hidden' ? '❓' :
-         choice && gem ? gem.emoji : '—'}
-      </div>
-    </div>
-  );
-}
-
-function PvPDuel() {
-  const { user, updateBalance } = useAuth();
-  const { language } = useLanguage();
-  const isRu = (language || 'ru') === 'ru';
-  const [activeDuelId, setActiveDuelId] = useState<string | null>(null);
-  const [betAmount, setBetAmount] = useState(100);
-  const [error, setError] = useState('');
-  const [myChoice, setMyChoice] = useState<string | null>(null);
-  const balance = user?.lumiCoins ?? 0;
-  const myId = user?.discordId || '';
-
-  // Poll open duels when not in a duel
-  const { data: openDuels = [] } = useQuery<DuelInfo[]>({
-    queryKey: ['/api/mini-games/duel/list'],
-    refetchInterval: activeDuelId ? false : 3000,
-    enabled: !activeDuelId,
-    staleTime: 0,
-  });
-
-  // Poll active duel status
-  const { data: duelData, refetch: refetchDuel } = useQuery<{ duel: DuelInfo }>({
-    queryKey: [`/api/mini-games/duel/${activeDuelId}?discordId=${myId}`],
-    refetchInterval: activeDuelId ? 1500 : false,
-    enabled: !!activeDuelId,
-    staleTime: 0,
-  });
-  const duel = duelData?.duel;
-
-  // Auto-detect if I'm already in a duel
-  useEffect(() => {
-    if (!activeDuelId && openDuels.length > 0) {
-      const myDuel = openDuels.find(d =>
-        (d.challengerId === myId || d.opponentId === myId) &&
-        (d.status === 'pending' || d.status === 'choosing')
-      );
-      if (myDuel) {
-        setActiveDuelId(myDuel.id);
-      }
-    }
-  }, [openDuels, myId, activeDuelId]);
-
-  // Update balance when duel resolves
-  useEffect(() => {
-    if (duel?.status === 'resolved') {
-      const myNewBalance = duel.challengerId === myId ? duel.challengerNewBalance : duel.opponentNewBalance;
-      if (myNewBalance !== null && myNewBalance !== undefined) {
-        updateBalance(myNewBalance);
-      }
-      saveGameHistory({
-        game: 'duel',
-        bet: duel.bet,
-        reward: duel.winnerId === myId ? duel.bet : duel.resultType === 'draw' ? 0 : -duel.bet,
-        result: duel.winnerId === myId ? 'win' : duel.resultType === 'draw' ? 'draw' : 'lose',
-      });
-    }
-  }, [duel?.status]);
-
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest('POST', '/api/mini-games/duel/create', { discordId: myId, bet: betAmount });
-      return res.json();
-    },
-    onSuccess: (data: { duel: DuelInfo; newBalance: number }) => {
-      setError('');
-      setActiveDuelId(data.duel.id);
-      setMyChoice(null);
-      updateBalance(data.newBalance);
-    },
-    onError: (err: Error) => setError(err.message),
-  });
-
-  const acceptMutation = useMutation({
-    mutationFn: async (duelId: string) => {
-      const res = await apiRequest('POST', '/api/mini-games/duel/accept', { duelId, discordId: myId });
-      return res.json();
-    },
-    onSuccess: (data: { duel: DuelInfo; newBalance: number }) => {
-      setError('');
-      setActiveDuelId(data.duel.id);
-      setMyChoice(null);
-      updateBalance(data.newBalance);
-    },
-    onError: (err: Error) => setError(err.message),
-  });
-
-  const chooseMutation = useMutation({
-    mutationFn: async (choice: string) => {
-      const res = await apiRequest('POST', '/api/mini-games/duel/choose', { duelId: activeDuelId, discordId: myId, choice });
-      return res.json();
-    },
-    onSuccess: (data: { duel: DuelInfo }) => {
-      setError('');
-      refetchDuel();
-    },
-    onError: (err: Error) => setError(err.message),
-  });
-
-  const cancelMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest('POST', '/api/mini-games/duel/cancel', { duelId: activeDuelId, discordId: myId });
-      return res.json();
-    },
-    onSuccess: (data: { newBalance: number }) => {
-      setError('');
-      setActiveDuelId(null);
-      setMyChoice(null);
-      updateBalance(data.newBalance);
-    },
-    onError: (err: Error) => setError(err.message),
-  });
-
-  const handleChoose = (gemId: string) => {
-    if (myChoice) return;
-    setMyChoice(gemId);
-    chooseMutation.mutate(gemId);
-  };
-
-  const handleClose = () => {
-    setActiveDuelId(null);
-    setMyChoice(null);
-    setError('');
-  };
-
-  const isResolved = duel?.status === 'resolved';
-  const isChoosing = duel?.status === 'choosing';
-  const isPending = duel?.status === 'pending';
-  const amChallenger = duel?.challengerId === myId;
-  const iWon = duel?.winnerId === myId;
-  const isDraw = duel?.resultType === 'draw';
-
-  // ---- LOBBY VIEW (no active duel) ----
-  if (!activeDuelId) {
-    const otherDuels = openDuels.filter(d => d.challengerId !== myId && d.status === 'pending');
-    return (
-      <div className="space-y-6">
-        {/* Create duel */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-center gap-3 flex-wrap">
-            <span className="text-sm text-muted-foreground">{isRu ? 'Ставка' : 'Bet'}:</span>
-            <div className="flex gap-1">
-              {[100, 1000, 10000].map(val => (
-                <Button key={val} size="sm" variant={betAmount === val ? "default" : "outline"}
-                  onClick={() => { setBetAmount(val); setError(''); }} className="text-xs">
-                  {val >= 1000 ? `${val/1000}K` : val}
-                </Button>
-              ))}
-              <Button size="sm" variant="outline" onClick={() => { setBetAmount(balance); setError(''); }}
-                className="text-xs font-bold">MAX</Button>
-            </div>
-            <Input type="number" min={10} value={betAmount}
-              onChange={(e) => { setBetAmount(Math.max(10, parseInt(e.target.value) || 10)); setError(''); }}
-              className="w-28 h-8 text-xs text-center" />
-          </div>
-          {error && <p className="text-center text-sm text-red-400">{error}</p>}
-          <div className="flex justify-center">
-            <Button onClick={() => createMutation.mutate()}
-              disabled={balance < betAmount || createMutation.isPending || !myId}
-              className="gap-2" size="lg">
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Swords className="h-4 w-4" />}
-              {isRu ? `Создать дуэль (${betAmount.toLocaleString()} LC)` : `Create Duel (${betAmount.toLocaleString()} LC)`}
-            </Button>
-          </div>
-        </div>
-
-        {/* Open duels from other players */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            {isRu ? 'Открытые дуэли' : 'Open Duels'}
-            {otherDuels.length > 0 && <Badge variant="outline" className="text-xs">{otherDuels.length}</Badge>}
-          </h3>
-          {otherDuels.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground py-4">
-              {isRu ? 'Нет открытых дуэлей. Создай свою!' : 'No open duels. Create one!'}
-            </p>
-          ) : otherDuels.map(d => (
-            <div key={d.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-muted/30">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={d.challengerAvatar ? `https://cdn.discordapp.com/avatars/${d.challengerId}/${d.challengerAvatar}.png` : undefined} />
-                  <AvatarFallback className="bg-primary/20 text-primary text-xs">
-                    {d.challengerName.slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="text-sm font-medium">{d.challengerName}</p>
-                  <p className="text-xs text-muted-foreground">{d.bet.toLocaleString()} LC</p>
-                </div>
-              </div>
-              <Button size="sm" variant="default"
-                onClick={() => acceptMutation.mutate(d.id)}
-                disabled={balance < d.bet || acceptMutation.isPending}
-                className="gap-1">
-                <Swords className="h-3 w-3" />
-                {isRu ? 'Принять' : 'Accept'}
-              </Button>
-            </div>
-          ))}
-        </div>
-
-        <div className="text-center space-y-1">
-          <p className="text-xs text-muted-foreground">
-            {isRu ? '🔴 Рубин бьёт 🟢 Изумруд • 🟢 Изумруд бьёт 🔵 Сапфир • 🔵 Сапфир бьёт 🔴 Рубин' :
-             '🔴 Ruby beats 🟢 Emerald • 🟢 Emerald beats 🔵 Sapphire • 🔵 Sapphire beats 🔴 Ruby'}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {isRu ? 'Одинаковый выбор = ничья, ставки возвращаются' : 'Same choice = draw, bets returned'}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- ACTIVE DUEL VIEW ----
-  if (!duel) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-8">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{isRu ? 'Загрузка дуэли...' : 'Loading duel...'}</p>
-      </div>
-    );
-  }
-
-  const challengerName = duel.challengerName;
-  const opponentName = duel.opponentName;
-  const myChoiceFromDuel = amChallenger ? duel.challengerChoice : duel.opponentChoice;
-  const theirChoiceFromDuel = amChallenger ? duel.opponentChoice : duel.challengerChoice;
-
-  return (
-    <div className="space-y-5">
-      {/* Duel header */}
-      <div className="text-center">
-        <Badge variant="outline" className="text-xs gap-1 mb-2">
-          <Swords className="h-3 w-3" />
-          {duel.bet.toLocaleString()} LC
-          {isPending && ` • ${isRu ? 'Ожидание' : 'Waiting'}`}
-          {isChoosing && ` • ${isRu ? 'Выбор' : 'Choosing'}`}
-          {isResolved && ` • ${isRu ? 'Завершено' : 'Finished'}`}
-        </Badge>
-      </div>
-
-      {/* Player cards */}
-      <div className="flex items-center justify-center gap-6">
-        <PlayerCard
-          name={amChallenger ? challengerName : opponentName}
-          avatar={amChallenger ? duel.challengerAvatar : duel.opponentAvatar}
-          discordId={amChallenger ? duel.challengerId : duel.opponentId}
-          choice={myChoiceFromDuel || myChoice}
-          revealed={true}
-          isMe={true}
-        />
-        <div className="text-xl font-bold text-muted-foreground">⚔️</div>
-        <PlayerCard
-          name={amChallenger ? opponentName : challengerName}
-          avatar={amChallenger ? duel.opponentAvatar : duel.challengerAvatar}
-          discordId={amChallenger ? duel.opponentId : duel.challengerId}
-          choice={isResolved ? theirChoiceFromDuel : (theirChoiceFromDuel === 'hidden' ? 'hidden' : null)}
-          revealed={isResolved}
-          isMe={false}
-        />
-      </div>
-
-      {/* Pending: waiting for opponent */}
-      {isPending && (
-        <div className="text-center space-y-3">
-          <div className="flex items-center justify-center gap-2 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm">{isRu ? 'Ожидание соперника...' : 'Waiting for opponent...'}</span>
-          </div>
-          <Button size="sm" variant="ghost" onClick={() => cancelMutation.mutate()}
-            disabled={cancelMutation.isPending} className="text-xs text-muted-foreground gap-1">
-            <XIcon className="h-3 w-3" /> {isRu ? 'Отменить' : 'Cancel'}
-          </Button>
-        </div>
-      )}
-
-      {/* Choosing: pick a gem */}
-      {isChoosing && !myChoiceFromDuel && !myChoice && (
-        <div className="space-y-3">
-          <p className="text-center text-sm font-medium">{isRu ? 'Выбери камень:' : 'Pick a gem:'}</p>
-          <div className="flex justify-center gap-4">
-            {GEMS.map(gem => (
-              <Button key={gem.id} variant="outline" size="lg"
-                onClick={() => handleChoose(gem.id)}
-                disabled={chooseMutation.isPending}
-                className={`flex-col h-auto py-3 px-5 gap-1 border-2 ${gem.color}`}>
-                <span className="text-3xl">{gem.emoji}</span>
-                <span className="text-xs">{gem.name[language as 'ru' | 'en'] || gem.name.ru}</span>
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Waiting for opponent's choice */}
-      {isChoosing && (myChoiceFromDuel || myChoice) && (
-        <div className="text-center space-y-2">
-          <p className="text-sm text-green-400 flex items-center justify-center gap-1">
-            <Check className="h-4 w-4" /> {isRu ? 'Твой выбор сделан!' : 'Your choice is locked!'}
-          </p>
-          {theirChoiceFromDuel !== 'hidden' && (
-            <div className="flex items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">{isRu ? 'Ожидание выбора соперника...' : 'Waiting for opponent...'}</span>
-            </div>
-          )}
-          {theirChoiceFromDuel === 'hidden' && (
-            <div className="flex items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">{isRu ? 'Соперник выбирает...' : 'Opponent is choosing...'}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Result */}
-      {isResolved && (
-        <div className="text-center space-y-3">
-          <p className={`text-2xl font-bold ${iWon ? 'text-green-400' : isDraw ? 'text-yellow-400' : 'text-red-400'}`}>
-            {iWon ? (isRu ? '🎉 Победа!' : '🎉 You win!') :
-             isDraw ? (isRu ? '🤝 Ничья!' : '🤝 Draw!') :
-             (isRu ? '😔 Поражение' : '😔 You lose')}
-          </p>
-          <Badge className={`text-base px-4 py-1 gap-1 ${
-            iWon ? 'bg-green-500/20 text-green-400' :
-            isDraw ? 'bg-yellow-500/20 text-yellow-400' :
-            'bg-red-500/20 text-red-400'
-          }`}>
-            <Coins className="h-4 w-4" />
-            {iWon ? `+${duel.bet.toLocaleString()}` : isDraw ? '0' : `-${duel.bet.toLocaleString()}`} LC
-          </Badge>
-          <div>
-            <Button size="sm" variant="outline" onClick={handleClose} className="gap-1 mt-2">
-              {isRu ? 'Назад в лобби' : 'Back to lobby'}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {error && <p className="text-center text-sm text-red-400">{error}</p>}
-    </div>
-  );
-}
-
 // ============= GAME HISTORY (localStorage) =============
 
 function GameHistoryTab() {
@@ -1073,7 +670,6 @@ function GameHistoryTab() {
     rps: isRu ? 'КНБ' : 'RPS',
     coinflip: isRu ? 'Монетка' : 'Coin Flip',
     dice: isRu ? 'Кости' : 'Dice',
-    duel: isRu ? 'Дуэль' : 'Duel',
   };
 
   const gameIcons: Record<string, any> = {
@@ -1081,7 +677,6 @@ function GameHistoryTab() {
     rps: Scissors,
     coinflip: Coins,
     dice: Dices,
-    duel: Swords,
   };
 
   if (history.length === 0) {
@@ -1161,10 +756,6 @@ export default function MiniGamesPage() {
           <TabsTrigger value="dice" className="flex-1 gap-1 text-xs" data-ai="game-dice">
             <Dices className="h-3 w-3" /> {isRu ? 'Кости' : 'Dice'}
           </TabsTrigger>
-          <TabsTrigger value="duel" className="flex-1 gap-1 text-xs relative" data-ai="game-duel">
-            <Swords className="h-3 w-3" /> {isRu ? 'Дуэль' : 'Duel'}
-            <span className="absolute -top-1 -right-1 text-[8px] bg-purple-500 text-white px-1 rounded-full leading-tight">β</span>
-          </TabsTrigger>
           <TabsTrigger value="history" className="flex-1 gap-1 text-xs" data-ai="game-history">
             <History className="h-3 w-3" /> {isRu ? 'История' : 'History'}
           </TabsTrigger>
@@ -1219,20 +810,6 @@ export default function MiniGamesPage() {
               <CardDescription>{isRu ? 'Угадай результат броска — выигрыш x1.8' : 'Guess the roll — win x1.8'}</CardDescription>
             </CardHeader>
             <CardContent><DiceGame /></CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="duel">
-          <Card className="glass glass-border">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Swords className="h-4 w-4 text-orange-400" />
-                {isRu ? 'Дуэль игроков' : 'PvP Duel'}
-                <Badge variant="outline" className="text-[10px] py-0 px-1">βeta</Badge>
-              </CardTitle>
-              <CardDescription>{isRu ? 'Сразись с другим игроком — выбери камень' : 'Fight another player — choose a gem'}</CardDescription>
-            </CardHeader>
-            <CardContent><PvPDuel /></CardContent>
           </Card>
         </TabsContent>
 
