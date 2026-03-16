@@ -481,8 +481,10 @@ export function AdminShopTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map((item) => (
-                  <TableRow key={item.id} data-testid={`row-shop-item-${item.id}`}>
+                {items.map((item) => {
+                  const safeName = item.name.replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_');
+                  return (
+                  <TableRow key={item.id} data-testid={`row-shop-item-${item.id}`} data-ai={`shop-row-${safeName}`}>
                     <TableCell className="font-medium">{item.name}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">{item.itemType === "role" ? "Роль" : "Предмет"}</Badge>
@@ -508,6 +510,7 @@ export function AdminShopTab() {
                           size="sm"
                           onClick={() => handleEdit(item)}
                           data-testid={`button-edit-${item.id}`}
+                          data-ai={`edit-${safeName}`}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -516,13 +519,15 @@ export function AdminShopTab() {
                           size="sm"
                           onClick={() => handleDelete(item.id)}
                           data-testid={`button-delete-${item.id}`}
+                          data-ai={`delete-${safeName}`}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           ) : (

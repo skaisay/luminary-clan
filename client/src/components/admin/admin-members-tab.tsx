@@ -181,8 +181,10 @@ export default function AdminMembersTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {members?.map((member) => (
-                <TableRow key={member.id} data-testid={`row-member-${member.id}`}>
+              {members?.map((member) => {
+                const safeName = member.username.replace(/[^a-zA-Z\u0430-\u044f\u0410-\u042f0-9_-]/g, '_');
+                return (
+                <TableRow key={member.id} data-testid={`row-member-${member.id}`} data-ai={`member-row-${safeName}`}>
                   <TableCell>
                     {editingId === member.id ? (
                       <Input
@@ -256,7 +258,7 @@ export default function AdminMembersTab() {
                   <TableCell className="text-right">
                     {editingId === member.id ? (
                       <div className="flex gap-2 justify-end">
-                        <Button size="sm" onClick={() => handleSave(member.id)} data-testid={`button-save-${member.id}`}>
+                        <Button size="sm" onClick={() => handleSave(member.id)} data-testid={`button-save-${member.id}`} data-ai={`save-${safeName}`}>
                           <Save className="w-4 h-4" />
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
@@ -265,17 +267,18 @@ export default function AdminMembersTab() {
                       </div>
                     ) : (
                       <div className="flex gap-2 justify-end">
-                        <Button size="sm" variant="outline" onClick={() => handleEdit(member)} data-testid={`button-edit-${member.id}`}>
+                        <Button size="sm" variant="outline" onClick={() => handleEdit(member)} data-testid={`button-edit-${member.id}`} data-ai={`edit-${safeName}`}>
                           <Edit className="w-4 h-4" />
                         </Button>
-                        <Button size="sm" variant="destructive" onClick={() => handleDelete(member.id)} data-testid={`button-delete-${member.id}`}>
+                        <Button size="sm" variant="destructive" onClick={() => handleDelete(member.id)} data-testid={`button-delete-${member.id}`} data-ai={`delete-${safeName}`}>
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
                     )}
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </div>

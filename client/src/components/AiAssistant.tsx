@@ -401,6 +401,27 @@ export function AiAssistant() {
     }, 800);
   }, [pendingActions, stepQueue, currentStepIdx, processStep]);
 
+  // Fast local navigation check — avoid API call for simple "open X" requests
+  function tryLocalNav(text: string): string | null {
+    const lower = text.toLowerCase().trim();
+    for (const [path, names] of Object.entries(NAV_ROUTES)) {
+      const ru = names.ru.toLowerCase();
+      const en = names.en.toLowerCase();
+      // Match patterns like "открой музыку", "go to shop", "зайди в магазин", "open members"
+      const patterns = [
+        `открой ${ru}`, `открой ${en}`, `перейди в ${ru}`, `перейди на ${ru}`,
+        `зайди в ${ru}`, `зайди на ${ru}`, `покажи ${ru}`, `go to ${en}`,
+        `open ${en}`, `show ${en}`, `открой ${ru.replace(/а$|у$|ы$/,'')}`
+      ];
+      if (patterns.some(p => lower.includes(p)) || lower === ru || lower === en) {
+        const emoji = path.includes('music') ? '🎵' : path.includes('shop') ? '🛒' : path.includes('admin') ? '🔐' : path.includes('trading') ? '💰' : '📄';
+        const label = isRu ? names.ru : names.en;
+        return `${emoji} ${isRu ? 'Открываю' : 'Opening'} **${label}**! [STEP:1][NAV:${path}]`;
+      }
+    }
+    return null;
+  }
+
   // Send message
   const send = useCallback(async (text?: string) => {
     const content = (text || input).trim();
@@ -414,6 +435,21 @@ export function AiAssistant() {
     setVoiceText('');
     setLoading(true);
     if (inputRef.current) inputRef.current.style.height = 'auto';
+
+    // Try fast local navigation first
+    const localReply = tryLocalNav(content);
+    if (localReply) {
+      const { clean, steps } = parseSteps(localReply);
+      setMsgs(prev => prev.map(m => m.id === placeholder.id ? { ...m, text: clean, loading: false, navPath: steps[0]?.nav } : m));
+      if (steps.length > 0) {
+        setStepQueue(steps);
+        setTotalSteps(steps.length);
+        setCurrentStepIdx(0);
+        processStep(steps, 0);
+      }
+      setLoading(false);
+      return;
+    }
 
     try {
       const history = [...msgs.filter(m => !m.loading), userMsg].map(m => ({
