@@ -343,9 +343,10 @@ export default function ProfilePage() {
                   <RankIcon className="h-3 w-3" /> {rankInfo[language as 'ru' | 'en'] || rankInfo.ru}
                 </Badge>
                 <span className="text-sm text-muted-foreground">{profile.role}</span>
-                <span className="text-sm text-muted-foreground">{t('profile.level')} {profile.level}</span>
+                {!cd.hiddenSections?.includes('xpLevel') && <span className="text-sm text-muted-foreground">{t('profile.level')} {profile.level}</span>}
               </div>
               {/* XP Progress */}
+              {!cd.hiddenSections?.includes('xpLevel') && (
               <div className="mt-3 max-w-md">
                 <div className="flex justify-between text-xs text-muted-foreground mb-1">
                   <span>{t('profile.experience')}</span>
@@ -353,6 +354,7 @@ export default function ProfilePage() {
                 </div>
                 <Progress value={xpProgress} className="h-2" />
               </div>
+              )}
             </div>
             <div className="text-right space-y-2">
               <div className="flex items-center gap-1.5 text-yellow-500 justify-end">
@@ -463,7 +465,7 @@ export default function ProfilePage() {
               <div>
                 <label className="text-xs text-muted-foreground mb-2 block">{t('profile.showSections')}</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {(['stats', 'achievements', 'info', 'inventory'] as const).map(section => (
+                  {(['stats', 'achievements', 'info', 'inventory', 'xpLevel'] as const).map(section => (
                     <label key={section} className="flex items-center gap-2 text-sm cursor-pointer select-none">
                       <input
                         type="checkbox"

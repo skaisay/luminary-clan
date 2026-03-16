@@ -600,6 +600,7 @@ const translations = {
       sectionAchievements: 'Достижения',
       sectionInfo: 'Информация',
       sectionInventory: 'Инвентарь',
+      sectionXpLevel: 'Опыт и уровень',
     },
     miniGames: {
       title: 'Мини-игры',
@@ -1201,6 +1202,7 @@ const translations = {
       sectionAchievements: 'Achievements',
       sectionInfo: 'Information',
       sectionInventory: 'Inventory',
+      sectionXpLevel: 'XP & Level',
     },
     miniGames: {
       title: 'Mini-games',

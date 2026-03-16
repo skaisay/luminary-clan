@@ -156,6 +156,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date().toISOString() });
   });
 
+  // === AI Chat Proxy (free APIs, no key needed) ===
+  app.post("/api/ai-chat", async (req, res) => {
+    try {
+      const { messages, language } = req.body;
+      if (!messages || !Array.isArray(messages)) {
+        return res.status(400).json({ error: 'messages array required' });
+      }
+
+      const systemPrompt = language === 'ru' 
+        ? `Ты — Luminary AI, умный ассистент клан-сайта Luminary. Отвечай по-русски, кратко и помогай пользователю. Ты знаешь о сайте всё: есть страницы — главная (/), статистика (/statistics), рейтинг (/leaderboard), участники (/members), магазин (/shop), инвентарь (/inventory), музыка (/music), форум (/forum), запросы (/requests), о клане (/about), достижения (/achievements), квесты (/quests), торговля (/trading), бустеры (/boosters), ежедневные награды (/daily-rewards), профиль (/profile), мини-игры (/mini-games), клановые войны (/clan-wars). На сайте можно слушать музыку, торговать предметами, выполнять квесты за LumiCoin, играть в мини-игры. Если пользователь хочет перейти куда-то, ответь СТРОГО в формате: [NAV:/path] в конце сообщения. Например: "Открываю музыку! [NAV:/music]". Отвечай дружелюбно, с эмодзи. Не упоминай что ты ИИ или модель — ты просто Luminary AI.`
+        : `You are Luminary AI, a smart assistant for the Luminary clan website. Reply in English, be concise and helpful. Site pages: dashboard (/), statistics (/statistics), leaderboard (/leaderboard), members (/members), shop (/shop), inventory (/inventory), music (/music), forum (/forum), requests (/requests), about (/about), achievements (/achievements), quests (/quests), trading (/trading), boosters (/boosters), daily rewards (/daily-rewards), profile (/profile), mini games (/mini-games), clan wars (/clan-wars). Users can listen to music, trade items, complete quests for LumiCoin, play mini-games. If user wants to navigate, end your message with [NAV:/path]. Example: "Opening music! [NAV:/music]". Be friendly, use emojis. Don't mention you're an AI model — you are Luminary AI.`;
+
+      const chatMessages = [
+        { role: 'system', content: systemPrompt },
+        ...messages.slice(-10), // last 10 messages for context
+      ];
+
+      // Provider 1: Pollinations.ai (free, no key)
+      try {
+        const pollRes = await fetch('https://text.pollinations.ai/openai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'openai',
+            messages: chatMessages,
+            max_tokens: 500,
+            temperature: 0.7,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (pollRes.ok) {
+          const data = await pollRes.json();
+          const content = data.choices?.[0]?.message?.content;
+          if (content) {
+            return res.json({ reply: content, provider: 'pollinations' });
+          }
+        }
+      } catch (e: any) {
+        console.log('[AI] Pollinations failed:', e.message);
+      }
+
+      // Provider 2: Pollinations direct text endpoint
+      try {
+        const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
+        const prompt = encodeURIComponent(`${systemPrompt}\n\nUser: ${lastUserMsg}\nAssistant:`);
+        const textRes = await fetch(`https://text.pollinations.ai/${prompt}`, {
+          signal: AbortSignal.timeout(15000),
+        });
+        if (textRes.ok) {
+          const text = await textRes.text();
+          if (text && text.length > 5) {
+            return res.json({ reply: text.trim(), provider: 'pollinations-text' });
+          }
+        }
+      } catch (e: any) {
+        console.log('[AI] Pollinations text failed:', e.message);
+      }
+
+      // Provider 3: HuggingFace free inference (Zephyr)
+      try {
+        const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
+        const hfRes = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inputs: `<|system|>\n${systemPrompt}</s>\n<|user|>\n${lastUserMsg}</s>\n<|assistant|>\n`,
+            parameters: { max_new_tokens: 300, temperature: 0.7 },
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (hfRes.ok) {
+          const hfData = await hfRes.json();
+          const text = Array.isArray(hfData) ? hfData[0]?.generated_text : hfData?.generated_text;
+          if (text) {
+            // Extract only the assistant's response
+            const assistantPart = text.split('<|assistant|>').pop()?.replace('</s>', '').trim();
+            if (assistantPart) {
+              return res.json({ reply: assistantPart, provider: 'huggingface' });
+            }
+          }
+        }
+      } catch (e: any) {
+        console.log('[AI] HuggingFace failed:', e.message);
+      }
+
+      // All providers failed
+      const fallback = language === 'ru' 
+        ? '😔 Все AI-сервисы временно недоступны. Попробуйте через минуту!'
+        : '😔 All AI services are temporarily unavailable. Try again in a minute!';
+      res.json({ reply: fallback, provider: 'fallback' });
+
+    } catch (error: any) {
+      console.error('[AI Chat] Error:', error);
+      res.status(500).json({ error: 'AI service error' });
+    }
+  });
+
   // === Roblox Tracker API ===
   const robloxApi = await import('./roblox-api');
 
