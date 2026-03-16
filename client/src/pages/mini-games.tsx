@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import {
   Gamepad2, Coins, Loader2, RotateCw, Hand, Scissors,
   Circle, Square, ChevronRight, History, Dices, CircleDot,
-  ArrowUp, ArrowDown, Hash
+  ArrowUp, ArrowDown, Hash, Cherry
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -652,6 +652,220 @@ function DiceGame() {
   );
 }
 
+// ============= SLOT MACHINE =============
+
+const SLOT_SYMBOLS = ["🍒", "🍋", "🍊", "🍇", "🔔", "⭐", "💎", "7️⃣", "🎰"];
+
+function SlotMachine() {
+  const { user, updateBalance } = useAuth();
+  const { language } = useLanguage();
+  const isRu = (language || 'ru') === 'ru';
+  const [spinning, setSpinning] = useState(false);
+  const [grid, setGrid] = useState<string[][] | null>(null);
+  const [displayGrid, setDisplayGrid] = useState<string[][]>([
+    ["❓", "❓", "❓"],
+    ["❓", "❓", "❓"],
+    ["❓", "❓", "❓"],
+  ]);
+  const [result, setResult] = useState<{ reward: number; multiplier: number; desc: string } | null>(null);
+  const [betAmount, setBetAmount] = useState(10);
+  const [error, setError] = useState("");
+  const [reelsStopped, setReelsStopped] = useState([false, false, false]);
+  const animRef = useRef<number | null>(null);
+  const balance = user?.lumiCoins ?? 0;
+
+  // Spinning animation — random symbols cycling per column
+  useEffect(() => {
+    if (!spinning) return;
+    let frame = 0;
+    const tick = () => {
+      frame++;
+      setDisplayGrid(prev => {
+        const newGrid = prev.map(row => [...row]);
+        for (let col = 0; col < 3; col++) {
+          if (reelsStopped[col]) continue;
+          for (let row = 0; row < 3; row++) {
+            newGrid[row][col] = SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)];
+          }
+        }
+        return newGrid;
+      });
+      animRef.current = window.setTimeout(tick, 60 + frame * 3);
+    };
+    tick();
+    return () => { if (animRef.current) clearTimeout(animRef.current); };
+  }, [spinning, reelsStopped]);
+
+  const spinMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/mini-games/slots", {
+        discordId: user?.discordId, bet: betAmount,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Error");
+      }
+      return res.json();
+    },
+    onSuccess: (data: { grid: string[][]; multiplier: number; reward: number; resultDesc: string; newBalance: number }) => {
+      setError("");
+      setGrid(data.grid);
+      // Stop reels one by one
+      setTimeout(() => {
+        setReelsStopped([true, false, false]);
+        setDisplayGrid(prev => prev.map((row, r) => [data.grid[r][0], row[1], row[2]]));
+      }, 800);
+      setTimeout(() => {
+        setReelsStopped([true, true, false]);
+        setDisplayGrid(prev => prev.map((row, r) => [data.grid[r][0], data.grid[r][1], row[2]]));
+      }, 1400);
+      setTimeout(() => {
+        setReelsStopped([true, true, true]);
+        setDisplayGrid(data.grid);
+        setSpinning(false);
+        setResult({ reward: data.reward, multiplier: data.multiplier, desc: data.resultDesc });
+        updateBalance(data.newBalance);
+        saveGameHistory({ game: 'slots', bet: betAmount, reward: data.reward, result: data.resultDesc });
+      }, 2000);
+    },
+    onError: (err: Error) => {
+      setSpinning(false);
+      setReelsStopped([false, false, false]);
+      if (err.message.includes("Not enough")) {
+        setError(isRu ? "Недостаточно LumiCoins!" : "Not enough LumiCoins!");
+      } else {
+        setError(err.message);
+      }
+    }
+  });
+
+  const handleSpin = () => {
+    setResult(null);
+    setError("");
+    setReelsStopped([false, false, false]);
+    setSpinning(true);
+    spinMutation.mutate();
+  };
+
+  const canPlay = balance >= betAmount && !spinning && !spinMutation.isPending && !!user?.discordId;
+
+  const isWinRow = (rowIdx: number) => {
+    if (!grid || spinning) return false;
+    const row = grid[rowIdx];
+    return row[0] === row[1] && row[1] === row[2];
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Slot Machine Display */}
+      <div className="flex justify-center">
+        <div className="relative p-4 rounded-2xl bg-gradient-to-b from-yellow-900/30 via-background to-yellow-900/20 border-2 border-yellow-500/30 shadow-lg shadow-yellow-500/10">
+          {/* Payline indicator */}
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-red-500 shadow-lg shadow-red-500/50 z-10" />
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-red-500 shadow-lg shadow-red-500/50 z-10" />
+
+          <div className="grid grid-rows-3 gap-1">
+            {displayGrid.map((row, rowIdx) => (
+              <div key={rowIdx} className={`flex gap-1 p-1 rounded-lg transition-all ${
+                rowIdx === 1 ? "bg-yellow-500/10 border border-yellow-500/20" : ""
+              } ${isWinRow(rowIdx) ? "ring-2 ring-green-400 bg-green-400/10" : ""}`}>
+                {row.map((sym, colIdx) => (
+                  <div
+                    key={colIdx}
+                    className={`w-16 h-16 md:w-20 md:h-20 rounded-lg border flex items-center justify-center text-3xl md:text-4xl transition-all ${
+                      spinning && !reelsStopped[colIdx]
+                        ? "border-yellow-500/40 bg-yellow-500/5 scale-95"
+                        : "border-border/50 bg-background/50"
+                    }`}
+                  >
+                    <span className={spinning && !reelsStopped[colIdx] ? "blur-[1px]" : ""}>{sym}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {/* Middle payline label */}
+          <div className="absolute left-1/2 -translate-x-1/2 -bottom-3 px-3 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-[10px] text-red-400">
+            PAYLINE
+          </div>
+        </div>
+      </div>
+
+      {/* Result */}
+      {result && !spinning && (
+        <div className="text-center space-y-2 mt-4">
+          <p className={`text-xl font-bold ${result.reward > 0 ? 'text-green-400' : result.reward < 0 ? 'text-red-400' : 'text-yellow-400'}`}>
+            {result.desc.includes("JACKPOT") ? "🎰 JACKPOT! 🎰" :
+             result.desc.includes("MEGA") ? "🔥 MEGA WIN! 🔥" :
+             result.desc.includes("BIG") ? "💎 BIG WIN! 💎" :
+             result.reward > 0 ? (isRu ? "Выигрыш!" : "Win!") :
+             (isRu ? "Нет совпадений" : "No match")}
+          </p>
+          {result.multiplier > 0 && (
+            <p className="text-sm text-muted-foreground">x{result.multiplier}</p>
+          )}
+          <Badge className={`text-base px-4 py-1 gap-1 ${
+            result.reward > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+          }`}>
+            <Coins className="h-4 w-4" />
+            {result.reward > 0 ? `+${result.reward}` : result.reward} LC
+          </Badge>
+        </div>
+      )}
+
+      {error && <p className="text-center text-sm text-red-400">{error}</p>}
+
+      {/* Bet controls */}
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        <span className="text-sm text-muted-foreground">{isRu ? 'Ставка' : 'Bet'}:</span>
+        <div className="flex gap-1">
+          {[100, 1000, 10000].map(val => (
+            <Button key={val} size="sm" variant={betAmount === val ? "default" : "outline"}
+              onClick={() => { setBetAmount(val); setError(""); }}
+              disabled={spinning} className="text-xs">{val >= 1000 ? `${val/1000}K` : val}</Button>
+          ))}
+          <Button size="sm" variant="outline" onClick={() => { setBetAmount(balance); setError(""); }}
+            disabled={spinning} className="text-xs font-bold">MAX</Button>
+        </div>
+        <Input type="number" min={1} value={betAmount}
+          onChange={(e) => { setBetAmount(Math.max(1, parseInt(e.target.value) || 1)); setError(""); }}
+          disabled={spinning} className="w-28 h-8 text-xs text-center" />
+      </div>
+
+      <div className="flex justify-center">
+        <Button size="lg"
+          onClick={handleSpin}
+          disabled={!canPlay}
+          className="gap-2 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 text-white shadow-lg shadow-yellow-600/20"
+        >
+          {spinning ? <Loader2 className="h-5 w-5 animate-spin" /> : <Cherry className="h-5 w-5" />}
+          {spinning ? (isRu ? 'Крутится...' : 'Spinning...') :
+           balance < betAmount ? (isRu ? 'Мало монет' : 'Not enough') :
+           `${isRu ? 'Крутить' : 'Spin'} (${betAmount} LC)`}
+        </Button>
+      </div>
+
+      {/* Paytable */}
+      <div className="mt-4 p-3 rounded-xl bg-muted/10 border border-border/30">
+        <p className="text-xs text-muted-foreground mb-2 font-semibold">{isRu ? 'Выплаты (средняя линия):' : 'Payouts (middle row):'}</p>
+        <div className="grid grid-cols-3 gap-1 text-xs">
+          <span>🎰🎰🎰 = x50</span>
+          <span>7️⃣7️⃣7️⃣ = x25</span>
+          <span>💎💎💎 = x15</span>
+          <span>⭐⭐⭐ = x10</span>
+          <span>🔔🔔🔔 = x7</span>
+          <span>🍇🍇🍇 = x5</span>
+          <span>🍊🍊🍊 = x4</span>
+          <span>🍋🍋🍋 = x3</span>
+          <span>🍒🍒🍒 = x2</span>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-1">{isRu ? '2 совпадения = x0.5 | Диагональ = +x1.5' : '2 match = x0.5 | Diagonal = +x1.5'}</p>
+      </div>
+    </div>
+  );
+}
+
 // ============= GAME HISTORY (localStorage) =============
 
 function GameHistoryTab() {
@@ -670,6 +884,7 @@ function GameHistoryTab() {
     rps: isRu ? 'КНБ' : 'RPS',
     coinflip: isRu ? 'Монетка' : 'Coin Flip',
     dice: isRu ? 'Кости' : 'Dice',
+    slots: isRu ? 'Слоты' : 'Slots',
   };
 
   const gameIcons: Record<string, any> = {
@@ -677,6 +892,7 @@ function GameHistoryTab() {
     rps: Scissors,
     coinflip: Coins,
     dice: Dices,
+    slots: Cherry,
   };
 
   if (history.length === 0) {
@@ -730,6 +946,7 @@ function GameHistoryTab() {
 export default function MiniGamesPage() {
   const { language } = useLanguage();
   const isRu = (language || 'ru') === 'ru';
+  const [activeTab, setActiveTab] = useState("wheel");
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl pt-24">
       <div className="flex items-center gap-3 mb-4">
@@ -742,7 +959,7 @@ export default function MiniGamesPage() {
 
       <BalanceBar />
 
-      <Tabs defaultValue="wheel">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full mb-6 flex-wrap h-auto gap-1">
           <TabsTrigger value="wheel" className="flex-1 gap-1 text-xs" data-ai="game-wheel">
             <RotateCw className="h-3 w-3" /> {isRu ? 'Рулетка' : 'Wheel'}
@@ -755,6 +972,9 @@ export default function MiniGamesPage() {
           </TabsTrigger>
           <TabsTrigger value="dice" className="flex-1 gap-1 text-xs" data-ai="game-dice">
             <Dices className="h-3 w-3" /> {isRu ? 'Кости' : 'Dice'}
+          </TabsTrigger>
+          <TabsTrigger value="slots" className="flex-1 gap-1 text-xs" data-ai="game-slots">
+            <Cherry className="h-3 w-3" /> {isRu ? 'Слоты' : 'Slots'}
           </TabsTrigger>
           <TabsTrigger value="history" className="flex-1 gap-1 text-xs" data-ai="game-history">
             <History className="h-3 w-3" /> {isRu ? 'История' : 'History'}
@@ -810,6 +1030,19 @@ export default function MiniGamesPage() {
               <CardDescription>{isRu ? 'Угадай результат броска — выигрыш x1.8' : 'Guess the roll — win x1.8'}</CardDescription>
             </CardHeader>
             <CardContent><DiceGame /></CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="slots">
+          <Card className="glass glass-border">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Cherry className="h-4 w-4 text-orange-400" />
+                {isRu ? 'Слот-машина' : 'Slot Machine'}
+              </CardTitle>
+              <CardDescription>{isRu ? 'Крути барабаны — 3 в ряд на средней линии = выигрыш!' : 'Spin the reels — 3 in a row on the payline = win!'}</CardDescription>
+            </CardHeader>
+            <CardContent><SlotMachine /></CardContent>
           </Card>
         </TabsContent>
 

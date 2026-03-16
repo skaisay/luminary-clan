@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   User, Trophy, Coins, Zap, Shield, Star, Clock, BarChart3,
   Loader2, Flame, Medal, Crown, Package, Award, TrendingUp,
-  Search, ArrowLeftRight, ArrowLeft, ExternalLink, Copy, Check, Pencil, Save, X as XIcon, Upload
+  Search, ArrowLeftRight, ArrowLeft, ExternalLink, Copy, Check, Pencil, Save, X as XIcon, Upload, Sparkles
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -81,6 +84,227 @@ function getXpForNextLevel(level: number): number {
   return level * 100 + 50;
 }
 
+// ============= DECORATIONS MODAL =============
+const rarityColors: Record<string, string> = {
+  common: "text-gray-400 border-gray-600/40",
+  uncommon: "text-green-400 border-green-600/40",
+  rare: "text-blue-400 border-blue-600/40",
+  epic: "text-purple-400 border-purple-600/40",
+  legendary: "text-yellow-400 border-yellow-600/40 shadow-yellow-500/10 shadow-lg",
+};
+const rarityLabels: Record<string, string> = {
+  common: "⬜ Common", uncommon: "🟩 Uncommon", rare: "🟦 Rare", epic: "🟪 Epic", legendary: "🟨 Legendary",
+};
+const typeIcons: Record<string, string> = {
+  badge: "🏅", avatar_frame: "🖼️", profile_effect: "✨", banner: "🎨", name_color: "🌈",
+};
+
+type DecModalDecoration = {
+  id: string; name: string; description: string | null; type: string; emoji: string | null;
+  imageUrl: string | null; cssEffect: string | null; color: string | null;
+  rarity: string; price: number; category: string | null;
+  maxOwners: number | null; currentOwners: number;
+};
+type DecModalOwned = {
+  memberDecorationId: string; decorationId: string; isEquipped: boolean;
+  decoration: DecModalDecoration;
+};
+
+function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
+  open: boolean; onOpenChange: (v: boolean) => void;
+  discordId: string; isOwnProfile: boolean;
+}) {
+  const { isAuthenticated, updateBalance } = useAuth();
+  const { language } = useLanguage();
+  const { toast } = useToast();
+  const isRu = (language || 'ru') === 'ru';
+  const [activeType, setActiveType] = useState("all");
+  const [buyingId, setBuyingId] = useState<string | null>(null);
+  const [equippingId, setEquippingId] = useState<string | null>(null);
+
+  const { data: allDecorations } = useQuery<DecModalDecoration[]>({
+    queryKey: ["/api/decorations"],
+    enabled: open,
+  });
+
+  const { data: owned } = useQuery<DecModalOwned[]>({
+    queryKey: ["/api/decorations/my"],
+    enabled: open && isAuthenticated && isOwnProfile,
+  });
+
+  const buyMutation = useMutation({
+    mutationFn: async (decorationId: string) => {
+      setBuyingId(decorationId);
+      const resp = await apiRequest("POST", "/api/decorations/buy", { decorationId });
+      return resp.json();
+    },
+    onSuccess: (data: any) => {
+      setBuyingId(null);
+      if (data.newBalance !== undefined) updateBalance(data.newBalance);
+      queryClient.invalidateQueries({ queryKey: ["/api/decorations/my"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/decorations"] });
+      toast({ title: isRu ? "Куплено!" : "Purchased!", description: data.message });
+    },
+    onError: (err: any) => {
+      setBuyingId(null);
+      toast({ title: isRu ? "Ошибка" : "Error", description: err?.message || "Failed", variant: "destructive" });
+    },
+  });
+
+  const equipMutation = useMutation({
+    mutationFn: async ({ decorationId, equip }: { decorationId: string; equip: boolean }) => {
+      setEquippingId(decorationId);
+      const resp = await apiRequest("POST", "/api/decorations/equip", { decorationId, equip });
+      return resp.json();
+    },
+    onSuccess: () => {
+      setEquippingId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/decorations/my"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/decorations/all-equipped"] });
+    },
+    onError: () => {
+      setEquippingId(null);
+      toast({ title: isRu ? "Ошибка" : "Error", variant: "destructive" });
+    },
+  });
+
+  const ownedMap = new Map<string, DecModalOwned>();
+  owned?.forEach(o => ownedMap.set(o.decorationId, o));
+
+  const types = ["all", "badge", "name_color", "avatar_frame", "profile_effect", "banner"];
+  const typeLabelsMap: Record<string, string> = {
+    all: isRu ? "Все" : "All",
+    badge: isRu ? "Значки" : "Badges",
+    name_color: isRu ? "Цвета" : "Colors",
+    avatar_frame: isRu ? "Рамки" : "Frames",
+    profile_effect: isRu ? "Эффекты" : "Effects",
+    banner: isRu ? "Баннеры" : "Banners",
+  };
+
+  const filtered = (allDecorations || []).filter(d => activeType === "all" || d.type === activeType);
+  const sorted = [...filtered].sort((a, b) => {
+    const rarityOrder = ["legendary", "epic", "rare", "uncommon", "common"];
+    const aOwned = ownedMap.has(a.id) ? 0 : 1;
+    const bOwned = ownedMap.has(b.id) ? 0 : 1;
+    if (aOwned !== bOwned) return aOwned - bOwned;
+    return rarityOrder.indexOf(a.rarity) - rarityOrder.indexOf(b.rarity);
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0">
+        <DialogHeader className="px-6 pt-6 pb-2">
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-purple-400" />
+            {isRu ? "Коллекция декораций" : "Decoration Collection"}
+            <Badge variant="outline" className="ml-2 text-xs">
+              {owned?.length ?? 0} / {allDecorations?.length ?? 0}
+            </Badge>
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* Type filter tabs */}
+        <div className="px-6 flex flex-wrap gap-1">
+          {types.map(t => (
+            <Button key={t} size="sm" variant={activeType === t ? "default" : "ghost"}
+              className="h-7 text-xs gap-1" onClick={() => setActiveType(t)}>
+              {typeIcons[t] || "📦"} {typeLabelsMap[t]}
+            </Button>
+          ))}
+        </div>
+
+        {/* Items grid */}
+        <ScrollArea className="flex-1 px-6 pb-6 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {sorted.map(dec => {
+              const myOwned = ownedMap.get(dec.id);
+              const isOwned = !!myOwned;
+              const isEquipped = myOwned?.isEquipped ?? false;
+              const isSoldOut = dec.maxOwners !== null && dec.maxOwners > 0 && dec.currentOwners >= dec.maxOwners;
+
+              return (
+                <div key={dec.id} className={`relative rounded-xl border p-3 transition-all hover:scale-[1.02] ${
+                  rarityColors[dec.rarity] || "border-border/40"
+                } ${isOwned ? "bg-muted/20" : "bg-background/50 opacity-70"}`}>
+                  {/* Emoji / icon */}
+                  <div className="text-2xl mb-1">{dec.emoji || typeIcons[dec.type] || "✦"}</div>
+
+                  {/* Name */}
+                  <p className="text-xs font-semibold truncate" style={{ color: dec.color || undefined }}>
+                    {dec.name}
+                  </p>
+
+                  {/* Rarity + type */}
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {rarityLabels[dec.rarity] || dec.rarity}
+                  </p>
+
+                  {/* Description */}
+                  {dec.description && (
+                    <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2">{dec.description}</p>
+                  )}
+
+                  {/* Price */}
+                  <div className="flex items-center gap-1 mt-2 text-xs text-yellow-500">
+                    <Coins className="h-3 w-3" /> {dec.price.toLocaleString()}
+                  </div>
+
+                  {/* Status badges */}
+                  <div className="flex gap-1 mt-1.5 flex-wrap">
+                    {isOwned && (
+                      <Badge variant="outline" className="text-[9px] h-4 bg-green-500/10 text-green-400 border-green-600/30">
+                        {isRu ? "В коллекции" : "Owned"}
+                      </Badge>
+                    )}
+                    {isEquipped && (
+                      <Badge variant="outline" className="text-[9px] h-4 bg-purple-500/10 text-purple-400 border-purple-600/30">
+                        {isRu ? "Надето" : "Equipped"}
+                      </Badge>
+                    )}
+                    {isSoldOut && !isOwned && (
+                      <Badge variant="outline" className="text-[9px] h-4 bg-red-500/10 text-red-400 border-red-600/30">
+                        {isRu ? "Распродано" : "Sold out"}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  {isOwnProfile && isAuthenticated && (
+                    <div className="mt-2 flex gap-1">
+                      {!isOwned && !isSoldOut && (
+                        <Button size="sm" className="h-6 text-[10px] flex-1" variant="outline"
+                          disabled={buyingId === dec.id} onClick={() => buyMutation.mutate(dec.id)}>
+                          {buyingId === dec.id ? <Loader2 className="h-3 w-3 animate-spin" /> :
+                           (isRu ? "Купить" : "Buy")}
+                        </Button>
+                      )}
+                      {isOwned && (
+                        <Button size="sm" className={`h-6 text-[10px] flex-1 ${isEquipped ? "bg-purple-600/20" : ""}`}
+                          variant="outline" disabled={equippingId === dec.id}
+                          onClick={() => equipMutation.mutate({ decorationId: dec.id, equip: !isEquipped })}>
+                          {equippingId === dec.id ? <Loader2 className="h-3 w-3 animate-spin" /> :
+                           isEquipped ? (isRu ? "Снять" : "Unequip") : (isRu ? "Надеть" : "Equip")}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {sorted.length === 0 && (
+            <div className="text-center py-10 text-muted-foreground">
+              <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">{isRu ? "Декорации не найдены" : "No decorations found"}</p>
+            </div>
+          )}
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function ProfilePage() {
   const { user } = useAuth();
   const { t, language } = useLanguage();
@@ -89,6 +313,7 @@ export default function ProfilePage() {
   const [searchInput, setSearchInput] = useState("");
   const [copiedId, setCopiedId] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [showDecorations, setShowDecorations] = useState(false);
   const { toast } = useToast();
   const bannerFileRef = useRef<HTMLInputElement>(null);
 
@@ -371,10 +596,14 @@ export default function ProfilePage() {
                 <span className="text-xl font-bold">{profile.lumiCoins?.toLocaleString()}</span>
               </div>
               <p className="text-xs text-muted-foreground">LumiCoins</p>
-              <div className="flex gap-1.5 justify-end">
+              <div className="flex gap-1.5 justify-end flex-wrap">
                 <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleCopyId}>
                   {copiedId ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   ID
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowDecorations(true)}>
+                  <Sparkles className="h-3 w-3" />
+                  {(language || 'ru') === 'ru' ? 'Декор' : 'Decor'}
                 </Button>
                 {!isOwnProfile && user?.discordId && (
                   <Link href={`/trading?target=${encodeURIComponent(profile.username)}`}>
@@ -640,6 +869,14 @@ export default function ProfilePage() {
           </Card>)}
         </div>
       </div>
+
+      {/* Decorations Modal */}
+      <DecorationsModal
+        open={showDecorations}
+        onOpenChange={setShowDecorations}
+        discordId={targetDiscordId || ""}
+        isOwnProfile={isOwnProfile}
+      />
     </div>
   );
 }

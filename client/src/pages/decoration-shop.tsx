@@ -156,7 +156,7 @@ export default function DecorationShop() {
   const renderDecorationCard = (dec: Decoration) => {
     const isOwned = ownedIds.has(dec.id);
     const ownedEntry = owned?.find(o => o.decorationId === dec.id);
-    const isSoldOut = dec.maxOwners !== null && dec.currentOwners >= dec.maxOwners;
+    const isSoldOut = dec.maxOwners !== null && dec.maxOwners > 0 && dec.currentOwners >= dec.maxOwners;
 
     return (
       <Card key={dec.id} className={`glass glass-border ${getCardBorder(dec.rarity)} transition-all hover:shadow-lg`}>

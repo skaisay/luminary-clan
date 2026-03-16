@@ -4391,6 +4391,93 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     }
   });
 
+  // ============= SLOTS (Casino slot machine) =============
+  app.post("/api/mini-games/slots", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { clanMembers, gameHistory } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { discordId, bet } = req.body;
+      if (!discordId || !bet || bet < 1) return res.status(400).json({ error: "Missing params" });
+      const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
+
+      // 3 reels, 9 symbols each (weighted)
+      const SYMBOLS = ["🍒", "🍋", "🍊", "🍇", "🔔", "⭐", "💎", "7️⃣", "🎰"];
+      // Weighted: common fruits high, 7/diamond low
+      const WEIGHTS = [20, 18, 16, 14, 10, 8, 5, 3, 2];
+      const totalWeight = WEIGHTS.reduce((a, b) => a + b, 0);
+
+      function spinReel(): number {
+        let r = Math.random() * totalWeight;
+        for (let i = 0; i < WEIGHTS.length; i++) {
+          r -= WEIGHTS[i];
+          if (r <= 0) return i;
+        }
+        return 0;
+      }
+
+      const reels = [
+        [spinReel(), spinReel(), spinReel()], // row 1
+        [spinReel(), spinReel(), spinReel()], // row 2 (middle - payline)
+        [spinReel(), spinReel(), spinReel()], // row 3
+      ];
+
+      // Check middle row (main payline)
+      const middle = reels[1];
+      let multiplier = 0;
+      let resultDesc = "";
+
+      if (middle[0] === middle[1] && middle[1] === middle[2]) {
+        // 3 of a kind on the middle payline
+        const sym = SYMBOLS[middle[0]];
+        if (sym === "🎰") { multiplier = 50; resultDesc = "JACKPOT 🎰🎰🎰"; }
+        else if (sym === "7️⃣") { multiplier = 25; resultDesc = "MEGA WIN 7️⃣7️⃣7️⃣"; }
+        else if (sym === "💎") { multiplier = 15; resultDesc = "BIG WIN 💎💎💎"; }
+        else if (sym === "⭐") { multiplier = 10; resultDesc = "WIN ⭐⭐⭐"; }
+        else if (sym === "🔔") { multiplier = 7; resultDesc = "WIN 🔔🔔🔔"; }
+        else if (sym === "🍇") { multiplier = 5; resultDesc = "WIN 🍇🍇🍇"; }
+        else if (sym === "🍊") { multiplier = 4; resultDesc = "WIN 🍊🍊🍊"; }
+        else if (sym === "🍋") { multiplier = 3; resultDesc = "WIN 🍋🍋🍋"; }
+        else { multiplier = 2; resultDesc = "WIN 🍒🍒🍒"; }
+      } else if (middle[0] === middle[1] || middle[1] === middle[2] || middle[0] === middle[2]) {
+        // 2 of a kind
+        multiplier = 0.5;
+        resultDesc = "Small win";
+      } else {
+        multiplier = 0;
+        resultDesc = "No match";
+      }
+
+      // Also check diagonals for bonus
+      const diag1 = [reels[0][0], reels[1][1], reels[2][2]];
+      const diag2 = [reels[0][2], reels[1][1], reels[2][0]];
+      if (diag1[0] === diag1[1] && diag1[1] === diag1[2] && multiplier < 2) {
+        multiplier += 1.5;
+        resultDesc += " + Diagonal!";
+      }
+      if (diag2[0] === diag2[1] && diag2[1] === diag2[2] && multiplier < 2) {
+        multiplier += 1.5;
+        resultDesc += " + Diagonal!";
+      }
+
+      const payout = Math.floor(betAmount * multiplier);
+      const reward = payout - betAmount;
+      const newBalance = Math.max(0, (member[0].lumiCoins || 0) + reward);
+      await db.update(clanMembers).set({ lumiCoins: newBalance }).where(eq(clanMembers.id, member[0].id));
+      try { await db.insert(gameHistory).values({ discordId, game: "slots", bet: betAmount, reward, result: resultDesc }); } catch {}
+      if (app.locals.broadcastSSE) app.locals.broadcastSSE('balance-update', { discordId, newBalance, username: member[0].username });
+
+      // Return symbols as indices for client to look up
+      const grid = reels.map(row => row.map(idx => SYMBOLS[idx]));
+      res.json({ grid, multiplier, reward, resultDesc, newBalance });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/mini-games/history/:discordId", async (req, res) => {
     try {
       const { db } = await import("./db");
