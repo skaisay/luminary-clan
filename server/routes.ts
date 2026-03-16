@@ -4106,26 +4106,23 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   app.post("/api/mini-games/wheel", async (req, res) => {
     try {
       const { db } = await import("./db");
-      const { clanMembers } = await import("@shared/schema");
+      const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
       const { discordId, bet } = req.body;
-      if (!discordId || !bet) return res.status(400).json({ error: "discordId and bet required" });
+      if (!discordId || !bet || bet < 1) return res.status(400).json({ error: "discordId and bet required" });
+      const betAmount = Math.min(Math.floor(Number(bet)), 50000);
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
-      if ((member[0].lumiCoins || 0) < bet) return res.status(400).json({ error: "Not enough LumiCoins" });
-      const segments = [10, 25, 50, 100, 5, 200, 0, 75, 500, 15, -1, 30];
-      const segmentIndex = Math.floor(Math.random() * segments.length);
-      const segmentValue = segments[segmentIndex];
-      let reward = 0;
-      if (segmentValue === -1) {
-        reward = bet * 2; // 2x multiplier
-      } else if (segmentValue === 0) {
-        reward = -bet; // lose bet
-      } else {
-        reward = segmentValue;
-      }
-      await db.update(clanMembers).set({ lumiCoins: (member[0].lumiCoins || 0) - bet + (reward > 0 ? reward : 0) + (reward < 0 ? reward : 0) }).where(eq(clanMembers.id, member[0].id));
-      res.json({ segmentIndex, reward });
+      if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
+      // Multiplier-based wheel: must match client WHEEL_SEGMENTS order
+      const multipliers = [0, 0.5, 1.5, 0, 2, 0.5, 3, 1, 0.5, 1.5, 5, 1];
+      const segmentIndex = Math.floor(Math.random() * multipliers.length);
+      const multiplier = multipliers[segmentIndex];
+      const payout = Math.floor(betAmount * multiplier);
+      const reward = payout - betAmount; // net change (negative = loss, positive = profit)
+      await db.update(clanMembers).set({ lumiCoins: Math.max(0, (member[0].lumiCoins || 0) + reward) }).where(eq(clanMembers.id, member[0].id));
+      try { await db.insert(gameHistory).values({ discordId, game: "wheel", bet: betAmount, reward, result: `x${multiplier}` }); } catch {}
+      res.json({ segmentIndex, reward, multiplier });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -4134,13 +4131,14 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   app.post("/api/mini-games/rps", async (req, res) => {
     try {
       const { db } = await import("./db");
-      const { clanMembers } = await import("@shared/schema");
+      const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
       const { discordId, choice, bet } = req.body;
-      if (!discordId || !choice || !bet) return res.status(400).json({ error: "discordId, choice, and bet required" });
+      if (!discordId || !choice || !bet || bet < 1) return res.status(400).json({ error: "discordId, choice, and bet required" });
+      const betAmount = Math.min(Math.floor(Number(bet)), 50000);
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
-      if ((member[0].lumiCoins || 0) < bet) return res.status(400).json({ error: "Not enough LumiCoins" });
+      if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
       const choices = ["rock", "paper", "scissors"] as const;
       const botChoice = choices[Math.floor(Math.random() * 3)];
       let result: "win" | "lose" | "draw" = "draw";
@@ -4154,18 +4152,33 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         }
       }
       let reward = 0;
-      if (result === "win") reward = bet;
-      else if (result === "lose") reward = -bet;
-      await db.update(clanMembers).set({ lumiCoins: Math.max(0, (member[0].lumiCoins || 0) + reward) }).where(eq(clanMembers.id, member[0].id));
+      if (result === "win") reward = betAmount;
+      else if (result === "lose") reward = -betAmount;
+      const updateData: Record<string, number> = { lumiCoins: Math.max(0, (member[0].lumiCoins || 0) + reward) };
+      if (result === "win") updateData.wins = (member[0].wins || 0) + 1;
+      if (result === "lose") updateData.losses = (member[0].losses || 0) + 1;
+      await db.update(clanMembers).set(updateData).where(eq(clanMembers.id, member[0].id));
+      try { await db.insert(gameHistory).values({ discordId, game: "rps", bet: betAmount, reward, result }); } catch {}
       res.json({ botChoice, result, reward });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.get("/api/mini-games/history/:discordId", async (_req, res) => {
-    // Game history not stored in DB yet - return empty
-    res.json([]);
+  app.get("/api/mini-games/history/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { gameHistory } = await import("@shared/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      const { discordId } = req.params;
+      const history = await db.select().from(gameHistory)
+        .where(eq(gameHistory.discordId, discordId))
+        .orderBy(desc(gameHistory.playedAt))
+        .limit(50);
+      res.json(history);
+    } catch {
+      res.json([]);
+    }
   });
 
   // ============================================================

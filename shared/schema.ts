@@ -751,6 +751,17 @@ export const memberDecorations = pgTable("member_decorations", {
   acquiredAt: timestamp("acquired_at").defaultNow().notNull(),
 });
 
+// История мини-игр
+export const gameHistory = pgTable("game_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  discordId: text("discord_id").notNull(),
+  game: text("game").notNull(),
+  bet: integer("bet").notNull(),
+  reward: integer("reward").notNull(),
+  result: text("result").notNull(),
+  playedAt: timestamp("played_at").defaultNow().notNull(),
+});
+
 export const insertProfileDecorationSchema = createInsertSchema(profileDecorations).omit({
   id: true,
   currentOwners: true,

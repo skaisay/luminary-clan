@@ -16,18 +16,18 @@ import { apiRequest } from "@/lib/queryClient";
 // ============= WHEEL OF FORTUNE =============
 
 const WHEEL_SEGMENTS = [
-  { label: "10", value: 10, color: "#ef4444" },
-  { label: "25", value: 25, color: "#f97316" },
-  { label: "50", value: 50, color: "#eab308" },
-  { label: "100", value: 100, color: "#22c55e" },
-  { label: "5", value: 5, color: "#6366f1" },
-  { label: "200", value: 200, color: "#a855f7" },
-  { label: "0", value: 0, color: "#64748b" },
-  { label: "75", value: 75, color: "#06b6d4" },
-  { label: "500", value: 500, color: "#ec4899" },
-  { label: "15", value: 15, color: "#14b8a6" },
-  { label: "2x", value: -1, color: "#f59e0b" },
-  { label: "30", value: 30, color: "#8b5cf6" },
+  { label: "x0", multiplier: 0, color: "#64748b" },
+  { label: "x0.5", multiplier: 0.5, color: "#ef4444" },
+  { label: "x1.5", multiplier: 1.5, color: "#22c55e" },
+  { label: "x0", multiplier: 0, color: "#475569" },
+  { label: "x2", multiplier: 2, color: "#eab308" },
+  { label: "x0.5", multiplier: 0.5, color: "#dc2626" },
+  { label: "x3", multiplier: 3, color: "#a855f7" },
+  { label: "x1", multiplier: 1, color: "#06b6d4" },
+  { label: "x0.5", multiplier: 0.5, color: "#f97316" },
+  { label: "x1.5", multiplier: 1.5, color: "#10b981" },
+  { label: "x5", multiplier: 5, color: "#ec4899" },
+  { label: "x1", multiplier: 1, color: "#6366f1" },
 ];
 
 function WheelOfFortune() {
@@ -36,7 +36,7 @@ function WheelOfFortune() {
   const queryClient = useQueryClient();
   const [spinning, setSpinning] = useState(false);
   const [rotation, setRotation] = useState(0);
-  const [result, setResult] = useState<{ value: number; label: string } | null>(null);
+  const [result, setResult] = useState<{ reward: number; label: string; multiplier: number } | null>(null);
   const [betAmount, setBetAmount] = useState(10);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -48,7 +48,7 @@ function WheelOfFortune() {
       });
       return res.json();
     },
-    onSuccess: (data: { segmentIndex: number; reward: number }) => {
+    onSuccess: (data: { segmentIndex: number; reward: number; multiplier: number }) => {
       const segPerAngle = 360 / WHEEL_SEGMENTS.length;
       const targetAngle = 360 - (data.segmentIndex * segPerAngle + segPerAngle / 2);
       const spins = 5 + Math.floor(Math.random() * 3);
@@ -57,7 +57,7 @@ function WheelOfFortune() {
       setSpinning(true);
       setTimeout(() => {
         setSpinning(false);
-        setResult({ value: data.reward, label: WHEEL_SEGMENTS[data.segmentIndex].label });
+        setResult({ reward: data.reward, label: WHEEL_SEGMENTS[data.segmentIndex].label, multiplier: data.multiplier });
         queryClient.invalidateQueries({ queryKey: ["/api/mini-games/history"] });
       }, 4000);
     }
@@ -126,7 +126,7 @@ function WheelOfFortune() {
       </div>
 
       {/* Bet controls */}
-      <div className="flex items-center justify-center gap-3">
+      <div className="flex items-center justify-center gap-3 flex-wrap">
         <span className="text-sm text-muted-foreground">{t('miniGames.bet')}:</span>
         <div className="flex gap-1">
           {[10, 25, 50, 100].map(val => (
@@ -143,13 +143,26 @@ function WheelOfFortune() {
             </Button>
           ))}
         </div>
+        <Input
+          type="number"
+          min={1}
+          max={10000}
+          value={betAmount}
+          onChange={(e) => setBetAmount(Math.max(1, parseInt(e.target.value) || 1))}
+          disabled={spinning}
+          className="w-20 h-8 text-xs text-center"
+          data-ai="wheel-bet-custom"
+        />
       </div>
 
       {result && (
-        <div className="text-center">
+        <div className="text-center space-y-1">
+          <p className={`text-2xl font-bold ${result.reward > 0 ? 'text-green-400' : result.reward < 0 ? 'text-red-400' : 'text-yellow-400'}`}>
+            {result.label}
+          </p>
           <Badge variant="secondary" className="text-lg px-4 py-1 gap-1">
             <Coins className="h-4 w-4 text-yellow-500" />
-            {result.value > 0 ? `+${result.value}` : result.value === 0 ? "0" : result.label} LumiCoins
+            {result.reward > 0 ? `+${result.reward}` : result.reward} LumiCoins
           </Badge>
         </div>
       )}
@@ -282,7 +295,7 @@ function RockPaperScissors() {
       )}
 
       {/* Bet */}
-      <div className="flex items-center justify-center gap-3">
+      <div className="flex items-center justify-center gap-3 flex-wrap">
         <span className="text-sm text-muted-foreground">{t('miniGames.bet')}:</span>
         <div className="flex gap-1">
           {[10, 25, 50, 100].map(val => (
@@ -299,6 +312,16 @@ function RockPaperScissors() {
             </Button>
           ))}
         </div>
+        <Input
+          type="number"
+          min={1}
+          max={10000}
+          value={betAmount}
+          onChange={(e) => setBetAmount(Math.max(1, parseInt(e.target.value) || 1))}
+          disabled={animating}
+          className="w-20 h-8 text-xs text-center"
+          data-ai="rps-bet-custom"
+        />
       </div>
 
       {/* Choice buttons */}
