@@ -243,10 +243,9 @@ ${getFieldsRu()}
 ПРАВИЛА:
 - Если юзер УЖЕ на нужной странице — НЕ добавляй [NAV:]. Проверяй ${pageContext}.
 - [DO:wait|_|500] после смены таба/клика edit/create.
-- profile-section-stats, profile-section-achievements, profile-section-info, profile-section-inventory, profile-section-xpLevel = ЧЕКБОКСЫ. [DO:click|profile-section-inventory] = скрыть/показать секцию. Если просят скрыть/убрать/спрятать — кликни чекбокс.
-- tab-members: "выдай/дай/начисли X LC игроку Y" = [DO:click|tab-members][DO:wait|_|500][DO:click|edit-Y][DO:wait|_|500][DO:fill|member-lumiCoins|X][DO:click|save-Y]. member-lumiCoins,member-role,member-rank,member-wins,member-losses = поля инлайн-редакт.
-- Макс 3 создания за раз. Если просят создать 4+ — сделай 3, скажи "продолжить?".
-- Если запрос содержит 4+ разных задач — сделай 2-3 главных, предложи продолжить.
+- profile-section-* = ЧЕКБОКСЫ видимости. [DO:click|profile-section-inventory] = скрыть/показать.
+- tab-members: "выдай X LC игроку Y" = [DO:click|tab-members][DO:wait|_|500][DO:click|edit-Y][DO:wait|_|500][DO:fill|member-lumiCoins|X][DO:click|save-Y]. member-lumiCoins,member-role,member-rank,member-wins,member-losses = инлайн-поля.
+- НЕСКОЛЬКО ЗАДАЧ: используй [STEP:1]...[STEP:2]...[STEP:3] для КАЖДОЙ задачи. Выполняй ВСЕ задачи из запроса! Пример: "зайди в торговлю, потом статистику, потом музыку" → [STEP:1][NAV:/trading][STEP:2][NAV:/statistics][STEP:3][NAV:/music].
 Примеры: "100 LC Test123"→"💰[STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
 "Создай Корона 500"→"👑[STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Корона][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
 "Измени цену Корона→200"(на /admin)→"✏️[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Корона][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
@@ -263,10 +262,9 @@ Tags: [NAV:/path], [DO:fill|field|val], [DO:click|btn], [DO:wait|_|ms], [STEP:N]
 RULES:
 - If user ALREADY on needed page — NO [NAV:]. Check ${pageContext}.
 - [DO:wait|_|500] after tab switch/edit click/create click.
-- profile-section-stats, profile-section-achievements, profile-section-info, profile-section-inventory, profile-section-xpLevel = CHECKBOXES. [DO:click|profile-section-inventory] = toggle section visibility. If asked to hide/remove — click the checkbox.
-- tab-members: "give/add X LC to player Y" = [DO:click|tab-members][DO:wait|_|500][DO:click|edit-Y][DO:wait|_|500][DO:fill|member-lumiCoins|X][DO:click|save-Y]. member-lumiCoins,member-role,member-rank,member-wins,member-losses = inline edit fields.
-- Max 3 creations at a time. If asked to create 4+ — do 3, say "continue?".
-- If request has 4+ different tasks — do 2-3 main ones, offer to continue.
+- profile-section-* = CHECKBOXES for visibility toggle. [DO:click|profile-section-inventory] = hide/show.
+- tab-members: "give X LC to Y" = [DO:click|tab-members][DO:wait|_|500][DO:click|edit-Y][DO:wait|_|500][DO:fill|member-lumiCoins|X][DO:click|save-Y]. member-lumiCoins,member-role,member-rank,member-wins,member-losses = inline fields.
+- MULTIPLE TASKS: use [STEP:1]...[STEP:2]...[STEP:3] for EACH task. Execute ALL tasks from request! Example: "go to trading, then stats, then music" → [STEP:1][NAV:/trading][STEP:2][NAV:/statistics][STEP:3][NAV:/music].
 Examples: "100 LC Test123"→"💰[STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
 "Create Crown 500"→"👑[STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Crown][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
 "Change Crown price→200"(on /admin)→"✏️[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Crown][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
@@ -308,7 +306,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
             body: JSON.stringify({
               model: 'openai',
               messages: chatMessages,
-              max_tokens: 1200,
+              max_tokens: 2000,
               temperature: 0.7,
             }),
             signal: AbortSignal.timeout(20000),
@@ -327,7 +325,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
               body: JSON.stringify({
                 model: 'mistral',
                 messages: chatMessages,
-                max_tokens: 1200,
+                max_tokens: 2000,
                 temperature: 0.7,
               }),
               signal: AbortSignal.timeout(18000),
@@ -350,7 +348,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
                   { role: 'user', content: lastUserMsg }
                 ],
                 model: 'gpt-4o-mini',
-                max_tokens: 1200,
+                max_tokens: 2000,
               }),
               signal: AbortSignal.timeout(15000),
             });
@@ -372,7 +370,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             inputs: `<|system|>\n${systemPrompt}</s>\n<|user|>\n${lastUserMsg}</s>\n<|assistant|>\n`,
-            parameters: { max_new_tokens: 500, temperature: 0.7 },
+            parameters: { max_new_tokens: 1000, temperature: 0.7 },
           }),
           signal: AbortSignal.timeout(15000),
         });
