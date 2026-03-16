@@ -21,8 +21,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useParams } from "wouter";
 import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
-import { AvatarFrame, StyledUsername, UserBadges } from "@/components/UserBadges";
+import { useAllDecorations } from "@/components/member-decorations";
+import { AvatarFrame, StyledUsername, UserBadges, useEquippedBanner } from "@/components/UserBadges";
 
 interface MemberProfile {
   id: string;
@@ -134,10 +134,12 @@ function DecorationPreview({ dec }: { dec: DecModalDecoration }) {
     );
   }
   if (dec.type === 'avatar_frame') {
+    const isSquare = (dec.cssEffect || '').includes('rounded-lg');
+    const shapeClass = isSquare ? 'rounded-lg' : 'rounded-full';
     return (
       <div className="flex justify-center p-3">
-        <div className={`w-16 h-16 rounded-full bg-gradient-to-br from-primary/30 to-accent/30 ${dec.cssEffect || ''}`}>
-          <div className="w-full h-full rounded-full bg-muted/50 flex items-center justify-center text-lg">👤</div>
+        <div className={`w-16 h-16 ${shapeClass} bg-gradient-to-br from-primary/30 to-accent/30 ${dec.cssEffect || ''}`}>
+          <div className={`w-full h-full ${shapeClass} bg-muted/50 flex items-center justify-center text-lg`}>👤</div>
         </div>
       </div>
     );
@@ -554,7 +556,8 @@ export default function ProfilePage() {
     enabled: !!targetDiscordId,
   });
 
-  const { data: allDecorations } = useAllDecorations();
+  useAllDecorations(); // keep query warm for other components
+  const equippedBanner = useEquippedBanner(targetDiscordId || undefined);
 
   const handleSearch = () => {
     const q = searchInput.trim();
@@ -642,24 +645,28 @@ export default function ProfilePage() {
 
       {/* Profile Header */}
       <Card className="glass glass-border overflow-hidden mb-6 relative" style={cd.cardColor ? { borderColor: cd.cardColor + '40' } : undefined}>
-        <div
-          className="h-32 relative"
-          style={cd.bannerColor1 && !cd.bannerImage
-            ? { background: `linear-gradient(to right, ${cd.bannerColor1}, ${cd.bannerColor2 || cd.bannerColor1})` }
-            : undefined
+        {(() => {
+          // Banner priority: 1) custom image URL, 2) custom colors, 3) equipped banner decoration, 4) default
+          const hasBannerImage = !!cd.bannerImage;
+          const hasBannerColors = !!cd.bannerColor1;
+          const hasBannerDecor = !!equippedBanner?.cssEffect;
+          let bannerStyle: React.CSSProperties | undefined;
+          if (hasBannerColors && !hasBannerImage) {
+            bannerStyle = { background: `linear-gradient(to right, ${cd.bannerColor1}, ${cd.bannerColor2 || cd.bannerColor1})` };
+          } else if (!hasBannerImage && !hasBannerColors && hasBannerDecor) {
+            bannerStyle = { background: equippedBanner!.cssEffect! };
           }
-        >
-          {cd.bannerImage && (
-            <img src={cd.bannerImage} alt="" className="w-full h-full object-cover absolute inset-0" />
-          )}
-          {!cd.bannerColor1 && !cd.bannerImage && (
-            <div className="absolute inset-0 bg-gradient-to-r from-primary/30 to-[hsl(var(--accent))]/30" />
-          )}
-          {profile.equippedBanner && !cd.bannerColor1 && !cd.bannerImage && (
-            <img src={profile.equippedBanner} alt="" className="w-full h-full object-cover absolute inset-0" />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent" />
-        </div>
+          return (
+            <div className="h-32 relative" style={bannerStyle}>
+              {hasBannerImage && (
+                <img src={cd.bannerImage} alt="" className="w-full h-full object-cover absolute inset-0" />
+              )}
+              {!hasBannerImage && !hasBannerColors && !hasBannerDecor && (
+                <div className="absolute inset-0 bg-gradient-to-r from-primary/30 to-[hsl(var(--accent))]/30" />
+              )}
+            </div>
+          );
+        })()}
         <CardContent className="relative -mt-12 pb-6">
           <div className="flex flex-col md:flex-row items-start md:items-end gap-4">
             <AvatarFrame discordId={profile.discordId}>
@@ -673,7 +680,6 @@ export default function ProfilePage() {
                 <h1 className="text-2xl font-bold flex items-center gap-1.5">
                   <StyledUsername discordId={profile.discordId} username={profile.username} />
                   <UserBadges discordId={profile.discordId} />
-                  <MemberDecorations discordId={profile.discordId} decorations={allDecorations} />
                 </h1>
                 {profile.equippedTitle && (
                   <Badge variant="secondary" className="text-xs">{profile.equippedTitle}</Badge>

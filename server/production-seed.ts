@@ -159,6 +159,23 @@ export async function ensureProductionData() {
         { name: "Плазменная Рамка", description: "Кипящая плазма вокруг аватара", type: "avatar_frame", emoji: null, cssEffect: "ring-3 ring-cyan-400 shadow-xl shadow-cyan-400/60 animate-pulse", color: "#22d3ee", rarity: "legendary", price: 35000, category: "limited", maxOwners: 15 },
         { name: "Абсолютная Рамка", description: "Идеальная рамка для легенд", type: "avatar_frame", emoji: null, cssEffect: "ring-4 ring-amber-400 shadow-2xl shadow-amber-500/50 animate-pulse", color: "#f59e0b", rarity: "legendary", price: 50000, category: "limited", maxOwners: 5 },
 
+        // ==================== SQUARE AVATAR FRAMES (10 items) ====================
+        // Common
+        { name: "Квадрат Простой", description: "Квадратная тонкая рамка", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-1 ring-white/30", color: "#e2e8f0", rarity: "common", price: 500, category: "general" },
+        { name: "Квадрат Синий", description: "Квадратная синяя обводка", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-2 ring-blue-500/50", color: "#3b82f6", rarity: "common", price: 600, category: "general" },
+        // Uncommon
+        { name: "Квадрат Молнии", description: "Квадрат с электрическими искрами", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-2 ring-yellow-400 shadow-md shadow-yellow-500/30", color: "#eab308", rarity: "uncommon", price: 1500, category: "general" },
+        { name: "Квадрат Ледяной", description: "Квадратная замороженная обводка", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-2 ring-cyan-400 shadow-md shadow-cyan-500/30", color: "#22d3ee", rarity: "uncommon", price: 1500, category: "general" },
+        // Rare
+        { name: "Квадрат Огненный", description: "Квадратная рамка в кольце пламени", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-2 ring-orange-500 shadow-lg shadow-orange-500/50", color: "#f97316", rarity: "rare", price: 4000, category: "general" },
+        { name: "Квадрат Алмазный", description: "Квадратная сверкающая алмазная обводка", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-2 ring-cyan-300 shadow-lg shadow-cyan-400/50", color: "#67e8f9", rarity: "rare", price: 5000, category: "general" },
+        // Epic
+        { name: "Квадрат Космический", description: "Квадратная мерцающая галактическая рамка", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-2 ring-purple-500 shadow-lg shadow-purple-500/50 animate-pulse", color: "#a855f7", rarity: "epic", price: 12000, category: "exclusive" },
+        { name: "Квадрат Неоновый", description: "Квадратный яркий неоновый контур", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-2 ring-emerald-400 shadow-lg shadow-emerald-400/60 animate-pulse", color: "#34d399", rarity: "epic", price: 10000, category: "exclusive" },
+        // Legendary
+        { name: "Квадрат Радужный", description: "Квадратная переливающаяся рамка", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-3 ring-yellow-400 shadow-xl shadow-yellow-500/40 animate-pulse", color: "#fbbf24", rarity: "legendary", price: 30000, category: "limited" },
+        { name: "Квадрат Абсолют", description: "Квадратная идеальная рамка для легенд", type: "avatar_frame", emoji: null, cssEffect: "rounded-lg ring-4 ring-amber-400 shadow-2xl shadow-amber-500/50 animate-pulse", color: "#f59e0b", rarity: "legendary", price: 50000, category: "limited", maxOwners: 5 },
+
         // ==================== PROFILE EFFECTS (15 items) ====================
         // Common
         { name: "Искры", description: "Лёгкие искорки на профиле", type: "profile_effect", emoji: "✨", cssEffect: "sparkle-subtle", color: "#fbbf24", rarity: "common", price: 700, category: "general" },

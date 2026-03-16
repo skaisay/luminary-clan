@@ -74,20 +74,28 @@ export function StyledUsername({ discordId, username, className = "" }: { discor
   const nameColors = allEquipped?.[discordId]?.filter(d => d.type === "name_color") || [];
   const activeColor = nameColors[0]; // Use the first equipped name_color
 
-  if (!activeColor?.cssEffect) {
+  if (!activeColor) {
     return <span className={className}>{username}</span>;
   }
 
   // Parse cssEffect into style object
   const style: Record<string, string> = {};
-  activeColor.cssEffect!.split(";").forEach((rule: string) => {
-    const [prop, val] = rule.split(":").map((s: string) => s.trim());
-    if (prop && val) {
-      // Convert CSS property to camelCase
-      const camelProp = prop.replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase());
-      style[camelProp] = val;
-    }
-  });
+  if (activeColor.cssEffect && activeColor.cssEffect.trim()) {
+    activeColor.cssEffect.split(";").forEach((rule: string) => {
+      const [prop, val] = rule.split(":").map((s: string) => s.trim());
+      if (prop && val) {
+        const camelProp = prop.replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase());
+        style[camelProp] = val;
+      }
+    });
+  } else if (activeColor.color) {
+    // Fallback: use plain color when no cssEffect (common name_colors)
+    style.color = activeColor.color;
+  }
+
+  if (Object.keys(style).length === 0) {
+    return <span className={className}>{username}</span>;
+  }
 
   return <span className={className} style={style}>{username}</span>;
 }
@@ -102,9 +110,26 @@ export function AvatarFrame({ discordId, children }: { discordId: string; childr
 
   if (!frame?.cssEffect) return <>{children}</>;
 
+  // Auto-detect square frames (they include rounded-lg in cssEffect)
+  const isSquare = frame.cssEffect.includes("rounded-lg");
+
   return (
-    <div className={`relative ${frame.cssEffect}`} style={{ borderRadius: "inherit" }}>
-      {children}
+    <div className={`relative ${frame.cssEffect} ${isSquare ? '' : 'rounded-full'}`}>
+      {isSquare ? (
+        <div style={{ borderRadius: '0.5rem' }} className="overflow-hidden [&_*]:!rounded-lg">
+          {children}
+        </div>
+      ) : children}
     </div>
   );
+}
+
+/**
+ * Get the equipped banner CSS gradient for a user (from decoration system)
+ */
+export function useEquippedBanner(discordId: string | undefined) {
+  const { data: allEquipped } = useEquippedDecorations();
+  if (!discordId || !allEquipped?.[discordId]) return null;
+  const banners = allEquipped[discordId].filter(d => d.type === "banner");
+  return banners[0] || null;
 }
