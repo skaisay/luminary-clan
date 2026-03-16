@@ -314,15 +314,25 @@ export function TopNav() {
                           <span className="text-xs text-muted-foreground">{user.lumiCoins || 0} LC</span>
                         </div>
                       </div>
-                      <Button 
-                        variant="outline" 
-                        className="w-full"
-                        onClick={() => { logout(); setMobileMenuOpen(false); }}
-                        data-testid="mobile-button-logout"
-                      >
-                        <LogOut className="mr-2 h-4 w-4" />
-                        {t('login.logout')}
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          className="flex-1"
+                          onClick={() => { navigate('/profile'); setMobileMenuOpen(false); }}
+                        >
+                          <UserIcon className="mr-2 h-4 w-4" />
+                          Профиль
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          className="flex-1"
+                          onClick={() => { logout(); setMobileMenuOpen(false); }}
+                          data-testid="mobile-button-logout"
+                        >
+                          <LogOut className="mr-2 h-4 w-4" />
+                          {t('login.logout')}
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <Button 
@@ -413,6 +423,14 @@ export function TopNav() {
                       <span className="text-xs text-muted-foreground">{user.lumiCoins || 0} LC</span>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem 
+                      onClick={() => navigate('/profile')}
+                      className="cursor-pointer"
+                      data-testid="button-profile"
+                    >
+                      <UserIcon className="mr-2 h-4 w-4" />
+                      <span>Мой профиль</span>
+                    </DropdownMenuItem>
                     <DropdownMenuItem 
                       onClick={() => logout()}
                       className="cursor-pointer"

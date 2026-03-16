@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import type { ClanMember } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
+import { Link } from "wouter";
 
 interface DiscordInfo {
   memberCount: number;
@@ -92,9 +93,9 @@ export default function Members() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredMembers.map((member) => (
+            <Link key={member.id} href={member.discordId ? `/profile/${member.discordId}` : '#'}>
             <Card
-              key={member.id}
-              className={`glass glass-border hover-elevate transition-all ${getRoleColor(member.role)}`}
+              className={`glass glass-border hover-elevate transition-all cursor-pointer ${getRoleColor(member.role)}`}
               data-testid={`card-member-${member.id}`}
             >
               <CardHeader className="pb-3">
@@ -139,8 +140,7 @@ export default function Members() {
                   </div>
                 </div>
               </CardContent>
-            </Card>
-          ))}
+            </Card>            </Link>          ))}
         </div>
       )}
     </div>

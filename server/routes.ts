@@ -3516,12 +3516,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================
   // PROFILE API
   // ============================================================
-  app.get("/api/profile/:discordId", async (req, res) => {
+  app.get("/api/profile/:identifier", async (req, res) => {
     try {
       const { db } = await import("./db");
       const { clanMembers } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, req.params.discordId)).limit(1);
+      const id = req.params.identifier;
+      // Try Discord ID first (all digits), then username
+      const isDiscordId = /^\d+$/.test(id);
+      let member;
+      if (isDiscordId) {
+        member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, id)).limit(1);
+      }
+      if (!member || !member[0]) {
+        member = await db.select().from(clanMembers).where(eq(clanMembers.username, id)).limit(1);
+      }
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
       res.json(member[0]);
     } catch (error: any) {
@@ -3628,7 +3637,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allTrades = await db.select().from(trades).where(
         or(eq(trades.fromMemberId, member[0].id), eq(trades.toMemberId, member[0].id))
       );
-      res.json(allTrades);
+      // Fetch usernames for all trades
+      const memberIds = new Set<string>();
+      allTrades.forEach(t => { memberIds.add(t.fromMemberId); memberIds.add(t.toMemberId); });
+      const membersMap: Record<string, string> = {};
+      for (const mid of memberIds) {
+        const m = await db.select().from(clanMembers).where(eq(clanMembers.id, mid)).limit(1);
+        if (m[0]) membersMap[mid] = m[0].username;
+      }
+      const enriched = allTrades.map(t => ({
+        ...t,
+        fromUsername: membersMap[t.fromMemberId] || 'Участник',
+        toUsername: membersMap[t.toMemberId] || 'Участник',
+      }));
+      const incoming = enriched.filter(t => t.toMemberId === member[0].id);
+      const outgoing = enriched.filter(t => t.fromMemberId === member[0].id);
+      res.json({ incoming, outgoing });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -3639,22 +3663,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { db } = await import("./db");
       const { trades, clanMembers } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { fromDiscordId, toDiscordId, offerItems, offerCoins, requestItems, requestCoins, message } = req.body;
-      if (!fromDiscordId || !toDiscordId) return res.status(400).json({ error: "Both discord IDs required" });
-      const fromMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, fromDiscordId)).limit(1);
-      const toMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, toDiscordId)).limit(1);
-      if (!fromMember[0] || !toMember[0]) return res.status(404).json({ error: "Member not found" });
+      const { discordId, targetUser, fromDiscordId, toDiscordId, offerItems, offerCoins, requestItems, requestCoins, message } = req.body;
+      // Support both formats: {discordId + targetUser} or {fromDiscordId + toDiscordId}
+      const senderDiscordId = discordId || fromDiscordId;
+      const receiverInput = targetUser || toDiscordId;
+      if (!senderDiscordId || !receiverInput) return res.status(400).json({ error: "Укажите Discord ID или username получателя" });
+      const fromMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, senderDiscordId)).limit(1);
+      if (!fromMember[0]) return res.status(404).json({ error: "Отправитель не найден" });
+      // Try to find receiver by Discord ID or username
+      const isDiscordId = /^\d+$/.test(receiverInput);
+      let toMember;
+      if (isDiscordId) {
+        toMember = await db.select().from(clanMembers).where(eq(clanMembers.discordId, receiverInput)).limit(1);
+      } else {
+        toMember = await db.select().from(clanMembers).where(eq(clanMembers.username, receiverInput)).limit(1);
+      }
+      if (!toMember[0]) return res.status(404).json({ error: `Участник "${receiverInput}" не найден` });
+      if (fromMember[0].id === toMember[0].id) return res.status(400).json({ error: "Нельзя торговать с самим собой" });
+      // Check balance
+      const sendCoins = offerCoins || 0;
+      if (sendCoins > 0 && (fromMember[0].lumiCoins || 0) < sendCoins) {
+        return res.status(400).json({ error: "Недостаточно LumiCoins" });
+      }
       const [trade] = await db.insert(trades).values({
         fromMemberId: fromMember[0].id,
         toMemberId: toMember[0].id,
         offerItems: offerItems || [],
-        offerCoins: offerCoins || 0,
+        offerCoins: sendCoins,
         requestItems: requestItems || [],
         requestCoins: requestCoins || 0,
         message: message || null,
         status: "pending",
       }).returning();
-      res.json(trade);
+      res.json({ ...trade, fromUsername: fromMember[0].username, toUsername: toMember[0].username });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

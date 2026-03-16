@@ -1,14 +1,19 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   User, Trophy, Coins, Zap, Shield, Star, Clock, BarChart3,
-  Loader2, Flame, Medal, Crown, Package, Award, TrendingUp
+  Loader2, Flame, Medal, Crown, Package, Award, TrendingUp,
+  Search, ArrowLeftRight, ExternalLink, Copy, Check
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import { useParams } from "wouter";
+import { Link, useLocation } from "wouter";
 
 interface MemberProfile {
   id: string;
@@ -74,7 +79,11 @@ function getXpForNextLevel(level: number): number {
 export default function ProfilePage() {
   const { user } = useAuth();
   const params = useParams<{ discordId?: string }>();
+  const [, navigate] = useLocation();
+  const [searchInput, setSearchInput] = useState("");
+  const [copiedId, setCopiedId] = useState(false);
   const targetDiscordId = params.discordId || user?.discordId;
+  const isOwnProfile = !params.discordId || params.discordId === user?.discordId;
 
   const { data: profile, isLoading: loadingProfile } = useQuery<MemberProfile>({
     queryKey: [`/api/profile/${targetDiscordId}`],
@@ -91,12 +100,39 @@ export default function ProfilePage() {
     enabled: !!targetDiscordId,
   });
 
+  const handleSearch = () => {
+    const q = searchInput.trim();
+    if (!q) return;
+    navigate(`/profile/${q}`);
+    setSearchInput("");
+  };
+
+  const handleCopyId = () => {
+    if (profile?.discordId) {
+      navigator.clipboard.writeText(profile.discordId);
+      setCopiedId(true);
+      setTimeout(() => setCopiedId(false), 2000);
+    }
+  };
+
   if (!targetDiscordId) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-4xl pt-24 text-center">
         <User className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
         <h1 className="text-2xl font-bold mb-2">Профиль</h1>
-        <p className="text-muted-foreground">Войдите через Discord для просмотра профиля</p>
+        <p className="text-muted-foreground mb-6">Войдите через Discord или найдите участника</p>
+        <div className="flex gap-2 max-w-md mx-auto">
+          <Input
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSearch()}
+            placeholder="Discord ID или username..."
+            className="glass glass-border"
+          />
+          <Button onClick={handleSearch} className="gap-1.5">
+            <Search className="h-4 w-4" /> Найти
+          </Button>
+        </div>
       </div>
     );
   }
@@ -131,6 +167,20 @@ export default function ProfilePage() {
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl pt-24">
+      {/* Search bar */}
+      <div className="flex gap-2 mb-6">
+        <Input
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleSearch()}
+          placeholder="Найти участника по Discord ID или username..."
+          className="glass glass-border"
+        />
+        <Button onClick={handleSearch} size="icon" variant="outline">
+          <Search className="h-4 w-4" />
+        </Button>
+      </div>
+
       {/* Profile Header */}
       <Card className="glass glass-border overflow-hidden mb-6">
         <div className="h-32 bg-gradient-to-r from-primary/30 to-[hsl(var(--accent))]/30 relative">
@@ -168,12 +218,25 @@ export default function ProfilePage() {
                 <Progress value={xpProgress} className="h-2" />
               </div>
             </div>
-            <div className="text-right">
-              <div className="flex items-center gap-1.5 text-yellow-500">
+            <div className="text-right space-y-2">
+              <div className="flex items-center gap-1.5 text-yellow-500 justify-end">
                 <Coins className="h-5 w-5" />
                 <span className="text-xl font-bold">{profile.lumiCoins?.toLocaleString()}</span>
               </div>
               <p className="text-xs text-muted-foreground">LumiCoins</p>
+              <div className="flex gap-1.5 justify-end">
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleCopyId}>
+                  {copiedId ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  ID
+                </Button>
+                {!isOwnProfile && user?.discordId && (
+                  <Link href="/trading">
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
+                      <ArrowLeftRight className="h-3 w-3" /> Торговля
+                    </Button>
+                  </Link>
+                )}
+              </div>
             </div>
           </div>
         </CardContent>
