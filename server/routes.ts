@@ -2882,15 +2882,32 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
       if (member.length === 0) return res.json([]);
 
-      const results = await db.select({
-        memberDecorationId: memberDecorations.id,
-        decorationId: memberDecorations.decorationId,
-        isEquipped: memberDecorations.isEquipped,
-        decoration: profileDecorations,
-      })
+      const rows = await db.select()
         .from(memberDecorations)
         .innerJoin(profileDecorations, eq(memberDecorations.decorationId, profileDecorations.id))
         .where(eq(memberDecorations.memberId, member[0].id));
+
+      // Transform Drizzle join result into the shape client expects
+      const results = rows.map(r => ({
+        memberDecorationId: r.member_decorations.id,
+        decorationId: r.member_decorations.decorationId,
+        isEquipped: r.member_decorations.isEquipped,
+        decoration: {
+          id: r.profile_decorations.id,
+          name: r.profile_decorations.name,
+          description: r.profile_decorations.description,
+          type: r.profile_decorations.type,
+          emoji: r.profile_decorations.emoji,
+          imageUrl: r.profile_decorations.imageUrl,
+          cssEffect: r.profile_decorations.cssEffect,
+          color: r.profile_decorations.color,
+          rarity: r.profile_decorations.rarity,
+          price: r.profile_decorations.price,
+          category: r.profile_decorations.category,
+          maxOwners: r.profile_decorations.maxOwners,
+          currentOwners: r.profile_decorations.currentOwners,
+        },
+      }));
 
       res.json(results);
     } catch (error: any) {
@@ -2946,7 +2963,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         app.locals.broadcastSSE('balance-update', { discordId, newBalance, username: member.username });
       }
 
-      res.json({ success: true, newBalance, memberDecoration: assigned });
+      res.json({ success: true, newBalance, memberDecoration: assigned, message: `Декорация "${decoration.name}" куплена!` });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -2957,16 +2974,26 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     try {
       const { db } = await import("./db");
       const { eq, and } = await import("drizzle-orm");
-      const { memberDecorationId, equip } = req.body;
+      // Accept both decorationId (from client) and legacy memberDecorationId
+      const { decorationId, memberDecorationId, equip } = req.body;
       const discordId = (req.user as any)?.discordId;
       if (!discordId) return res.status(401).json({ error: "Not authenticated" });
 
-      const [md] = await db.select().from(memberDecorations).where(eq(memberDecorations.id, memberDecorationId));
-      if (!md || md.discordId !== discordId) return res.status(404).json({ error: "Не найдено" });
+      let md;
+      if (decorationId) {
+        // Look up by discordId + decorationId (primary path)
+        [md] = await db.select().from(memberDecorations)
+          .where(and(eq(memberDecorations.discordId, discordId), eq(memberDecorations.decorationId, decorationId)));
+      } else if (memberDecorationId) {
+        // Legacy: look up by memberDecoration id
+        [md] = await db.select().from(memberDecorations).where(eq(memberDecorations.id, memberDecorationId));
+        if (md && md.discordId !== discordId) md = undefined;
+      }
+      if (!md) return res.status(404).json({ error: "Декорация не найдена в вашей коллекции" });
 
       await db.update(memberDecorations)
         .set({ isEquipped: !!equip })
-        .where(eq(memberDecorations.id, memberDecorationId));
+        .where(eq(memberDecorations.id, md.id));
 
       res.json({ success: true });
     } catch (error: any) {

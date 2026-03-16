@@ -286,9 +286,9 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
         </div>
 
         {/* Main content area */}
-        <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-h-0 flex flex-col sm:flex-row">
           {/* Items grid — scrollable */}
-          <div className="flex-1 overflow-y-auto px-6 py-3" style={{ scrollbarWidth: 'thin' }}>
+          <div className="flex-1 overflow-y-auto px-6 py-3 decor-scroll">
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {sorted.map(dec => {
                 const myOwned = ownedMap.get(dec.id);
@@ -312,10 +312,30 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
                       <Coins className="h-2.5 w-2.5" /> {dec.price.toLocaleString()}
                     </div>
                     <div className="flex gap-0.5 mt-1 flex-wrap">
-                      {isOwned && <Badge variant="outline" className="text-[8px] h-3.5 bg-green-500/10 text-green-400 border-green-600/30 px-1">{isRu ? "✓" : "✓"}</Badge>}
-                      {isEquipped && <Badge variant="outline" className="text-[8px] h-3.5 bg-purple-500/10 text-purple-400 border-purple-600/30 px-1">{isRu ? "⚡" : "⚡"}</Badge>}
+                      {isOwned && <Badge variant="outline" className="text-[8px] h-3.5 bg-green-500/10 text-green-400 border-green-600/30 px-1">✓</Badge>}
+                      {isEquipped && <Badge variant="outline" className="text-[8px] h-3.5 bg-purple-500/10 text-purple-400 border-purple-600/30 px-1">⚡</Badge>}
                       {isSoldOut && !isOwned && <Badge variant="outline" className="text-[8px] h-3.5 bg-red-500/10 text-red-400 border-red-600/30 px-1">✕</Badge>}
                     </div>
+                    {/* Inline action buttons on each card */}
+                    {isOwnProfile && isAuthenticated && (
+                      <div className="mt-1.5 flex gap-1" onClick={e => e.stopPropagation()}>
+                        {!isOwned && !isSoldOut && (
+                          <Button size="sm" className="h-5 text-[9px] flex-1 px-1" variant="outline"
+                            disabled={buyingId === dec.id} onClick={() => buyMutation.mutate(dec.id)}>
+                            {buyingId === dec.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> :
+                             (isRu ? "Купить" : "Buy")}
+                          </Button>
+                        )}
+                        {isOwned && (
+                          <Button size="sm" className={`h-5 text-[9px] flex-1 px-1 ${isEquipped ? "bg-purple-600/20" : ""}`}
+                            variant="outline" disabled={equippingId === dec.id}
+                            onClick={() => equipMutation.mutate({ decorationId: dec.id, equip: !isEquipped })}>
+                            {equippingId === dec.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> :
+                             isEquipped ? (isRu ? "Снять" : "Unequip") : (isRu ? "Надеть" : "Equip")}
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -330,21 +350,25 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
             )}
           </div>
 
-          {/* Preview sidebar */}
+          {/* Preview panel — sidebar on sm+, bottom strip on mobile */}
           {selectedDec && (
-            <div className="w-64 shrink-0 border-l border-white/10 p-4 overflow-y-auto hidden sm:flex flex-col gap-3 bg-background/40" style={{ scrollbarWidth: 'thin' }}>
-              <div className="text-3xl text-center">{selectedDec.emoji || typeIcons[selectedDec.type] || "✦"}</div>
-              <h3 className="text-sm font-bold text-center" style={{ color: selectedDec.color || undefined }}>{selectedDec.name}</h3>
-              <p className="text-[10px] text-center text-muted-foreground">{rarityLabels[selectedDec.rarity]}</p>
+            <div className="sm:w-64 shrink-0 border-t sm:border-t-0 sm:border-l border-white/10 p-4 overflow-y-auto flex flex-col gap-3 bg-background/40 max-h-[35vh] sm:max-h-none decor-scroll">
+              <div className="flex sm:flex-col items-center sm:items-stretch gap-3">
+                <div className="text-3xl sm:text-center">{selectedDec.emoji || typeIcons[selectedDec.type] || "✦"}</div>
+                <div className="flex-1 sm:text-center">
+                  <h3 className="text-sm font-bold" style={{ color: selectedDec.color || undefined }}>{selectedDec.name}</h3>
+                  <p className="text-[10px] text-muted-foreground">{rarityLabels[selectedDec.rarity]}</p>
+                </div>
+              </div>
               {selectedDec.description && <p className="text-xs text-muted-foreground">{selectedDec.description}</p>}
 
               {/* Visual preview */}
-              <div className="mt-2">
+              <div>
                 <p className="text-[10px] text-muted-foreground mb-1 font-semibold">{isRu ? "Предпросмотр:" : "Preview:"}</p>
                 <DecorationPreview dec={selectedDec} />
               </div>
 
-              <div className="flex items-center gap-1 text-sm text-yellow-500 justify-center mt-2">
+              <div className="flex items-center gap-1 text-sm text-yellow-500 justify-center">
                 <Coins className="h-4 w-4" /> {selectedDec.price.toLocaleString()} LC
               </div>
 
@@ -355,7 +379,7 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
                 const isEquipped = myOwned?.isEquipped ?? false;
                 const isSoldOut = selectedDec.maxOwners !== null && selectedDec.maxOwners > 0 && selectedDec.currentOwners >= selectedDec.maxOwners;
                 return (
-                  <div className="flex flex-col gap-1.5 mt-2">
+                  <div className="flex flex-col gap-1.5">
                     {!isOwned && !isSoldOut && (
                       <Button size="sm" className="w-full h-8 text-xs" disabled={buyingId === selectedDec.id}
                         onClick={() => buyMutation.mutate(selectedDec.id)}>
@@ -373,7 +397,7 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
                     )}
                     {isOwned && (
                       <Badge variant="outline" className="text-xs justify-center py-1 bg-green-500/10 text-green-400 border-green-600/30">
-                        {isRu ? "В коллекции" : "Owned"}
+                        {isRu ? "В коллекции ✓" : "Owned ✓"}
                       </Badge>
                     )}
                     {isSoldOut && !isOwned && (

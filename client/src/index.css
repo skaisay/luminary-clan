@@ -889,6 +889,26 @@ textarea,
   background: rgba(255, 255, 255, 0.4);
 }
 
+/* Decoration modal scrollbar — black track, red thumb */
+.decor-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #dc2626 #111111;
+}
+.decor-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.decor-scroll::-webkit-scrollbar-track {
+  background: #111111;
+  border-radius: 4px;
+}
+.decor-scroll::-webkit-scrollbar-thumb {
+  background: #dc2626;
+  border-radius: 4px;
+}
+.decor-scroll::-webkit-scrollbar-thumb:hover {
+  background: #ef4444;
+}
+
 /* ==================== LOGIN PAGE ANIMATED BG ==================== */
 .login-animated-bg {
   background: linear-gradient(
