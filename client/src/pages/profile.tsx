@@ -647,8 +647,8 @@ export default function ProfilePage() {
 
       {/* Profile Header */}
       <Card className="glass glass-border overflow-hidden mb-6 relative" style={cd.cardColor ? { borderColor: cd.cardColor + '40' } : undefined}>
+        {/* Banner — covers the ENTIRE card as absolute background */}
         {(() => {
-          // Banner priority: 1) custom image URL, 2) custom colors, 3) equipped banner decoration, 4) default
           const hasBannerImage = !!cd.bannerImage;
           const hasBannerColors = !!cd.bannerColor1;
           const hasBannerDecor = !!equippedBanner?.cssEffect;
@@ -656,12 +656,10 @@ export default function ProfilePage() {
           if (hasBannerColors && !hasBannerImage) {
             bannerStyle = { background: `linear-gradient(to right, ${cd.bannerColor1}, ${cd.bannerColor2 || cd.bannerColor1})` };
           } else if (!hasBannerImage && !hasBannerColors && hasBannerDecor) {
-            // Parse cssEffect that may contain multiple CSS properties separated by ;
             const parsed: Record<string, string> = {};
             equippedBanner!.cssEffect!.split(";").forEach((rule: string) => {
               const idx = rule.indexOf(":");
               if (idx === -1) {
-                // No colon means this is just a value (e.g. a gradient as first segment)
                 if (rule.trim()) parsed.background = rule.trim();
                 return;
               }
@@ -676,17 +674,19 @@ export default function ProfilePage() {
             bannerStyle = parsed as React.CSSProperties;
           }
           return (
-            <div className="h-48 relative" style={bannerStyle}>
+            <div className="absolute inset-0 z-0" style={bannerStyle}>
               {hasBannerImage && (
-                <img src={cd.bannerImage} alt="" className="w-full h-full object-cover absolute inset-0" />
+                <img src={cd.bannerImage} alt="" className="w-full h-full object-cover" />
               )}
               {!hasBannerImage && !hasBannerColors && !hasBannerDecor && (
                 <div className="absolute inset-0 bg-gradient-to-r from-primary/30 to-[hsl(var(--accent))]/30" />
               )}
+              {/* Subtle dark overlay at bottom for readability */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
             </div>
           );
         })()}
-        <CardContent className="relative -mt-12 pb-6">
+        <CardContent className="relative z-10 pt-24 pb-6">
           <div className="flex flex-col md:flex-row items-start md:items-end gap-4">
             <AvatarFrame discordId={profile.discordId}>
               <Avatar className="w-24 h-24 border-4 border-background shadow-xl">
@@ -768,7 +768,7 @@ export default function ProfilePage() {
 
           {/* Edit Panel */}
           {editing && isOwnProfile && (
-            <div className="mt-4 p-4 rounded-xl bg-muted/20 border border-border/50 space-y-3">
+            <div className="mt-4 p-4 rounded-xl bg-background/80 backdrop-blur-sm border border-border/50 space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">{t('profile.bannerColor')}</label>
