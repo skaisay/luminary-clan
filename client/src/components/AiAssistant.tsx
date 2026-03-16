@@ -29,6 +29,8 @@ const NAV_ROUTES: Record<string, { ru: string; en: string }> = {
   '/mini-games': { ru: 'Мини-игры', en: 'Mini Games' },
   '/clan-wars': { ru: 'Войны', en: 'Clan Wars' },
   '/roblox-tracker': { ru: 'Roblox Трекер', en: 'Roblox Tracker' },
+  '/admin/login': { ru: 'Вход в Админку', en: 'Admin Login' },
+  '/admin': { ru: 'Админ Панель', en: 'Admin Panel' },
 };
 
 // Action step that AI can return
@@ -266,6 +268,7 @@ export function AiAssistant() {
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
       .replace(/`(.*?)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:11px">$1</code>')
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#a78bfa;word-break:break-all;text-decoration:underline">$1</a>')
       .replace(/\n/g, '<br/>');
   }
 
@@ -574,7 +577,7 @@ export function AiAssistant() {
                     msg.role === 'user'
                       ? 'bg-violet-500/70 text-white'
                       : 'bg-white/[0.05] text-white/80'
-                  }`}>
+                  }`} style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}>
                     {msg.loading ? (
                       <div className="flex gap-1 py-0.5 px-0.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-violet-400 ai-dots" />

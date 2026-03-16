@@ -333,6 +333,7 @@ export default function ProfilePage() {
                     className="h-7 w-7 p-0 rounded-full opacity-60 hover:opacity-100"
                     onClick={() => setEditing(true)}
                     title={t('profile.editProfile')}
+                    data-ai="profile-edit"
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -423,6 +424,7 @@ export default function ProfilePage() {
                   placeholder={t('profile.bioPlaceholder')}
                   className="glass glass-border resize-none h-20"
                   maxLength={200}
+                  data-ai="profile-bio"
                 />
               </div>
               <div>
@@ -432,6 +434,7 @@ export default function ProfilePage() {
                   onChange={e => setEditData(d => ({ ...d, customAvatar: e.target.value }))}
                   placeholder={t('profile.avatarPlaceholder')}
                   className="glass glass-border"
+                  data-ai="profile-avatar"
                 />
               </div>
               <div>
@@ -442,6 +445,7 @@ export default function ProfilePage() {
                     onChange={e => setEditData(d => ({ ...d, bannerImage: e.target.value }))}
                     placeholder={t('profile.bannerImagePlaceholder')}
                     className="glass glass-border flex-1"
+                    data-ai="profile-banner"
                   />
                   <input
                     ref={bannerFileRef}
@@ -478,6 +482,7 @@ export default function ProfilePage() {
                           });
                         }}
                         className="rounded accent-primary"
+                        data-ai={`profile-section-${section}`}
                       />
                       {t(`profile.section${section.charAt(0).toUpperCase() + section.slice(1)}`)}
                     </label>
@@ -485,10 +490,10 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div className="flex gap-2 justify-end">
-                <Button size="sm" variant="outline" className="gap-1" onClick={cancelEditing}>
+                <Button size="sm" variant="outline" className="gap-1" onClick={cancelEditing} data-ai="profile-cancel">
                   <XIcon className="h-3 w-3" /> {t('profile.back')}
                 </Button>
-                <Button size="sm" className="gap-1" onClick={saveCustomProfile} disabled={saveMutation.isPending}>
+                <Button size="sm" className="gap-1" onClick={saveCustomProfile} disabled={saveMutation.isPending} data-ai="profile-save">
                   {saveMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} {t('profile.saveProfile')}
                 </Button>
               </div>
