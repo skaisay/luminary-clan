@@ -778,3 +778,30 @@ export type ProfileDecoration = typeof profileDecorations.$inferSelect;
 export type InsertProfileDecoration = z.infer<typeof insertProfileDecorationSchema>;
 export type MemberDecoration = typeof memberDecorations.$inferSelect;
 export type InsertMemberDecoration = z.infer<typeof insertMemberDecorationSchema>;
+
+// ==================== PROFILE CUSTOMIZATION (DB) ====================
+export const profileCustoms = pgTable("profile_customs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  discordId: text("discord_id").notNull().unique(),
+  bannerColor1: text("banner_color_1").default(""),
+  bannerColor2: text("banner_color_2").default(""),
+  cardColor: text("card_color").default(""),
+  bio: text("bio").default(""),
+  customAvatar: text("custom_avatar").default(""),
+  bannerImage: text("banner_image").default(""),
+  hiddenSections: jsonb("hidden_sections").default([]),
+  robloxUsername: text("roblox_username").default(""),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ==================== AD SPOTS (Dashboard Roblox avatar ads) ====================
+export const adSpots = pgTable("ad_spots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  discordId: text("discord_id").notNull(),
+  robloxUsername: text("roblox_username").notNull(),
+  robloxAvatarUrl: text("roblox_avatar_url"),
+  paidAmount: integer("paid_amount").notNull().default(500000),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+

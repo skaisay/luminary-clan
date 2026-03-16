@@ -41,6 +41,8 @@ import {
   insertProfileDecorationSchema,
   profileDecorations,
   memberDecorations,
+  profileCustoms,
+  adSpots,
 } from "@shared/schema";
 import { videoUpload } from "./upload";
 import {
@@ -4542,50 +4544,58 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   });
 
   // ============================================================
-  // PROFILE CUSTOMIZATION API (in-memory + file, no DB)
+  // PROFILE CUSTOMIZATION API (Database-backed, persistent)
   // ============================================================
-  const profileCustomPath = path.join(process.cwd(), 'uploads', 'profile-customs.json');
-  let profileCustoms: Record<string, any> = {};
-  try {
-    if (fs.existsSync(profileCustomPath)) {
-      profileCustoms = JSON.parse(fs.readFileSync(profileCustomPath, 'utf-8'));
-    }
-  } catch { /* fresh start */ }
-
-  function saveProfileCustoms() {
+  app.get("/api/profile-custom/:discordId", async (req, res) => {
     try {
-      const dir = path.dirname(profileCustomPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(profileCustomPath, JSON.stringify(profileCustoms, null, 2));
-    } catch (err: any) {
-      console.error('Failed to save profile customs:', err.message);
+      const rows = await db.select().from(profileCustoms).where(eq(profileCustoms.discordId, req.params.discordId)).limit(1);
+      if (rows.length === 0) return res.json({});
+      const r = rows[0];
+      res.json({
+        bannerColor1: r.bannerColor1 || '',
+        bannerColor2: r.bannerColor2 || '',
+        cardColor: r.cardColor || '',
+        bio: r.bio || '',
+        customAvatar: r.customAvatar || '',
+        bannerImage: r.bannerImage || '',
+        hiddenSections: r.hiddenSections || [],
+        robloxUsername: r.robloxUsername || '',
+      });
+    } catch (e: any) {
+      console.error('profile-custom GET error:', e.message);
+      res.json({});
     }
-  }
-
-  app.get("/api/profile-custom/:discordId", (req, res) => {
-    const data = profileCustoms[req.params.discordId] || {};
-    res.json(data);
   });
 
-  app.post("/api/profile-custom/:discordId", (req, res) => {
+  app.post("/api/profile-custom/:discordId", async (req, res) => {
     const user = (req as any).user;
     if (!user || (user.discordId !== req.params.discordId && user.type !== 'admin')) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    const { bannerColor1, bannerColor2, cardColor, bio, customAvatar, hiddenSections, bannerImage, robloxUsername } = req.body;
-    profileCustoms[req.params.discordId] = {
-      bannerColor1: bannerColor1 || '',
-      bannerColor2: bannerColor2 || '',
-      cardColor: cardColor || '',
-      bio: (bio || '').substring(0, 200),
-      customAvatar: customAvatar || '',
-      bannerImage: (bannerImage || '').substring(0, 500),
-      hiddenSections: hiddenSections || [],
-      robloxUsername: (robloxUsername || '').substring(0, 30),
-      updatedAt: new Date().toISOString(),
-    };
-    saveProfileCustoms();
-    res.json({ success: true });
+    try {
+      const { bannerColor1, bannerColor2, cardColor, bio, customAvatar, hiddenSections, bannerImage, robloxUsername } = req.body;
+      const data = {
+        bannerColor1: bannerColor1 || '',
+        bannerColor2: bannerColor2 || '',
+        cardColor: cardColor || '',
+        bio: (bio || '').substring(0, 200),
+        customAvatar: customAvatar || '',
+        bannerImage: (bannerImage || '').substring(0, 500),
+        hiddenSections: hiddenSections || [],
+        robloxUsername: (robloxUsername || '').substring(0, 30),
+        updatedAt: new Date(),
+      };
+      const existing = await db.select().from(profileCustoms).where(eq(profileCustoms.discordId, req.params.discordId)).limit(1);
+      if (existing.length > 0) {
+        await db.update(profileCustoms).set(data).where(eq(profileCustoms.discordId, req.params.discordId));
+      } else {
+        await db.insert(profileCustoms).values({ discordId: req.params.discordId, ...data });
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error('profile-custom POST error:', e.message);
+      res.status(500).json({ error: 'Failed to save' });
+    }
   });
 
   // Banner image upload endpoint
@@ -4622,6 +4632,70 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     } catch (err: any) {
       console.error('Banner upload error:', err);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ============================================================
+  // AD SPOTS API (Roblox avatar ads on dashboard)
+  // ============================================================
+  app.get("/api/ad-spots", async (_req, res) => {
+    try {
+      const spots = await db.select().from(adSpots)
+        .where(sql`${adSpots.expiresAt} > NOW()`)
+        .orderBy(adSpots.createdAt);
+      res.json(spots);
+    } catch (e: any) {
+      console.error('ad-spots GET error:', e.message);
+      res.json([]);
+    }
+  });
+
+  app.post("/api/ad-spots/buy", requireDiscordAuth, async (req: any, res) => {
+    try {
+      const user = req.user;
+      if (!user?.discordId) return res.status(401).json({ error: "Not authorized" });
+
+      const { robloxUsername } = req.body;
+      if (!robloxUsername || typeof robloxUsername !== 'string') {
+        return res.status(400).json({ error: "Roblox username required" });
+      }
+
+      const cost = 500000;
+      const member = await storage.getMemberByDiscordId(user.discordId);
+      if (!member || (member.lumiCoins || 0) < cost) {
+        return res.status(400).json({ error: "Not enough LumiCoins (need 500,000)" });
+      }
+
+      // Get Roblox avatar
+      let avatarUrl = "";
+      try {
+        const { getUserFullBodyAvatar } = await import("./roblox-api");
+        avatarUrl = await getUserFullBodyAvatar(robloxUsername) || "";
+      } catch { /* fallback: empty */ }
+
+      // Deduct balance
+      const newBalance = (member.lumiCoins || 0) - cost;
+      await storage.updateMember(member.id, { lumiCoins: newBalance });
+
+      // Create ad spot (7 days)
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await db.insert(adSpots).values({
+        discordId: user.discordId,
+        robloxUsername: robloxUsername.substring(0, 30),
+        robloxAvatarUrl: avatarUrl,
+        paidAmount: cost,
+        expiresAt,
+      });
+
+      // SSE broadcast balance update
+      if (app.locals.broadcastSSE) {
+        app.locals.broadcastSSE('balance-update', { discordId: user.discordId, newBalance });
+      }
+
+      res.json({ success: true, newBalance, expiresAt: expiresAt.toISOString() });
+    } catch (e: any) {
+      console.error('ad-spots buy error:', e.message);
+      res.status(500).json({ error: "Failed to purchase ad spot" });
     }
   });
 

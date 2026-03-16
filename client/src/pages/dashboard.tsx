@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { Users, TrendingUp, Trophy, Activity } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Users, TrendingUp, Trophy, Activity, Megaphone, Sparkles, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ClanStats, ClanMember, News, ClanSettings } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -9,12 +10,24 @@ import { Link } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
 import { RobloxAvatarCard } from "@/components/RobloxAvatarCard";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import heroBackground from "@assets/generated_images/Futuristic_hero_background_cityscape_2d39cec6.png";
 
 interface DiscordInfo {
   memberCount: number;
   onlineCount: number;
   guildName: string;
+}
+
+interface AdSpot {
+  id: string;
+  discordId: string;
+  robloxUsername: string;
+  robloxAvatarUrl: string;
+  paidAmount: number;
+  expiresAt: string;
+  createdAt: string;
 }
 
 export default function Dashboard() {
@@ -42,6 +55,29 @@ export default function Dashboard() {
   });
 
   const { data: decorations } = useAllDecorations();
+  const { toast } = useToast();
+
+  const { data: adSpots, isLoading: adSpotsLoading } = useQuery<AdSpot[]>({
+    queryKey: ["/api/ad-spots"],
+  });
+
+  const buyAdMutation = useMutation({
+    mutationFn: async () => {
+      const resp = await apiRequest("POST", "/api/ad-spots/buy");
+      return resp.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.newBalance !== undefined) {
+        // Update balance via auth context
+        queryClient.invalidateQueries({ queryKey: ["/api/members"] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/ad-spots"] });
+      toast({ title: t('dashboard.latestNews'), description: data.message || "Ad spot purchased!" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err?.message || "Failed to buy ad spot", variant: "destructive" });
+    },
+  });
 
   const statCards = [
     {
@@ -169,6 +205,54 @@ export default function Dashboard() {
           <div className="space-y-6">
             {/* Roblox Avatar (own profile, if set) */}
             {isAuthenticated && <RobloxAvatarCard />}
+
+            {/* Ad Spots — Roblox avatar showcase */}
+            <Card className="glass glass-border border-0 shadow-lg overflow-hidden">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xl font-bold flex items-center gap-2">
+                  <Megaphone className="h-6 w-6 text-yellow-400" />
+                  {(t as any)('dashboard.adSpots') || 'Витрина'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {adSpotsLoading ? (
+                  <Skeleton className="h-32 w-full" />
+                ) : (adSpots && adSpots.length > 0) ? (
+                  <div className="space-y-3">
+                    {adSpots.map(spot => (
+                      <Link key={spot.id} href={`/profile/${spot.discordId}`}
+                        className="flex items-center gap-3 p-2.5 rounded-xl bg-gradient-to-r from-yellow-500/5 to-purple-500/5 border border-yellow-500/20 hover:border-yellow-500/40 transition-colors cursor-pointer">
+                        <img src={spot.robloxAvatarUrl} alt={spot.robloxUsername}
+                          className="w-16 h-20 object-contain rounded-lg" style={{ imageRendering: 'auto' }} />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm truncate">{spot.robloxUsername}</p>
+                          <Badge variant="outline" className="text-[9px] bg-yellow-500/10 text-yellow-400 border-yellow-600/30 mt-0.5">
+                            <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Sponsor
+                          </Badge>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    {(t as any)('dashboard.noAdSpots') || 'Пока никто не купил место'}
+                  </p>
+                )}
+
+                {/* Buy button */}
+                {isAuthenticated && (
+                  <Button
+                    className="w-full mt-3 gap-1.5 bg-gradient-to-r from-yellow-600/80 to-amber-600/80 hover:from-yellow-600 hover:to-amber-600 border border-yellow-500/30 text-white"
+                    size="sm"
+                    disabled={buyAdMutation.isPending}
+                    onClick={() => buyAdMutation.mutate()}
+                  >
+                    {buyAdMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Megaphone className="h-3.5 w-3.5" />}
+                    {(t as any)('dashboard.buyAdSpot') || 'Купить место — 500 000 LC'}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
 
             <Card className="glass glass-border border-0 shadow-lg">
               <CardHeader>
