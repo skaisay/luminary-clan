@@ -465,7 +465,7 @@ export function AiAssistant() {
           body: JSON.stringify({
             messages: history,
             language,
-            currentPage: pageName(location),
+            currentPage: location,
           }),
         });
         if (!resp.ok) throw new Error('fail');

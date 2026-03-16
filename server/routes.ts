@@ -192,7 +192,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         shopInfo = 'данные недоступны';
       }
 
-      const pageContext = currentPage ? `Юзер на: ${currentPage}.` : '';
+      const pageContext = currentPage ? `Юзер на: ${currentPage}` : '';
 
       // Build page-specific field info (only include relevant pages to reduce tokens)
       const cp = (currentPage || '').toLowerCase();
@@ -240,12 +240,19 @@ ${getFieldsRu()}
 ТОП: ${topMembersInfo || 'нет'}
 ТОВАРЫ: ${shopInfo}
 Теги: [NAV:/путь], [DO:fill|поле|знач], [DO:click|кнопка], [DO:wait|_|мс], [STEP:N]
-Если юзер УЖЕ на странице — БЕЗ [NAV:]. [DO:wait|_|500] после смены таба/клика edit.
+ПРАВИЛА:
+- Если юзер УЖЕ на нужной странице — НЕ добавляй [NAV:]. Проверяй ${pageContext}.
+- [DO:wait|_|500] после смены таба/клика edit/create.
+- profile-section-stats, profile-section-achievements, profile-section-info, profile-section-inventory, profile-section-xpLevel = ЧЕКБОКСЫ. [DO:click|profile-section-inventory] = скрыть/показать секцию. Если просят скрыть/убрать/спрятать — кликни чекбокс.
+- tab-members: "выдай/дай/начисли X LC игроку Y" = [DO:click|tab-members][DO:wait|_|500][DO:click|edit-Y][DO:wait|_|500][DO:fill|member-lumiCoins|X][DO:click|save-Y]. member-lumiCoins,member-role,member-rank,member-wins,member-losses = поля инлайн-редакт.
+- Макс 3 создания за раз. Если просят создать 4+ — сделай 3, скажи "продолжить?".
+- Если запрос содержит 4+ разных задач — сделай 2-3 главных, предложи продолжить.
 Примеры: "100 LC Test123"→"💰[STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
 "Создай Корона 500"→"👑[STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Корона][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
 "Измени цену Корона→200"(на /admin)→"✏️[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Корона][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
-"Сделай stock=1 для Корона"→"[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Корона][DO:wait|_|500][DO:fill|input-item-stock|1][DO:click|button-submit-shop-item]"
-Кратко(1-2 предл), эмодзи, по-русски. Разные формулировки="измени/поставь/сделай"→edit→fill→submit. Придумывай красивые названия если просят. input-item-stock=сколько можно купить(1=один человек,-1=бесконечно).`;
+"Выдай 1500 монет kairozun"→"💰[STEP:1][DO:click|tab-members][DO:wait|_|500][DO:click|edit-kairozun][DO:wait|_|500][DO:fill|member-lumiCoins|1500][DO:click|save-kairozun]"
+"Скрой секцию инвентарь"→"📦[STEP:1][NAV:/profile][DO:click|profile-edit][DO:wait|_|500][DO:click|profile-section-inventory][DO:click|profile-save]"
+Кратко(1-2 предл), эмодзи, по-русски. "измени/поставь/сделай/выдай/начисли"→edit→fill→save. input-item-stock=сколько(1=один,-1=∞).`;
 
       const siteKnowledgeEn = `Luminary AI — clan assistant. ${pageContext}
 Pages: /, /statistics, /leaderboard, /members(${memberCount}), /news, /about, /shop, /inventory, /convert, /requests, /forum, /roblox-tracker, /music, /achievements, /quests, /trading, /boosters, /daily-rewards, /profile, /mini-games, /clan-wars, /admin/login, /admin
@@ -253,12 +260,19 @@ ${getFieldsEn()}
 TOP: ${topMembersInfo || 'none'}
 SHOP: ${shopInfo}
 Tags: [NAV:/path], [DO:fill|field|val], [DO:click|btn], [DO:wait|_|ms], [STEP:N]
-If user ALREADY on page — NO [NAV:]. [DO:wait|_|500] after tab switch/edit click.
+RULES:
+- If user ALREADY on needed page — NO [NAV:]. Check ${pageContext}.
+- [DO:wait|_|500] after tab switch/edit click/create click.
+- profile-section-stats, profile-section-achievements, profile-section-info, profile-section-inventory, profile-section-xpLevel = CHECKBOXES. [DO:click|profile-section-inventory] = toggle section visibility. If asked to hide/remove — click the checkbox.
+- tab-members: "give/add X LC to player Y" = [DO:click|tab-members][DO:wait|_|500][DO:click|edit-Y][DO:wait|_|500][DO:fill|member-lumiCoins|X][DO:click|save-Y]. member-lumiCoins,member-role,member-rank,member-wins,member-losses = inline edit fields.
+- Max 3 creations at a time. If asked to create 4+ — do 3, say "continue?".
+- If request has 4+ different tasks — do 2-3 main ones, offer to continue.
 Examples: "100 LC Test123"→"💰[STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
 "Create Crown 500"→"👑[STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Crown][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
 "Change Crown price→200"(on /admin)→"✏️[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Crown][DO:wait|_|500][DO:fill|input-item-price|200][DO:click|button-submit-shop-item]"
-"Set stock=1 for Crown"→"[STEP:1][DO:click|tab-shop][DO:wait|_|500][DO:click|edit-Crown][DO:wait|_|500][DO:fill|input-item-stock|1][DO:click|button-submit-shop-item]"
-Concise(1-2 sent), emojis, English. Various phrasings="change/set/make"→edit→fill→submit. Invent nice names if asked. input-item-stock=how many can buy(1=one person,-1=unlimited).`;
+"Give 1500 coins to kairozun"→"💰[STEP:1][DO:click|tab-members][DO:wait|_|500][DO:click|edit-kairozun][DO:wait|_|500][DO:fill|member-lumiCoins|1500][DO:click|save-kairozun]"
+"Hide inventory section"→"📦[STEP:1][NAV:/profile][DO:click|profile-edit][DO:wait|_|500][DO:click|profile-section-inventory][DO:click|profile-save]"
+Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→save. input-item-stock=how many(1=one,-1=∞).`;
 
       const systemPrompt = language === 'ru' ? siteKnowledgeRu : siteKnowledgeEn;
 
@@ -270,101 +284,95 @@ Concise(1-2 sent), emojis, English. Various phrasings="change/set/make"→edit�
       ];
       const lastUserMsg = recentMessages.filter((m: any) => m.role === 'user').pop()?.content || '';
 
-      // Helper: try a provider once (no retries = faster fallthrough)
-      async function tryProvider(name: string, timeoutMs: number, fn: () => Promise<string | null>): Promise<string | null> {
+      // Helper: try a single provider
+      async function tryProvider(name: string, fn: () => Promise<string | null>): Promise<{reply: string; provider: string} | null> {
         try {
           const result = await fn();
           if (result && result.length > 3 && !result.includes('<!DOCTYPE')) {
             console.log(`[AI] ${name} success`);
-            return result;
+            return { reply: result, provider: name };
           }
         } catch (e: any) {
-          console.log(`[AI] ${name} failed:`, e.message?.substring(0, 80));
+          console.log(`[AI] ${name} failed:`, e.message?.substring(0, 60));
         }
         return null;
       }
 
-      // Provider 1: Pollinations OpenAI-compatible (most reliable)
-      let reply = await tryProvider('Pollinations-OpenAI', 18000, async () => {
-        const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'openai',
-            messages: chatMessages,
-            max_tokens: 800,
-            temperature: 0.7,
-          }),
-          signal: AbortSignal.timeout(18000),
-        });
-        if (!resp.ok) return null;
-        const data = await resp.json();
-        return data.choices?.[0]?.message?.content?.trim() || null;
-      });
-      if (reply) return res.json({ reply, provider: 'pollinations' });
+      // Race providers in parallel — first valid response wins
+      const raceResult = await Promise.any([
+        // Group A: Pollinations OpenAI (most capable)
+        tryProvider('pollinations', async () => {
+          const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'openai',
+              messages: chatMessages,
+              max_tokens: 1200,
+              temperature: 0.7,
+            }),
+            signal: AbortSignal.timeout(20000),
+          });
+          if (!resp.ok) return null;
+          const data = await resp.json();
+          return data.choices?.[0]?.message?.content?.trim() || null;
+        }).then(r => { if (!r) throw new Error('no result'); return r; }),
 
-      // Provider 2: Pollinations with different model
-      reply = await tryProvider('Pollinations-Mistral', 15000, async () => {
-        const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'mistral',
-            messages: chatMessages,
-            max_tokens: 800,
-            temperature: 0.7,
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!resp.ok) return null;
-        const data = await resp.json();
-        return data.choices?.[0]?.message?.content?.trim() || null;
-      });
-      if (reply) return res.json({ reply, provider: 'pollinations-mistral' });
+        // Group B: Pollinations Mistral (fast alternative)
+        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 2000)).then(() =>
+          tryProvider('mistral', async () => {
+            const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'mistral',
+                messages: chatMessages,
+                max_tokens: 1200,
+                temperature: 0.7,
+              }),
+              signal: AbortSignal.timeout(18000),
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            return data.choices?.[0]?.message?.content?.trim() || null;
+          }).then(r => { if (!r) throw new Error('no result'); return r; })
+        ),
 
-      // Provider 3: Blackbox AI
-      reply = await tryProvider('Blackbox', 12000, async () => {
-        const resp = await fetch('https://api.blackbox.ai/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: lastUserMsg }
-            ],
-            model: 'gpt-4o-mini',
-            max_tokens: 800,
-          }),
-          signal: AbortSignal.timeout(12000),
-        });
-        if (!resp.ok) return null;
-        const text = await resp.text();
-        return text?.trim() || null;
-      });
-      if (reply) return res.json({ reply, provider: 'blackbox' });
+        // Group C: Blackbox (starts after 4s delay as backup)
+        new Promise<{reply: string; provider: string}>(resolve => setTimeout(resolve as any, 4000)).then(() =>
+          tryProvider('blackbox', async () => {
+            const resp = await fetch('https://api.blackbox.ai/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: lastUserMsg }
+                ],
+                model: 'gpt-4o-mini',
+                max_tokens: 1200,
+              }),
+              signal: AbortSignal.timeout(15000),
+            });
+            if (!resp.ok) return null;
+            const text = await resp.text();
+            return text?.trim() || null;
+          }).then(r => { if (!r) throw new Error('no result'); return r; })
+        ),
+      ]).catch(() => null);
 
-      // Provider 4: Pollinations simple text (compact prompt for URL length)
-      reply = await tryProvider('Pollinations-Text', 12000, async () => {
-        // Use compact prompt to avoid URL length issues
-        const compactPrompt = `You are Luminary AI for a clan site. Use [NAV:/path], [DO:fill|field|val], [DO:click|btn], [STEP:N] for actions. Reply ${language === 'ru' ? 'in Russian' : 'in English'}, concise, with emojis.`;
-        const seed = Math.floor(Math.random() * 100000);
-        const resp = await fetch(`https://text.pollinations.ai/${encodeURIComponent(compactPrompt + '\n\nUser: ' + lastUserMsg + '\nAssistant:')}?seed=${seed}&model=openai`, {
-          signal: AbortSignal.timeout(12000),
-        });
-        if (!resp.ok) return null;
-        const text = await resp.text();
-        return text?.trim() || null;
-      });
-      if (reply) return res.json({ reply, provider: 'pollinations-text' });
+      if (raceResult) {
+        return res.json({ reply: raceResult.reply, provider: raceResult.provider });
+      }
 
-      // Provider 5: HuggingFace Zephyr (last resort)
-      reply = await tryProvider('HuggingFace', 15000, async () => {
+      // If race failed, try HuggingFace as last resort
+      const hfResult = await tryProvider('huggingface', async () => {
         const resp = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             inputs: `<|system|>\n${systemPrompt}</s>\n<|user|>\n${lastUserMsg}</s>\n<|assistant|>\n`,
-            parameters: { max_new_tokens: 400, temperature: 0.7 },
+            parameters: { max_new_tokens: 500, temperature: 0.7 },
           }),
           signal: AbortSignal.timeout(15000),
         });
@@ -374,7 +382,7 @@ Concise(1-2 sent), emojis, English. Various phrasings="change/set/make"→edit�
         if (!text) return null;
         return text.split('<|assistant|>').pop()?.replace('</s>', '').trim() || null;
       });
-      if (reply) return res.json({ reply, provider: 'huggingface' });
+      if (hfResult) return res.json(hfResult);
 
       // All providers failed — give a helpful fallback, not just an error
       const fallback = language === 'ru' 

@@ -191,6 +191,7 @@ export default function AdminMembersTab() {
                         value={editData.username || ""}
                         onChange={(e) => setEditData({ ...editData, username: e.target.value })}
                         className="h-8"
+                        data-ai="member-username"
                       />
                     ) : (
                       member.username
@@ -202,6 +203,7 @@ export default function AdminMembersTab() {
                         value={editData.role || ""}
                         onChange={(e) => setEditData({ ...editData, role: e.target.value })}
                         className="h-8"
+                        data-ai="member-role"
                       />
                     ) : (
                       member.role
@@ -214,6 +216,7 @@ export default function AdminMembersTab() {
                         value={editData.rank || 0}
                         onChange={(e) => setEditData({ ...editData, rank: parseInt(e.target.value) })}
                         className="h-8"
+                        data-ai="member-rank"
                       />
                     ) : (
                       member.rank
@@ -226,6 +229,7 @@ export default function AdminMembersTab() {
                         value={editData.wins || 0}
                         onChange={(e) => setEditData({ ...editData, wins: parseInt(e.target.value) })}
                         className="h-8"
+                        data-ai="member-wins"
                       />
                     ) : (
                       member.wins
@@ -238,6 +242,7 @@ export default function AdminMembersTab() {
                         value={editData.losses || 0}
                         onChange={(e) => setEditData({ ...editData, losses: parseInt(e.target.value) })}
                         className="h-8"
+                        data-ai="member-losses"
                       />
                     ) : (
                       member.losses
@@ -250,6 +255,7 @@ export default function AdminMembersTab() {
                         value={editData.lumiCoins || 0}
                         onChange={(e) => setEditData({ ...editData, lumiCoins: parseInt(e.target.value) })}
                         className="h-8"
+                        data-ai="member-lumiCoins"
                       />
                     ) : (
                       member.lumiCoins ?? 0
