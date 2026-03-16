@@ -19,10 +19,10 @@ import { apiRequest } from "@/lib/queryClient";
 function BalanceBar() {
   const { user } = useAuth();
   return (
-    <div className="flex items-center justify-center gap-2 p-3 rounded-lg bg-gradient-to-r from-yellow-500/10 to-amber-500/10 border border-yellow-500/20 mb-4">
-      <Coins className="h-5 w-5 text-yellow-500" />
-      <span className="font-bold text-lg">{(user?.lumiCoins ?? 0).toLocaleString()}</span>
-      <span className="text-sm text-muted-foreground">LumiCoins</span>
+    <div className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md bg-gradient-to-r from-yellow-500/10 to-amber-500/10 border border-yellow-500/20 mb-3 w-fit mx-auto">
+      <Coins className="h-4 w-4 text-yellow-500" />
+      <span className="font-semibold text-sm">{(user?.lumiCoins ?? 0).toLocaleString()}</span>
+      <span className="text-xs text-muted-foreground">LC</span>
     </div>
   );
 }
@@ -506,9 +506,25 @@ function DiceGame() {
   const [gameResult, setGameResult] = useState<{ won: boolean; reward: number } | null>(null);
   const [betAmount, setBetAmount] = useState(10);
   const [error, setError] = useState("");
+  const [rollAnim, setRollAnim] = useState(0);
+  const animRef = useRef<number | null>(null);
   const balance = user?.lumiCoins ?? 0;
 
   const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+
+  // Rapid face cycling during roll
+  useEffect(() => {
+    if (rolling) {
+      let frame = 0;
+      const tick = () => {
+        frame++;
+        setRollAnim(prev => (prev + 1) % 6);
+        animRef.current = window.setTimeout(tick, 80 + frame * 8);
+      };
+      tick();
+      return () => { if (animRef.current) clearTimeout(animRef.current); };
+    }
+  }, [rolling]);
 
   const rollMutation = useMutation({
     mutationFn: async (guess: string) => {
@@ -530,7 +546,7 @@ function DiceGame() {
         setGameResult({ won: data.won, reward: data.reward });
         updateBalance(data.newBalance);
         saveGameHistory({ game: 'dice', bet: betAmount, reward: data.reward, result: `${data.roll} (${data.won ? 'win' : 'lose'})` });
-      }, 1200);
+      }, 1500);
     },
     onError: (err: Error) => {
       setError(err.message.includes("Not enough") ? (isRu ? "Недостаточно LC!" : "Not enough LC!") : err.message);
@@ -539,17 +555,37 @@ function DiceGame() {
 
   const canPlay = balance >= betAmount && !rolling && !rollMutation.isPending && !!user?.discordId;
 
+  const displayFace = rolling ? DICE_FACES[rollAnim] : diceResult ? DICE_FACES[diceResult - 1] : null;
+  const borderColor = rolling ? "border-purple-400" : diceResult ? (gameResult?.won ? "border-green-400" : "border-red-400") : "border-muted";
+  const bgColor = rolling ? "bg-purple-400/10" : diceResult ? (gameResult?.won ? "bg-green-400/10" : "bg-red-400/10") : "bg-muted/10";
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-center">
-        <div className={`w-24 h-24 rounded-xl border-3 flex items-center justify-center text-5xl transition-all ${
-          rolling ? "animate-bounce border-purple-400 bg-purple-400/10" :
-          diceResult ? (gameResult?.won ? "border-green-400 bg-green-400/10" : "border-red-400 bg-red-400/10") :
-          "border-muted bg-muted/10"
-        }`}>
-          {rolling ? "🎲" : diceResult ? DICE_FACES[diceResult - 1] : "🎲"}
+      {/* Dice cube visual */}
+      <div className="flex justify-center" style={{ perspective: '300px' }}>
+        <div
+          className={`w-24 h-24 rounded-xl border-2 flex items-center justify-center transition-colors ${borderColor} ${bgColor}`}
+          style={{
+            transformStyle: 'preserve-3d',
+            animation: rolling ? 'diceRoll 0.4s ease-in-out infinite' : 'none',
+          }}
+        >
+          <span className={`text-5xl transition-all duration-200 ${
+            rolling ? 'scale-110' : diceResult ? 'scale-100' : 'opacity-40'
+          }`}>
+            {displayFace || '🎲'}
+          </span>
         </div>
       </div>
+      <style>{`
+        @keyframes diceRoll {
+          0%   { transform: rotateX(0deg) rotateZ(0deg); }
+          25%  { transform: rotateX(90deg) rotateZ(45deg); }
+          50%  { transform: rotateX(180deg) rotateZ(0deg); }
+          75%  { transform: rotateX(270deg) rotateZ(-45deg); }
+          100% { transform: rotateX(360deg) rotateZ(0deg); }
+        }
+      `}</style>
 
       {gameResult && !rolling && (
         <div className="text-center space-y-1">

@@ -58,10 +58,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateBalance = (newBalance: number) => {
+    // 1) Update auth cache (top-nav reads from here)
     queryClient.setQueryData(['/auth/user'], (old: any) => {
       if (!old?.user) return old;
       return { ...old, user: { ...old.user, lumiCoins: newBalance } };
     });
+    // 2) Update any open profile page cache
+    const uid = authData?.user?.discordId;
+    if (uid) {
+      queryClient.setQueryData([`/api/profile/${uid}`], (old: any) => {
+        if (!old) return old;
+        return { ...old, lumiCoins: newBalance };
+      });
+    }
+    // 3) Invalidate coin-balance widget
+    queryClient.invalidateQueries({ queryKey: ['/api/shop/balance'] });
   };
 
   const user = authData?.user || null;
