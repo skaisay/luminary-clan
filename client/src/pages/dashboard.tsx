@@ -6,6 +6,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { ClanStats, ClanMember, News, ClanSettings } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Link } from "wouter";
+import { useAuth } from "@/contexts/AuthContext";
+import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
+import { RobloxAvatarCard } from "@/components/RobloxAvatarCard";
 import heroBackground from "@assets/generated_images/Futuristic_hero_background_cityscape_2d39cec6.png";
 
 interface DiscordInfo {
@@ -16,6 +19,7 @@ interface DiscordInfo {
 
 export default function Dashboard() {
   const { t } = useLanguage();
+  const { user, isAuthenticated } = useAuth();
   const { data: settings, isLoading: settingsLoading } = useQuery<ClanSettings>({
     queryKey: ["/api/clan/settings"],
   });
@@ -36,6 +40,8 @@ export default function Dashboard() {
     queryKey: ["/api/discord/info"],
     refetchInterval: 60000,
   });
+
+  const { data: decorations } = useAllDecorations();
 
   const statCards = [
     {
@@ -143,7 +149,10 @@ export default function Dashboard() {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm truncate">{member.username}</p>
+                        <p className="font-semibold text-sm truncate">
+                          {member.username}
+                          <MemberDecorations discordId={member.discordId} decorations={decorations} />
+                        </p>
                         <p className="text-xs text-muted-foreground truncate">{member.role}</p>
                       </div>
                       <div className="text-right shrink-0">
@@ -157,41 +166,46 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="glass glass-border border-0 shadow-lg">
-            <CardHeader>
-              <CardTitle className="text-xl font-bold flex items-center gap-2">
-                <Activity className="h-6 w-6 text-accent" />
-                {t('dashboard.latestNews')}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {newsLoading ? (
-                <div className="space-y-3">
-                  {[1, 2].map((i) => (
-                    <Skeleton key={i} className="h-20 w-full" />
-                  ))}
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {latestNews?.slice(0, 3).map((article) => (
-                    <div
-                      key={article.id}
-                      className="p-2.5 rounded-xl bg-gradient-to-r from-background/50 to-transparent border border-border/50 hover:border-accent/30 cursor-pointer transition-colors"
-                      data-testid={`card-news-${article.id}`}
-                    >
-                      <Badge className="mb-1.5 text-[10px] px-2 py-0.5" variant="outline">
-                        {article.category}
-                      </Badge>
-                      <h3 className="font-semibold text-sm mb-0.5 line-clamp-2">{article.title}</h3>
-                      <p className="text-[10px] text-muted-foreground">
-                        {new Date(article.createdAt).toLocaleDateString('ru-RU')}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            {/* Roblox Avatar (own profile, if set) */}
+            {isAuthenticated && <RobloxAvatarCard />}
+
+            <Card className="glass glass-border border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-xl font-bold flex items-center gap-2">
+                  <Activity className="h-6 w-6 text-accent" />
+                  {t('dashboard.latestNews')}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {newsLoading ? (
+                  <div className="space-y-3">
+                    {[1, 2].map((i) => (
+                      <Skeleton key={i} className="h-20 w-full" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {latestNews?.slice(0, 3).map((article) => (
+                      <div
+                        key={article.id}
+                        className="p-2.5 rounded-xl bg-gradient-to-r from-background/50 to-transparent border border-border/50 hover:border-accent/30 cursor-pointer transition-colors"
+                        data-testid={`card-news-${article.id}`}
+                      >
+                        <Badge className="mb-1.5 text-[10px] px-2 py-0.5" variant="outline">
+                          {article.category}
+                        </Badge>
+                        <h3 className="font-semibold text-sm mb-0.5 line-clamp-2">{article.title}</h3>
+                        <p className="text-[10px] text-muted-foreground">
+                          {new Date(article.createdAt).toLocaleDateString('ru-RU')}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </div>

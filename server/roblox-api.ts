@@ -96,6 +96,30 @@ export async function getUserAvatar(userId: number): Promise<string | null> {
   return null;
 }
 
+/** Full-body avatar render (720x720) */
+export async function getUserFullBodyAvatar(userId: number): Promise<string | null> {
+  const sizes = ['720x720', '352x352'];
+  for (const size of sizes) {
+    try {
+      const data = await fetchJson(
+        `https://thumbnails.roblox.com/v1/users/avatar?userIds=${userId}&size=${size}&format=Png&isCircular=false`
+      );
+      if (data.data?.[0]?.imageUrl && data.data[0].state === 'Completed') {
+        return data.data[0].imageUrl;
+      }
+      if (data.data?.[0]?.state === 'Pending') {
+        await new Promise(r => setTimeout(r, 1500));
+        const retry = await fetchJson(
+          `https://thumbnails.roblox.com/v1/users/avatar?userIds=${userId}&size=${size}&format=Png&isCircular=false`
+        );
+        if (retry.data?.[0]?.imageUrl) return retry.data[0].imageUrl;
+      }
+      if (data.data?.[0]?.imageUrl) return data.data[0].imageUrl;
+    } catch { continue; }
+  }
+  return null;
+}
+
 /** Статус онлайн / в игре */
 export async function getUserPresence(userId: number) {
   try {

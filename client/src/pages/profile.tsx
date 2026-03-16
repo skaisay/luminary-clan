@@ -18,6 +18,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useParams } from "wouter";
 import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
 
 interface MemberProfile {
   id: string;
@@ -99,6 +100,7 @@ export default function ProfilePage() {
     customAvatar: string;
     bannerImage: string;
     hiddenSections: string[];
+    robloxUsername: string;
   }
 
   const defaultCustom: CustomProfileData = {
@@ -109,6 +111,7 @@ export default function ProfilePage() {
     customAvatar: "",
     bannerImage: "",
     hiddenSections: [],
+    robloxUsername: "",
   };
 
   const [editData, setEditData] = useState<CustomProfileData>(defaultCustom);
@@ -209,6 +212,8 @@ export default function ProfilePage() {
     queryKey: [`/api/inventory/${targetDiscordId}`],
     enabled: !!targetDiscordId,
   });
+
+  const { data: allDecorations } = useAllDecorations();
 
   const handleSearch = () => {
     const q = searchInput.trim();
@@ -322,7 +327,10 @@ export default function ProfilePage() {
             </Avatar>
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-2xl font-bold">{profile.username}</h1>
+                <h1 className="text-2xl font-bold">
+                  {profile.username}
+                  <MemberDecorations discordId={profile.discordId} decorations={allDecorations} />
+                </h1>
                 {profile.equippedTitle && (
                   <Badge variant="secondary" className="text-xs">{profile.equippedTitle}</Badge>
                 )}
@@ -465,6 +473,18 @@ export default function ProfilePage() {
                   </Button>
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-1">{t('profile.bannerImageHint')}</p>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">🎮 Roblox никнейм</label>
+                <Input
+                  value={editData.robloxUsername}
+                  onChange={e => setEditData(d => ({ ...d, robloxUsername: e.target.value }))}
+                  placeholder="Ваш ник в Roblox"
+                  className="glass glass-border"
+                  maxLength={30}
+                  data-ai="profile-roblox"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Для отображения 3D аватара на главной</p>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-2 block">{t('profile.showSections')}</label>

@@ -486,6 +486,55 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     }
   });
 
+  // Full-body Roblox avatar (for 3D-like display on dashboard)
+  app.get("/api/roblox/fullbody/:username", async (req, res) => {
+    try {
+      const { username } = req.params;
+      if (!username || username.length < 3 || username.length > 20) {
+        return res.status(400).json({ success: false, error: 'Invalid username' });
+      }
+      const user = await robloxApi.getUserIdByUsername(username);
+      if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+      const avatarUrl = await robloxApi.getUserFullBodyAvatar(user.id);
+      const headshot = await robloxApi.getUserAvatar(user.id);
+      res.json({
+        success: true,
+        userId: user.id,
+        username: user.name,
+        displayName: user.displayName,
+        fullBodyUrl: avatarUrl,
+        headshotUrl: headshot,
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Error fetching avatar' });
+    }
+  });
+
+  // ===== Server-Sent Events (SSE) for real-time updates =====
+  const sseClients = new Set<import("express").Response>();
+
+  function broadcastSSE(event: string, data: any) {
+    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of sseClients) {
+      try { client.write(payload); } catch { sseClients.delete(client); }
+    }
+  }
+
+  // Make broadcastSSE available to other route handlers via app.locals
+  app.locals.broadcastSSE = broadcastSSE;
+
+  app.get("/api/events", (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write('event: connected\ndata: {}\n\n');
+    sseClients.add(res);
+    req.on('close', () => { sseClients.delete(res); });
+  });
+
   app.get("/auth/discord", (req, res, next) => {
     // Валидируем и сохраняем returnTo параметр в session
     const returnTo = req.query.returnTo as string;
@@ -1671,6 +1720,10 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         purchase,
         newBalance: (member.lumiCoins || 0) - item.price 
       });
+      // SSE: broadcast balance change
+      if (app.locals.broadcastSSE) {
+        app.locals.broadcastSSE('balance-update', { discordId: member.discordId, newBalance: (member.lumiCoins || 0) - item.price, username: member.username });
+      }
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -2624,6 +2677,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         color: profileDecorations.color,
         name: profileDecorations.name,
         rarity: profileDecorations.rarity,
+        cssEffect: profileDecorations.cssEffect,
         isEquipped: memberDecorations.isEquipped,
       })
         .from(memberDecorations)
@@ -2631,10 +2685,10 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         .where(eq(memberDecorations.isEquipped, true));
       
       // Группируем по discordId
-      const grouped: Record<string, Array<{emoji: string | null, type: string, color: string | null, name: string, rarity: string}>> = {};
+      const grouped: Record<string, Array<{emoji: string | null, type: string, color: string | null, name: string, rarity: string, cssEffect: string | null}>> = {};
       for (const row of results) {
         if (!grouped[row.discordId]) grouped[row.discordId] = [];
-        grouped[row.discordId].push({ emoji: row.emoji, type: row.type, color: row.color, name: row.name, rarity: row.rarity });
+        grouped[row.discordId].push({ emoji: row.emoji, type: row.type, color: row.color, name: row.name, rarity: row.rarity, cssEffect: row.cssEffect });
       }
       res.json(grouped);
     } catch (error: any) {
@@ -2812,6 +2866,107 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         .innerJoin(clanMembers, eq(memberDecorations.memberId, clanMembers.id))
         .where(eq(memberDecorations.decorationId, req.params.id));
       res.json(owners);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PLAYER: Мои декорации (с информацией о декорации)
+  app.get("/api/decorations/my", requireDiscordAuth, async (req, res) => {
+    try {
+      const discordId = (req as any).user?.discordId;
+      if (!discordId) return res.status(401).json({ error: "Не авторизован" });
+
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
+      if (member.length === 0) return res.json([]);
+
+      const results = await db.select({
+        memberDecorationId: memberDecorations.id,
+        decorationId: memberDecorations.decorationId,
+        isEquipped: memberDecorations.isEquipped,
+        decoration: profileDecorations,
+      })
+        .from(memberDecorations)
+        .innerJoin(profileDecorations, eq(memberDecorations.decorationId, profileDecorations.id))
+        .where(eq(memberDecorations.memberId, member[0].id));
+
+      res.json(results);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PLAYER: Купить декорацию за LumiCoins
+  app.post("/api/decorations/buy", requireDiscordAuth, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq, and } = await import("drizzle-orm");
+      const { clanMembers } = await import("@shared/schema");
+      const { decorationId } = req.body;
+      const discordId = (req.user as any)?.discordId;
+      if (!discordId) return res.status(401).json({ error: "Not authenticated" });
+
+      const [decoration] = await db.select().from(profileDecorations).where(eq(profileDecorations.id, decorationId));
+      if (!decoration) return res.status(404).json({ error: "Декорация не найдена" });
+      if (!decoration.isAvailable) return res.status(400).json({ error: "Декорация недоступна" });
+      if (decoration.maxOwners > 0 && decoration.currentOwners >= decoration.maxOwners) {
+        return res.status(400).json({ error: "Лимит владельцев исчерпан" });
+      }
+
+      // Проверяем, не куплена ли уже
+      const [existing] = await db.select().from(memberDecorations)
+        .where(and(eq(memberDecorations.discordId, discordId), eq(memberDecorations.decorationId, decorationId)));
+      if (existing) return res.status(400).json({ error: "Уже куплено" });
+
+      // Проверяем баланс
+      const [member] = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId));
+      if (!member) return res.status(404).json({ error: "Участник не найден" });
+      if ((member.lumiCoins || 0) < decoration.price) return res.status(400).json({ error: "Недостаточно LC" });
+
+      // Списываем LC
+      const newBalance = (member.lumiCoins || 0) - decoration.price;
+      await db.update(clanMembers).set({ lumiCoins: newBalance }).where(eq(clanMembers.id, member.id));
+
+      // Выдаём декорацию
+      const [assigned] = await db.insert(memberDecorations).values({
+        memberId: member.id,
+        decorationId,
+        discordId,
+        isEquipped: false,
+      }).returning();
+
+      await db.update(profileDecorations)
+        .set({ currentOwners: decoration.currentOwners + 1 })
+        .where(eq(profileDecorations.id, decorationId));
+
+      // SSE: broadcast balance change
+      if (app.locals.broadcastSSE) {
+        app.locals.broadcastSSE('balance-update', { discordId, newBalance, username: member.username });
+      }
+
+      res.json({ success: true, newBalance, memberDecoration: assigned });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PLAYER: Надеть/снять декорацию
+  app.post("/api/decorations/equip", requireDiscordAuth, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { eq, and } = await import("drizzle-orm");
+      const { memberDecorationId, equip } = req.body;
+      const discordId = (req.user as any)?.discordId;
+      if (!discordId) return res.status(401).json({ error: "Not authenticated" });
+
+      const [md] = await db.select().from(memberDecorations).where(eq(memberDecorations.id, memberDecorationId));
+      if (!md || md.discordId !== discordId) return res.status(404).json({ error: "Не найдено" });
+
+      await db.update(memberDecorations)
+        .set({ isEquipped: !!equip })
+        .where(eq(memberDecorations.id, memberDecorationId));
+
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -4123,6 +4278,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const newBalance = Math.max(0, (member[0].lumiCoins || 0) + reward);
       await db.update(clanMembers).set({ lumiCoins: newBalance }).where(eq(clanMembers.id, member[0].id));
       try { await db.insert(gameHistory).values({ discordId, game: "wheel", bet: betAmount, reward, result: `x${multiplier}` }); } catch {}
+      if (app.locals.broadcastSSE) app.locals.broadcastSSE('balance-update', { discordId, newBalance, username: member[0].username });
       res.json({ segmentIndex, reward, multiplier, newBalance });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -4160,6 +4316,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       if (result === "lose") updateData.losses = (member[0].losses || 0) + 1;
       await db.update(clanMembers).set(updateData).where(eq(clanMembers.id, member[0].id));
       try { await db.insert(gameHistory).values({ discordId, game: "rps", bet: betAmount, reward, result }); } catch {}
+      if (app.locals.broadcastSSE) app.locals.broadcastSSE('balance-update', { discordId, newBalance: updateData.lumiCoins, username: member[0].username });
       res.json({ botChoice, result, reward, newBalance: updateData.lumiCoins });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -4184,6 +4341,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const newBalance = Math.max(0, (member[0].lumiCoins || 0) + reward);
       await db.update(clanMembers).set({ lumiCoins: newBalance }).where(eq(clanMembers.id, member[0].id));
       try { await db.insert(gameHistory).values({ discordId, game: "coinflip", bet: betAmount, reward, result: `${coin} (${won ? 'win' : 'lose'})` }); } catch {}
+      if (app.locals.broadcastSSE) app.locals.broadcastSSE('balance-update', { discordId, newBalance, username: member[0].username });
       res.json({ coin, won, reward, newBalance });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -4226,6 +4384,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const newBalance = Math.max(0, (member[0].lumiCoins || 0) + reward);
       await db.update(clanMembers).set({ lumiCoins: newBalance }).where(eq(clanMembers.id, member[0].id));
       try { await db.insert(gameHistory).values({ discordId, game: "dice", bet: betAmount, reward, result: `${roll} (${guess})` }); } catch {}
+      if (app.locals.broadcastSSE) app.locals.broadcastSSE('balance-update', { discordId, newBalance, username: member[0].username });
       res.json({ roll, won, reward, multiplier: won ? multiplier : 0, newBalance });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -4326,7 +4485,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     if (!user || (user.discordId !== req.params.discordId && user.type !== 'admin')) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    const { bannerColor1, bannerColor2, cardColor, bio, customAvatar, hiddenSections, bannerImage } = req.body;
+    const { bannerColor1, bannerColor2, cardColor, bio, customAvatar, hiddenSections, bannerImage, robloxUsername } = req.body;
     profileCustoms[req.params.discordId] = {
       bannerColor1: bannerColor1 || '',
       bannerColor2: bannerColor2 || '',
@@ -4335,6 +4494,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       customAvatar: customAvatar || '',
       bannerImage: (bannerImage || '').substring(0, 500),
       hiddenSections: hiddenSections || [],
+      robloxUsername: (robloxUsername || '').substring(0, 30),
       updatedAt: new Date().toISOString(),
     };
     saveProfileCustoms();

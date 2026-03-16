@@ -80,6 +80,7 @@ const translations = {
       profile: 'Профиль',
       miniGames: 'Мини-игры',
       clanWars: 'Войны',
+      decorations: 'Украшения',
       menu: 'Меню',
     },
     dashboard: {
@@ -682,6 +683,7 @@ const translations = {
       profile: 'Profile',
       miniGames: 'Mini-games',
       clanWars: 'Wars',
+      decorations: 'Decorations',
       menu: 'Menu',
     },
     dashboard: {

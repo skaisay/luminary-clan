@@ -51,9 +51,11 @@ import BoostersPage from "@/pages/boosters";
 import DailyRewardsPage from "@/pages/daily-rewards";
 import ProfilePage from "@/pages/profile";
 import MiniGamesPage from "@/pages/mini-games";
+import DecorationShop from "@/pages/decoration-shop";
 import ClanWarsPage from "@/pages/clan-wars";
 import NotFound from "@/pages/not-found";
 import { AiAssistant } from "@/components/AiAssistant";
+import { useSSE } from "@/hooks/useSSE";
 
 function MainRouter() {
   return (
@@ -65,6 +67,7 @@ function MainRouter() {
       <Route path="/members" component={() => <MaintenanceGate pageId="members"><Members /></MaintenanceGate>} />
       <Route path="/news" component={() => <MaintenanceGate pageId="news"><NewsPage /></MaintenanceGate>} />
       <Route path="/shop" component={() => <MaintenanceGate pageId="shop"><Shop /></MaintenanceGate>} />
+      <Route path="/decorations" component={() => <DecorationShop />} />
       <Route path="/inventory" component={() => <MaintenanceGate pageId="inventory"><Inventory /></MaintenanceGate>} />
       <Route path="/convert" component={() => <MaintenanceGate pageId="convert"><ConvertPage /></MaintenanceGate>} />
       <Route path="/requests" component={() => <MaintenanceGate pageId="requests"><RequestsPage /></MaintenanceGate>} />
@@ -122,6 +125,7 @@ function VideoPlatformRouter() {
 }
 
 function MainLayout() {
+  useSSE(); // Real-time balance & decoration updates via SSE
   return (
     <>
       <TopNav />
