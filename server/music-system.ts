@@ -314,8 +314,9 @@ async function streamFromSoundCloud(songTitle: string): Promise<{ resource: any;
     12000, 'sc-search'
   );
   
-  // If cleaned title found nothing and it differs from original, try shorter version
+  // If cleaned title found nothing, try several fallback search strategies
   if ((!results || results.length === 0) && cleanedTitle !== songTitle) {
+    // Strategy A: try shorter version (first 3 words)
     const words = cleanedTitle.split(/\s+/);
     if (words.length > 3) {
       const shorterQuery = words.slice(0, 3).join(' ');
@@ -324,6 +325,39 @@ async function streamFromSoundCloud(songTitle: string): Promise<{ resource: any;
         play.search(shorterQuery, { limit: 3, source: { soundcloud: 'tracks' } }),
         12000, 'sc-search-short'
       );
+    }
+  }
+  
+  // Strategy B: try English-only words from the title (useful for mixed Russian/English titles)
+  if (!results || results.length === 0) {
+    const englishWords = songTitle.match(/[a-zA-Z]{3,}/g);
+    if (englishWords && englishWords.length >= 2) {
+      const engQuery = englishWords.slice(0, 5).join(' ');
+      musicLog(`SC: retrying with English words "${engQuery}"...`);
+      results = await withTimeout(
+        play.search(engQuery, { limit: 5, source: { soundcloud: 'tracks' } }),
+        12000, 'sc-search-eng'
+      );
+    }
+  }
+  
+  // Strategy C: try generic genre keywords if title has them
+  if (!results || results.length === 0) {
+    const genrePatterns = [
+      /doomer\s*music/i, /post[\s-]*punk/i, /synthwave/i, /darkwave/i,
+      /russian\s*(doomer|music|rock|punk)/i, /lofi|lo-fi/i, /ambient/i,
+    ];
+    for (const pattern of genrePatterns) {
+      const match = songTitle.match(pattern);
+      if (match) {
+        const genreQuery = match[0];
+        musicLog(`SC: retrying with genre "${genreQuery}"...`);
+        results = await withTimeout(
+          play.search(genreQuery, { limit: 5, source: { soundcloud: 'tracks' } }),
+          12000, 'sc-search-genre'
+        );
+        if (results && results.length > 0) break;
+      }
     }
   }
   
@@ -376,24 +410,31 @@ async function resolveSpotifyTitle(spotifyUrl: string): Promise<string | null> {
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.adminforge.de',
-  'https://watchapi.whatever.social',
-  'https://pipedapi.leptons.xyz',
-  'https://pipedapi.drgns.space',
+  'https://api.piped.yt',
+  'https://piped-api.lunar.icu',
+  'https://pipedapi.r4fo.com',
+  'https://pipedapi.in.projectsegfau.lt',
+  'https://pipedapi.darkness.services',
 ];
 
 const INVIDIOUS_INSTANCES = [
   'https://inv.nadeko.net',
-  'https://invidious.nerdvpn.de',
-  'https://yewtu.be',
-  'https://vid.puffyan.us',
-  'https://invidious.snopyta.org',
-  'https://inv.tux.pizza',
-  'https://invidious.fdn.fr',
+  'https://iv.datura.network',
+  'https://yt.drgnz.club',
+  'https://invidious.privacyredirect.com',
+  'https://invidious.protokolla.fi',
+  'https://inv.in.projectsegfau.lt',
+  'https://invidious.perennialte.ch',
 ];
 
 // ========= Cobalt API Strategy =========
-// Cobalt (cobalt.tools) is a public media download API that works from cloud IPs
+// Cobalt (cobalt.tools) is a public media download API
+// Official instance requires API key; self-hosted instances don't
 const COBALT_INSTANCES = [
+  'https://cobalt-api.ayo.tf',
+  'https://co.eepy.today',
+  'https://cobalt.tskau.team',
+  'https://cobalt-api.kwiatekmiki.com',
   'https://api.cobalt.tools',
 ];
 
@@ -411,23 +452,28 @@ async function getCobaltAudioUrl(videoId: string): Promise<string> {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0',
         },
         body: JSON.stringify({
           url: youtubeUrl,
           downloadMode: 'audio',
-          audioFormat: 'opus',
+          audioFormat: 'mp3',
+          filenameStyle: 'basic',
         }),
       });
       clearTimeout(timer);
       
       if (!resp.ok) {
-        errors.push(`${instance}: HTTP ${resp.status}`);
+        // Try to read error body for more info
+        let errBody = '';
+        try { errBody = await resp.text(); } catch {}
+        errors.push(`${instance}: HTTP ${resp.status} ${errBody.substring(0, 80)}`);
         continue;
       }
       
       const data: any = await resp.json();
       
-      if (data.status === 'tunnel' || data.status === 'redirect') {
+      if (data.status === 'tunnel' || data.status === 'redirect' || data.status === 'stream') {
         const audioUrl = data.url;
         if (audioUrl) {
           musicLog(`Cobalt(${instance}): got audio URL (status=${data.status})`);
@@ -443,13 +489,42 @@ async function getCobaltAudioUrl(videoId: string): Promise<string> {
         }
       }
       
-      errors.push(`${instance}: unexpected response status=${data.status}`);
+      // Some instances return the URL directly without status
+      if (data.url) {
+        musicLog(`Cobalt(${instance}): got direct URL from response`);
+        return data.url;
+      }
+      
+      errors.push(`${instance}: unexpected response status=${data.status} keys=${Object.keys(data).join(',')}`);
     } catch (err: any) {
       errors.push(`${instance}: ${err.message}`);
     }
   }
   
   throw new Error(`All Cobalt instances failed: ${errors.join('; ')}`);
+}
+
+// ========= play-dl YouTube Direct Strategy =========
+// play-dl uses its own internal YouTube client (Innertube) which may bypass IP blocks
+async function getPlayDlYouTubeResource(url: string): Promise<any> {
+  try {
+    // Ensure play-dl YouTube token is set
+    if (play.is_expired()) {
+      await play.refreshToken();
+    }
+  } catch { /* token refresh not critical */ }
+  
+  const stream = await withTimeout(
+    play.stream(url, { quality: 2 }), // quality 2 = highest audio
+    20000, 'play-dl-yt'
+  );
+  
+  const resource = createAudioResource(stream.stream, {
+    inputType: stream.type,
+    inlineVolume: true,
+  });
+  
+  return resource;
 }
 
 /** Get direct audio URL via Piped API (public YouTube proxy) */
@@ -608,7 +683,7 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
         }
       }
 
-      // Strategy P3: Cobalt API — public media download API (works from cloud IPs)
+      // Strategy P3: Cobalt API — public media download API
       if (!resource && videoId) {
         setLoadingStatus(guildId, 'streaming', 65 + attempt * 5, 'Cobalt API...', { songTitle: song.title });
         try {
@@ -625,8 +700,23 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
           musicLog(msg);
         }
       }
+
+      // Strategy P4: play-dl direct — uses YouTube Innertube API internally
+      if (!resource) {
+        setLoadingStatus(guildId, 'streaming', 68 + attempt * 5, 'play-dl (YouTube)...', { songTitle: song.title });
+        try {
+          musicLog(`P4: play-dl direct for ${song.url}...`);
+          resource = await getPlayDlYouTubeResource(song.url);
+          strategyUsed = 'play-dl YouTube direct';
+          musicLog(`✅ P4 OK`);
+        } catch (p4Err: any) {
+          const msg = `P4(play-dl): ${p4Err.message}`;
+          errors.push(msg);
+          musicLog(msg);
+        }
+      }
       
-      // Strategy 0: yt-dlp --get-url → ffmpeg (with web_creator client)
+      // Strategy 0: yt-dlp --get-url → ffmpeg (tries multiple client types)
       if (!resource) {
         setLoadingStatus(guildId, 'streaming', 58 + attempt * 5, 'Получение ссылки (yt-dlp)...', { songTitle: song.title });
         try {
@@ -781,7 +871,31 @@ function extractVideoId(url: string): string | null {
 }
 
 /** Use yt-dlp --get-url to quickly extract direct audio URL (no download, just URL extraction) */
+// yt-dlp client types to try, in order of likelihood to work from cloud IPs
+const YT_DLP_CLIENTS = ['android_vr', 'ios', 'tv_embedded', 'mweb', 'web_creator'];
+
 function getYtDlpDirectUrl(url: string, format: string = 'bestaudio/best'): Promise<string> {
+  return new Promise(async (resolve, reject) => {
+    // Try multiple YouTube client types
+    for (const client of YT_DLP_CLIENTS) {
+      try {
+        const result = await tryYtDlpClient(url, format, client);
+        resolve(result);
+        return;
+      } catch (err: any) {
+        musicLog(`S0: yt-dlp client=${client} failed: ${err.message.substring(0, 100)}`);
+        // If it's rate limited (429), don't try more clients
+        if (err.message.includes('429') || err.message.includes('Too Many')) {
+          reject(err);
+          return;
+        }
+      }
+    }
+    reject(new Error(`yt-dlp --get-url failed with all clients (${YT_DLP_CLIENTS.join(', ')})`));
+  });
+}
+
+function tryYtDlpClient(url: string, format: string, client: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const ytdlp = spawn('yt-dlp', [
       '--get-url',
@@ -789,9 +903,9 @@ function getYtDlpDirectUrl(url: string, format: string = 'bestaudio/best'): Prom
       '--no-playlist',
       '--no-check-certificates',
       '--no-warnings',
-      '--socket-timeout', '15',
+      '--socket-timeout', '12',
       '--force-ipv4',
-      '--extractor-args', 'youtube:player_client=web_creator',
+      '--extractor-args', `youtube:player_client=${client}`,
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -802,8 +916,8 @@ function getYtDlpDirectUrl(url: string, format: string = 'bestaudio/best'): Prom
 
     const timeout = setTimeout(() => {
       ytdlp.kill();
-      reject(new Error(`yt-dlp --get-url timeout (30s). stderr: ${stderr.substring(0, 200)}`));
-    }, 30000);
+      reject(new Error(`yt-dlp --get-url timeout (15s, client=${client}). stderr: ${stderr.substring(0, 150)}`));
+    }, 15000);
 
     ytdlp.on('error', (err: any) => {
       clearTimeout(timeout);
@@ -814,10 +928,10 @@ function getYtDlpDirectUrl(url: string, format: string = 'bestaudio/best'): Prom
       clearTimeout(timeout);
       const directUrl = stdout.trim().split('\n')[0];
       if (code === 0 && directUrl && directUrl.startsWith('http')) {
-        console.log(`[Music] yt-dlp extracted URL (${directUrl.length} chars)`);
+        musicLog(`yt-dlp client=${client} extracted URL (${directUrl.length} chars)`);
         resolve(directUrl);
       } else {
-        reject(new Error(`yt-dlp --get-url failed (code ${code}): ${stderr.substring(0, 200)}`));
+        reject(new Error(`yt-dlp --get-url failed (code ${code}, client=${client}): ${stderr.substring(0, 200)}`));
       }
     });
   });
@@ -890,7 +1004,7 @@ function getYtDlpPipeResource(url: string): Promise<any> {
       '--no-check-certificates',
       '--force-ipv4',
       '--socket-timeout', '15',
-      '--extractor-args', 'youtube:player_client=web_creator',
+      '--extractor-args', 'youtube:player_client=android_vr',
       url,
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 

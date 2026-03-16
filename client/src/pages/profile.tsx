@@ -94,6 +94,7 @@ export default function ProfilePage() {
     cardColor: string;
     bio: string;
     customAvatar: string;
+    bannerImage: string;
     hiddenSections: string[];
   }
 
@@ -103,6 +104,7 @@ export default function ProfilePage() {
     cardColor: "",
     bio: "",
     customAvatar: "",
+    bannerImage: "",
     hiddenSections: [],
   };
 
@@ -257,32 +259,35 @@ export default function ProfilePage() {
       </div>
 
       {/* Profile Header */}
-      <Card className="glass glass-border overflow-hidden mb-6" style={cd.cardColor ? { borderColor: cd.cardColor + '40' } : undefined}>
+      <Card className="glass glass-border overflow-hidden mb-6 relative" style={cd.cardColor ? { borderColor: cd.cardColor + '40' } : undefined}>
+        {isOwnProfile && !editing && (
+          <Button
+            size="icon"
+            variant="secondary"
+            className="absolute top-3 right-3 h-8 w-8 rounded-full opacity-80 hover:opacity-100 z-20 shadow-lg"
+            onClick={() => setEditing(true)}
+            title={t('profile.editProfile')}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <div
           className="h-32 relative"
-          style={cd.bannerColor1
+          style={cd.bannerColor1 && !cd.bannerImage
             ? { background: `linear-gradient(to right, ${cd.bannerColor1}, ${cd.bannerColor2 || cd.bannerColor1})` }
             : undefined
           }
         >
-          {!cd.bannerColor1 && (
+          {cd.bannerImage && (
+            <img src={cd.bannerImage} alt="" className="w-full h-full object-cover absolute inset-0" />
+          )}
+          {!cd.bannerColor1 && !cd.bannerImage && (
             <div className="absolute inset-0 bg-gradient-to-r from-primary/30 to-[hsl(var(--accent))]/30" />
           )}
-          {profile.equippedBanner && !cd.bannerColor1 && (
+          {profile.equippedBanner && !cd.bannerColor1 && !cd.bannerImage && (
             <img src={profile.equippedBanner} alt="" className="w-full h-full object-cover absolute inset-0" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent" />
-          {isOwnProfile && !editing && (
-            <Button
-              size="icon"
-              variant="secondary"
-              className="absolute top-2 right-2 h-8 w-8 rounded-full opacity-70 hover:opacity-100 z-10 shadow-md"
-              onClick={() => setEditing(true)}
-              title={t('profile.editProfile')}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-          )}
         </div>
         <CardContent className="relative -mt-12 pb-6">
           <div className="flex flex-col md:flex-row items-start md:items-end gap-4">
@@ -390,6 +395,16 @@ export default function ProfilePage() {
                   placeholder={t('profile.avatarPlaceholder')}
                   className="glass glass-border"
                 />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">{t('profile.bannerImage')}</label>
+                <Input
+                  value={editData.bannerImage}
+                  onChange={e => setEditData(d => ({ ...d, bannerImage: e.target.value }))}
+                  placeholder={t('profile.bannerImagePlaceholder')}
+                  className="glass glass-border"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">{t('profile.bannerImageHint')}</p>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-2 block">{t('profile.showSections')}</label>
