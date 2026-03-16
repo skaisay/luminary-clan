@@ -213,13 +213,23 @@ function parseSteps(text: string): { clean: string; steps: AiStep[]; firstNav?: 
 
 // ==================== COMPONENT ====================
 export function AiAssistant() {
-  const [open, setOpen] = useState(false);
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  const [open, setOpen] = useState(() => {
+    try { return sessionStorage.getItem('ai-chat-open') === '1'; } catch { return false; }
+  });
+  const [msgs, setMsgs] = useState<ChatMsg[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('ai-chat-msgs');
+      if (saved) { const parsed = JSON.parse(saved); if (Array.isArray(parsed) && parsed.length > 0) return parsed; }
+    } catch {}
+    return [];
+  });
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceText, setVoiceText] = useState('');
-  const [greeted, setGreeted] = useState(false);
+  const [greeted, setGreeted] = useState(() => {
+    try { return sessionStorage.getItem('ai-chat-greeted') === '1'; } catch { return false; }
+  });
   const [navAction, setNavAction] = useState<{ path: string; label: string } | null>(null);
   const [pendingActions, setPendingActions] = useState<AiAction[]>([]);
   // Multi-step queue
@@ -229,7 +239,13 @@ export function AiAssistant() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recogRef = useRef<any>(null);
-  const idRef = useRef(0);
+  const idRef = useRef((() => {
+    try {
+      const saved = sessionStorage.getItem('ai-chat-msgs');
+      if (saved) { const arr = JSON.parse(saved); return Math.max(0, ...arr.map((m: any) => m.id || 0)); }
+    } catch {}
+    return 0;
+  })());
 
   const [location, setLocation] = useLocation();
   const { language } = useLanguage();
@@ -245,6 +261,22 @@ export function AiAssistant() {
     voiceUnsupported: isRu ? 'Голосовой ввод не поддерживается в этом браузере' : 'Voice input not supported in this browser',
     listening: isRu ? 'Говорите...' : 'Speak...',
   };
+
+  // Persist chat state to sessionStorage
+  useEffect(() => {
+    try {
+      const toSave = msgs.filter(m => !m.loading).slice(-30);
+      sessionStorage.setItem('ai-chat-msgs', JSON.stringify(toSave));
+    } catch {}
+  }, [msgs]);
+
+  useEffect(() => {
+    try { sessionStorage.setItem('ai-chat-open', open ? '1' : '0'); } catch {}
+  }, [open]);
+
+  useEffect(() => {
+    try { sessionStorage.setItem('ai-chat-greeted', greeted ? '1' : '0'); } catch {}
+  }, [greeted]);
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -503,6 +535,7 @@ export function AiAssistant() {
 
   const clearChat = () => {
     setMsgs([{ id: ++idRef.current, role: 'assistant', text: txt.greeting }]);
+    try { sessionStorage.removeItem('ai-chat-msgs'); } catch {}
   };
 
   const suggestions = isRu

@@ -129,7 +129,6 @@ function MainLayout() {
         <MainRouter />
       </main>
       <ScrollToTop />
-      <AiAssistant />
     </>
   );
 }
@@ -201,6 +200,7 @@ export default function App() {
                   <MainLayout />
                 </BanGate>
               )}
+              <AiAssistant />
               <Toaster />
             </TooltipProvider>
           </AuthProvider>
