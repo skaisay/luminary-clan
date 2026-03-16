@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import {
   Gamepad2, Coins, Loader2, RotateCw, Trophy, Hand, Scissors,
   Circle, Square, Star, Zap, Target, ChevronDown, Gift, Flame, History
@@ -33,7 +33,6 @@ const WHEEL_SEGMENTS = [
 function WheelOfFortune() {
   const { user } = useAuth();
   const { t } = useLanguage();
-  const queryClient = useQueryClient();
   const [spinning, setSpinning] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [result, setResult] = useState<{ reward: number; label: string; multiplier: number } | null>(null);
@@ -50,15 +49,23 @@ function WheelOfFortune() {
     },
     onSuccess: (data: { segmentIndex: number; reward: number; multiplier: number }) => {
       const segPerAngle = 360 / WHEEL_SEGMENTS.length;
-      const targetAngle = 360 - (data.segmentIndex * segPerAngle + segPerAngle / 2);
+      // Pointer is at top (270°). Segment N center = N*segPerAngle + segPerAngle/2.
+      // We need: (segCenter + finalRotation) mod 360 = 270
+      const segCenter = data.segmentIndex * segPerAngle + segPerAngle / 2;
+      const desiredMod = ((270 - segCenter) % 360 + 360) % 360;
+      const currentMod = ((rotation % 360) + 360) % 360;
+      let delta = desiredMod - currentMod;
+      if (delta < 0) delta += 360;
       const spins = 5 + Math.floor(Math.random() * 3);
-      const finalRotation = rotation + (spins * 360) + targetAngle;
+      const finalRotation = rotation + spins * 360 + delta;
       setRotation(finalRotation);
       setSpinning(true);
       setTimeout(() => {
         setSpinning(false);
-        setResult({ reward: data.reward, label: WHEEL_SEGMENTS[data.segmentIndex].label, multiplier: data.multiplier });
-        queryClient.invalidateQueries({ queryKey: ["/api/mini-games/history"] });
+        const seg = WHEEL_SEGMENTS[data.segmentIndex];
+        setResult({ reward: data.reward, label: seg.label, multiplier: data.multiplier });
+        // Save to local history
+        saveGameHistory({ game: 'wheel', bet: betAmount, reward: data.reward, result: seg.label });
       }, 4000);
     }
   });
@@ -158,11 +165,12 @@ function WheelOfFortune() {
       {result && (
         <div className="text-center space-y-1">
           <p className={`text-2xl font-bold ${result.reward > 0 ? 'text-green-400' : result.reward < 0 ? 'text-red-400' : 'text-yellow-400'}`}>
-            {result.label}
+            {result.label} {result.multiplier > 0 ? `= ${Math.floor(betAmount * result.multiplier)} LC` : ''}
           </p>
           <Badge variant="secondary" className="text-lg px-4 py-1 gap-1">
             <Coins className="h-4 w-4 text-yellow-500" />
-            {result.reward > 0 ? `+${result.reward}` : result.reward} LumiCoins
+            {result.reward > 0 ? `+${result.reward}` : result.reward === 0 ? '0' : result.reward} LumiCoins
+            {result.reward > 0 && <span className="text-xs text-muted-foreground ml-1">({t('miniGames.bet')}: {betAmount})</span>}
           </Badge>
         </div>
       )}
@@ -201,7 +209,6 @@ const RPS_LABELS: Record<RPSChoice, { ru: string; en: string }> = {
 function RockPaperScissors() {
   const { user } = useAuth();
   const { t, language } = useLanguage();
-  const queryClient = useQueryClient();
   const [playerChoice, setPlayerChoice] = useState<RPSChoice | null>(null);
   const [botChoice, setBotChoice] = useState<RPSChoice | null>(null);
   const [resultText, setResultText] = useState<string>("");
@@ -222,12 +229,12 @@ function RockPaperScissors() {
       setTimeout(() => {
         setBotChoice(data.botChoice);
         setReward(data.reward);
-        setResultText(
-          data.result === "win" ? t('miniGames.win') :
-          data.result === "lose" ? t('miniGames.lose') : t('miniGames.draw')
-        );
+        const resultLabel = data.result === "win" ? t('miniGames.win') :
+          data.result === "lose" ? t('miniGames.lose') : t('miniGames.draw');
+        setResultText(resultLabel);
         setAnimating(false);
-        queryClient.invalidateQueries({ queryKey: ["/api/mini-games/history"] });
+        // Save to local history
+        saveGameHistory({ game: 'rps', bet: betAmount, reward: data.reward, result: data.result });
       }, 1500);
     }
   });
@@ -348,7 +355,7 @@ function RockPaperScissors() {
   );
 }
 
-// ============= GAME HISTORY =============
+// ============= LOCAL GAME HISTORY =============
 
 interface GameHistoryItem {
   id: string;
@@ -359,23 +366,42 @@ interface GameHistoryItem {
   playedAt: string;
 }
 
-function GameHistory() {
-  const { user } = useAuth();
-  const { t } = useLanguage();
-  const { data: history, isLoading } = useQuery<GameHistoryItem[]>({
-    queryKey: ["/api/mini-games/history", user?.discordId],
-    queryFn: async () => {
-      const res = await fetch(`/api/mini-games/history/${user?.discordId}`);
-      return res.json();
-    },
-    enabled: !!user?.discordId,
+const HISTORY_KEY = 'luminary_game_history';
+
+function getGameHistory(): GameHistoryItem[] {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+  } catch { return []; }
+}
+
+function saveGameHistory(entry: { game: string; bet: number; reward: number; result: string }) {
+  const history = getGameHistory();
+  history.unshift({
+    id: Date.now().toString(),
+    game: entry.game,
+    bet: entry.bet,
+    reward: entry.reward,
+    result: entry.result,
+    playedAt: new Date().toISOString(),
   });
+  // Keep last 100 entries
+  if (history.length > 100) history.length = 100;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  // Dispatch event so GameHistory component can update
+  window.dispatchEvent(new Event('game-history-updated'));
+}
 
-  if (isLoading) {
-    return <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-  }
+function GameHistory() {
+  const { t } = useLanguage();
+  const [history, setHistory] = useState<GameHistoryItem[]>(getGameHistory);
 
-  if (!history || history.length === 0) {
+  useEffect(() => {
+    const onUpdate = () => setHistory(getGameHistory());
+    window.addEventListener('game-history-updated', onUpdate);
+    return () => window.removeEventListener('game-history-updated', onUpdate);
+  }, []);
+
+  if (history.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
         <History className="h-10 w-10 mx-auto mb-2 opacity-30" />
@@ -386,7 +412,7 @@ function GameHistory() {
 
   return (
     <div className="space-y-2">
-      {history.slice(0, 20).map(item => (
+      {history.slice(0, 30).map(item => (
         <div key={item.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20">
           <div className="flex items-center gap-3">
             {item.game === "wheel" ? (
@@ -397,6 +423,7 @@ function GameHistory() {
             <div>
               <p className="text-sm font-medium">
                 {item.game === "wheel" ? t('miniGames.wheelGame') : t('miniGames.rpsGame')}
+                {item.result && <span className="text-xs text-muted-foreground ml-1">({item.result})</span>}
               </p>
               <p className="text-xs text-muted-foreground">
                 {t('miniGames.betLabel')}: {item.bet} LC • {new Date(item.playedAt).toLocaleString()}
