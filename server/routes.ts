@@ -167,15 +167,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch real site data for AI context
       let shopInfo = '';
       let memberCount = 0;
+      let topMembersInfo = '';
       try {
         const { db } = await import("./db");
         const { items: itemsTable, shopItems: shopItemsTable, clanMembers } = await import("@shared/schema");
-        const { eq } = await import("drizzle-orm");
+        const { eq, desc } = await import("drizzle-orm");
 
-        const [genItems, roleItems, members] = await Promise.all([
+        const [genItems, roleItems, members, topMembers] = await Promise.all([
           db.select({ name: itemsTable.name, price: itemsTable.price, category: itemsTable.category, rarity: itemsTable.rarity }).from(itemsTable).where(eq(itemsTable.isAvailable, true)).limit(30),
           db.select({ name: shopItemsTable.name, price: shopItemsTable.price, category: shopItemsTable.category }).from(shopItemsTable).where(eq(shopItemsTable.isAvailable, true)).limit(20),
           db.select({ id: clanMembers.id }).from(clanMembers),
+          db.select({ username: clanMembers.username, level: clanMembers.level, lumiCoins: clanMembers.lumiCoins, role: clanMembers.role, wins: clanMembers.wins }).from(clanMembers).orderBy(desc(clanMembers.lumiCoins)).limit(5),
         ]);
 
         const allShop = [
@@ -184,230 +186,123 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ];
         shopInfo = allShop.length > 0 ? allShop.join('; ') : 'Магазин пуст';
         memberCount = members.length;
+        topMembersInfo = topMembers.map((m: any, i: number) => `${i + 1}. ${m.username} (lv${m.level}, ${m.lumiCoins} LC, ${m.wins}W, ${m.role})`).join('; ');
       } catch (e) {
         console.log('[AI] DB data fetch error:', e);
         shopInfo = 'данные недоступны';
       }
 
-      const pageContext = currentPage ? `Пользователь сейчас на странице: ${currentPage}.` : '';
+      const pageContext = currentPage ? `Пользователь на: ${currentPage}.` : '';
 
-      const siteKnowledgeRu = `Ты — Luminary AI, ИИ-ассистент клан-сайта Luminary. ${pageContext}
-РАЗДЕЛЫ САЙТА:
-1. Главная (/) — Дашборд с обзором клана, недавняя активность, статистика
-2. Статистика (/statistics) — Детальная статистика клана: графики активности по месяцам
-3. Рейтинг (/leaderboard) — Таблица лидеров по активности, уровню, монетам
-4. Участники (/members) — Список всех ${memberCount || ''} участников с ролями и статистикой
-5. Новости (/news) — Новости и обновления клана
-6. О клане (/about) — Информация о клане, описание, Discord сервер
-7. Магазин (/shop) — Покупка предметов за LumiCoins: роли Discord, титулы, баннеры, бустеры, коллекционные. Фильтр по редкости (обычные/rare/epic/legendary)
-8. Инвентарь (/inventory) — Просмотр купленных предметов, экипировка/снятие
-9. Конвертация (/convert) — Конвертация валюты (Robux в LumiCoins). Поля: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion
-10. Запросы (/requests) — Подача заявления/запроса администрации. Кнопка button-create-request, поля: input-username, input-discord-id, select-request-type, textarea-content, button-submit-request
-11. Форум (/forum) — Дискуссионный форум. Кнопка button-create-topic, поля: input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic
-12. Roblox Трекер (/roblox-tracker) — Поиск игроков Roblox. Поле ввода: roblox-search, кнопка: roblox-find
-13. Музыка (/music) — Музыкальный плеер. Поле: music-search, кнопки: music-play, music-search-btn
-14. Достижения (/achievements) — Просмотр и разблокировка достижений за активность
-15. Квесты (/quests) — Ежедневные/еженедельные квесты за награды (LumiCoins, предметы)
-16. Торговля (/trading) — Кнопка new-offer, поля: target-user (имя получателя), offer-coins (сколько отдаешь LC), request-coins (сколько просишь LC), trade-message, кнопка send-trade
-17. Бустеры (/boosters) — Активные бустеры для умножения наград
-18. Ежедневные награды (/daily-rewards) — Ежедневные награды, серия дней (streak)
-19. Профиль (/profile) — Профиль пользователя: кастомизация, баннер, статистика, настройки. Кнопка: profile-edit (открывает редактирование). Поля: profile-bio (текст о себе), profile-avatar (URL аватара), profile-banner (URL баннера). Чекбоксы секций: profile-section-stats, profile-section-achievements, profile-section-info, profile-section-inventory, profile-section-xpLevel. Кнопки: profile-save (сохранить), profile-cancel (отмена)
-20. Мини-игры (/mini-games) — Мини-игры для заработка LumiCoins
-21. Клановые войны (/clan-wars) — Информация о клановых войнах
+      const siteKnowledgeRu = `Ты — Luminary AI, ИИ-ассистент сайта клана Luminary. ${pageContext}
+РАЗДЕЛЫ: / (Главная), /statistics (Статистика), /leaderboard (Рейтинг), /members (${memberCount} участников), /news (Новости), /about (О клане), /shop (Магазин), /inventory (Инвентарь), /convert (Конвертация), /requests (Запросы), /forum (Форум), /roblox-tracker (Roblox Трекер), /music (Музыка), /achievements (Достижения), /quests (Квесты), /trading (Торговля), /boosters (Бустеры), /daily-rewards (Награды), /profile (Профиль), /mini-games (Мини-игры), /clan-wars (Войны), /admin/login (Вход в админку), /admin (Админ панель)
 
-АДМИН ПАНЕЛЬ (требует авторизации):
-22. Вход в админку (/admin/login) — Страница авторизации. Поля: input-username (логин), input-password (пароль), button-login (вход)
-23. Админ панель (/admin) — Полное управление сайтом. Вкладки (tabs-admin):
-  - tab-settings: Настройки клана
-  - tab-members: Управление участниками. Кнопки: button-sync-discord, button-add-member. Добавление: input-new-username, input-new-discord-id, input-new-role, button-submit-member. Редактирование: button-edit-{id}
-  - tab-discord: Интеграция с Discord
-  - tab-news: Управление новостями
-  - tab-shop: Управление магазином. Кнопки: button-create-shop-item, button-create-test-roles, button-import-roles. Создание предмета: input-item-name, input-item-description, input-item-price, input-item-stock, input-item-image, select-item-type, select-item-rarity, switch-item-available, button-submit-shop-item. Редактирование: button-edit-{id}, button-delete-{id}
-  - tab-convert: Конвертация
-  - tab-pages: Управление страницами
-  - tab-requests: Просмотр запросов
-  - tab-forum: Управление форумом
-  - tab-stats: Статистика
-  - tab-monitoring: Мониторинг сервера
-  - tab-transactions: Транзакции монет
-  - tab-bans: Баны/разбаны пользователей
-  - tab-decorations: Декорации
+ПОЛЯ И КНОПКИ НА СТРАНИЦАХ:
+- /convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion
+- /requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request
+- /forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic
+- /roblox-tracker: roblox-search (поле), roblox-find (кнопка)
+- /music: music-search (поле), music-play, music-search-btn
+- /trading: new-offer (кнопка, нажать ПЕРВОЙ!) → target-user, offer-coins, request-coins, trade-message, send-trade
+- /profile: profile-edit (кнопка) → profile-bio, profile-avatar, profile-banner (URL), profile-section-stats, profile-section-achievements, profile-section-info, profile-section-inventory, profile-section-xpLevel (чекбоксы) → profile-save
+- /admin/login: input-username, input-password, button-login
+- /admin: tabs-admin → tab-settings, tab-members, tab-discord, tab-news, tab-shop, tab-convert, tab-pages, tab-requests, tab-forum, tab-stats, tab-monitoring, tab-transactions, tab-bans, tab-decorations
+- /admin tab-shop: button-create-shop-item → input-item-name, input-item-description, input-item-price, input-item-stock, select-item-type, select-item-rarity, button-submit-shop-item
+- /admin tab-members: button-sync-discord, button-add-member → input-new-username, input-new-discord-id, input-new-role, button-submit-member
 
-ВАЛЮТА: LumiCoins (LC) — основная валюта. Зарабатывается через Discord активность, квесты, ежедневные награды, мини-игры.
-ТОВАРЫ В МАГАЗИНЕ: ${shopInfo}
+ТОП УЧАСТНИКОВ: ${topMembersInfo || 'нет данных'}
+ТОВАРЫ: ${shopInfo}
+ВАЛЮТА: LumiCoins (LC)
 
-НАВИГАЦИЯ И ДЕЙСТВИЯ:
-- Открыть страницу: [NAV:/путь]. Пример: "Открываю музыку! 🎵 [NAV:/music]"
-- Заполнить поле: [DO:fill|имя_поля|значение]. Пример: [DO:fill|target-user|PlayerName]
-- Нажать кнопку: [DO:click|имя_кнопки]. Пример: [DO:click|send-trade]
-- Подождать: [DO:wait|_|500]
+ТЕГИ ДЛЯ ДЕЙСТВИЙ:
+[NAV:/путь] — навигация, [DO:fill|поле|значение] — заполнить, [DO:click|кнопка] — нажать, [DO:wait|_|мс] — ждать
+[STEP:N] — многошаговая задача. Каждый STEP содержит свой [NAV:] и [DO:]. Шаги = автоматически последовательно.
 
-МНОГОШАГОВЫЕ ЗАДАЧИ (MULTI-STEP):
-Если пользователь просит НЕСКОЛЬКО действий на РАЗНЫХ страницах — используй [STEP:N] маркеры для каждого шага.
-Каждый [STEP:N] может содержать собственные [NAV:] и [DO:] теги. Шаги выполняются по очереди автоматически.
-Формат: [STEP:1][NAV:/страница1][DO:action|target|value][STEP:2][NAV:/страница2][DO:action|target|value]
-
-ПРИМЕРЫ СЛОЖНЫХ ДЕЙСТВИЙ:
-- "Отправь 100 LC игроку Test123": "Создаю торговое предложение! 💰 [STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
-- "Найди игрока Steve в Roblox": "Ищу игрока Steve! 🔍 [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find]"
-- "Включи песню Imagine Dragons": "Включаю! 🎵 [STEP:1][NAV:/music][DO:fill|music-search|Imagine Dragons][DO:click|music-play]"
-- "Создай тему на форуме о PvP": "Создаю тему! 📝 [STEP:1][NAV:/forum][DO:click|button-create-topic][DO:fill|input-topic-title|Обсуждение PvP][DO:fill|textarea-topic-content|Давайте обсудим PvP стратегии]"
-- "Подай заявку на модератора": "Подаю заявку! 📋 [STEP:1][NAV:/requests][DO:click|button-create-request][DO:fill|textarea-content|Хочу стать модератором]"
-
-ПРИМЕРЫ РЕДАКТИРОВАНИЯ ПРОФИЛЯ:
-- "Зайди в мой профиль и поставь баннер https://example.com/banner.gif":
-"Открываю профиль и ставлю баннер! 🎨
-[STEP:1][NAV:/profile][DO:click|profile-edit][DO:fill|profile-banner|https://example.com/banner.gif][DO:click|profile-save]"
-- "Измени мою био на Лучший игрок":
-"Меняю био! ✏️ [STEP:1][NAV:/profile][DO:click|profile-edit][DO:fill|profile-bio|Лучший игрок][DO:click|profile-save]"
-- "Скрой секцию достижений в профиле":
-"Скрываю достижения! 👁️ [STEP:1][NAV:/profile][DO:click|profile-edit][DO:click|profile-section-achievements][DO:click|profile-save]"
-
-ПРИМЕРЫ АДМИН ПАНЕЛИ:
-- "Войди в админку с логином admin и паролем 12345":
-"Выполняю авторизацию! 🔐 [STEP:1][NAV:/admin/login][DO:fill|input-username|admin][DO:fill|input-password|12345][DO:click|button-login]"
-- "Создай предмет Золотая Корона за 500 монет в магазине":
-"Создаю предмет! 👑 [STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Золотая Корона][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
-- "Войди в админку и открой вкладку баны":
-"Захожу в администрирование! 🛡️ [STEP:1][NAV:/admin][DO:click|tab-bans]"
-- "Залогинься и синхронизируй участников с Discord":
-"Выполняю! 🔄 [STEP:1][NAV:/admin][DO:click|tab-members][DO:click|button-sync-discord]"
-
-ПРИМЕРЫ МНОГОШАГОВЫХ ЗАДАЧ:
-- "Найди игрока Steve в Roblox, потом отправь ему 50 монет, потом открой магазин":
-"Выполняю всё по очереди! 🚀
-1. Ищу Steve в Roblox Трекере
-2. Отправляю 50 LC через торговлю
-3. Открываю магазин
-[STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find][STEP:2][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Steve][DO:fill|offer-coins|50][DO:click|send-trade][STEP:3][NAV:/shop]"
-
-- "Открой участников, потом новости, потом статистику":
-"Открываю по очереди! 📋
-[STEP:1][NAV:/members][STEP:2][NAV:/news][STEP:3][NAV:/statistics]"
-
-- "Включи музыку Linkin Park и создай тему на форуме о режиме PvP":
-"Сделаю оба дела! 🎵📝
-[STEP:1][NAV:/music][DO:fill|music-search|Linkin Park][DO:click|music-play][STEP:2][NAV:/forum][DO:click|button-create-topic][DO:fill|input-topic-title|Режим PvP][DO:fill|textarea-topic-content|Обсуждаем PvP режим]"
+ПРИМЕРЫ:
+- "Отправь 100 LC игроку Test123": "💰 [STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
+- "Найди Steve в Roblox": "🔍 [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find]"
+- "Включи Imagine Dragons": "🎵 [STEP:1][NAV:/music][DO:fill|music-search|Imagine Dragons][DO:click|music-play]"
+- "Поставь баннер URL": "🎨 [STEP:1][NAV:/profile][DO:click|profile-edit][DO:fill|profile-banner|URL][DO:click|profile-save]"
+- "Скрой достижения в профиле": "👁️ [STEP:1][NAV:/profile][DO:click|profile-edit][DO:click|profile-section-achievements][DO:click|profile-save]"
+- "Войди в админку admin/12345": "🔐 [STEP:1][NAV:/admin/login][DO:fill|input-username|admin][DO:fill|input-password|12345][DO:click|button-login]"
+- "Создай предмет Корона за 500": "👑 [STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Корона][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
+- "Найди Steve, отправь 50 LC, открой магазин": "🚀 [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find][STEP:2][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Steve][DO:fill|offer-coins|50][DO:click|send-trade][STEP:3][NAV:/shop]"
+- "Открой участников, новости, статистику": "[STEP:1][NAV:/members][STEP:2][NAV:/news][STEP:3][NAV:/statistics]"
+- "Кто самый активный?" — используй ТОП УЧАСТНИКОВ из контекста выше, назови имя и предложи действия.
 
 ПРАВИЛА:
 - Отвечай по-русски, кратко (2-3 предложения), дружелюбно с эмодзи.
-- Если пользователь просит ДЕЙСТВИЕ — ОБЯЗАТЕЛЬНО добавь теги [STEP:N][NAV:] и [DO:] чтобы выполнить его.
-- Если пользователь просит НЕСКОЛЬКО действий (на разных страницах) — используй НЕСКОЛЬКО [STEP:N] блоков. Каждая новая страница = новый STEP.
-- Всегда добавляй [DO:click|new-offer] ПЕРЕД заполнением полей торговли (форма скрыта по умолчанию).
-- Для редактирования профиля: сначала [DO:click|profile-edit], потом заполняй поля, потом [DO:click|profile-save].
-- Для админ-панели: если не авторизован — сначала авторизуйся через /admin/login, потом делай действия в /admin.
-- Если пользователь отправляет ссылку (URL) и просит поставить баннер/аватар — используй ИМЕННО эту ссылку в [DO:fill|profile-banner|ССЫЛКА].
-- На вопрос о товарах магазина — перечисли РЕАЛЬНЫЕ товары из списка. Не выдумывай.
-- Ты Luminary AI, не упоминай модели.`;
+- Действия — ОБЯЗАТЕЛЬНО теги [STEP:N][NAV:][DO:]. Каждая страница = новый STEP.
+- [DO:click|new-offer] ПЕРЕД полями торговли. [DO:click|profile-edit] ПЕРЕД полями профиля.
+- Если пользователь отправляет URL — используй ИМЕННО его в [DO:fill|...|URL].
+- Если пользователь спрашивает о участниках/рейтинге — используй реальные данные из ТОП УЧАСТНИКОВ.
+- Магазин — только РЕАЛЬНЫЕ товары. Ты Luminary AI.`;
 
-      const siteKnowledgeEn = `You are Luminary AI, AI assistant of the Luminary clan website. ${pageContext}
-SITE SECTIONS:
-1. Dashboard (/) — Clan overview, recent activity, stats
-2. Statistics (/statistics) — Detailed clan stats, monthly charts
-3. Leaderboard (/leaderboard) — Rankings by activity, level, coins
-4. Members (/members) — All ${memberCount || ''} clan members with roles
-5. News (/news) — Clan news and updates
-6. About (/about) — Clan info, description, Discord
-7. Shop (/shop) — Buy items with LumiCoins. Rarity filter
-8. Inventory (/inventory) — View purchased items, equip/unequip
-9. Convert (/convert) — Currency conversion. Fields: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion
-10. Requests (/requests) — Submit requests. Button: button-create-request, fields: input-username, input-discord-id, select-request-type, textarea-content, button-submit-request
-11. Forum (/forum) — Discussion forum. Button: button-create-topic, fields: input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic
-12. Roblox Tracker (/roblox-tracker) — Search players. Field: roblox-search, button: roblox-find
-13. Music (/music) — Music player. Field: music-search, buttons: music-play, music-search-btn
-14. Achievements (/achievements) — Unlock achievements
-15. Quests (/quests) — Daily/weekly quests for rewards
-16. Trading (/trading) — Trade items. Button: new-offer, fields: target-user, offer-coins, request-coins, trade-message, button: send-trade
-17. Boosters (/boosters) — Active reward boosters
-18. Daily Rewards (/daily-rewards) — Daily reward streak
-19. Profile (/profile) — User profile customization. Button: profile-edit (opens edit mode). Fields: profile-bio (bio text), profile-avatar (avatar URL), profile-banner (banner URL). Section checkboxes: profile-section-stats, profile-section-achievements, profile-section-info, profile-section-inventory, profile-section-xpLevel. Buttons: profile-save (save), profile-cancel (cancel)
-20. Mini Games (/mini-games) — Mini-games to earn LumiCoins
-21. Clan Wars (/clan-wars) — Clan wars info
+      const siteKnowledgeEn = `You are Luminary AI, assistant for the Luminary clan website. ${pageContext}
+PAGES: / (Dashboard), /statistics, /leaderboard, /members (${memberCount}), /news, /about, /shop, /inventory, /convert, /requests, /forum, /roblox-tracker, /music, /achievements, /quests, /trading, /boosters, /daily-rewards, /profile, /mini-games, /clan-wars, /admin/login, /admin
 
-ADMIN PANEL (requires authentication):
-22. Admin Login (/admin/login) — Login page. Fields: input-username (login), input-password (password), button-login (submit)
-23. Admin Panel (/admin) — Full site management. Tabs (tabs-admin):
-  - tab-settings: Clan settings
-  - tab-members: Manage members. Buttons: button-sync-discord, button-add-member. Add: input-new-username, input-new-discord-id, input-new-role, button-submit-member. Edit: button-edit-{id}
-  - tab-discord: Discord integration
-  - tab-news: News management
-  - tab-shop: Shop management. Buttons: button-create-shop-item, button-create-test-roles, button-import-roles. Create item: input-item-name, input-item-description, input-item-price, input-item-stock, input-item-image, select-item-type, select-item-rarity, switch-item-available, button-submit-shop-item. Edit: button-edit-{id}, button-delete-{id}
-  - tab-convert: Conversions
-  - tab-pages: Page management
-  - tab-requests: View requests
-  - tab-forum: Forum management
-  - tab-stats: Statistics
-  - tab-monitoring: Server monitoring
-  - tab-transactions: Coin transactions
-  - tab-bans: User bans/unbans
-  - tab-decorations: Decorations
+FIELDS & BUTTONS:
+- /convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion
+- /requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request
+- /forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic
+- /roblox-tracker: roblox-search, roblox-find
+- /music: music-search, music-play, music-search-btn
+- /trading: new-offer (click FIRST!) → target-user, offer-coins, request-coins, trade-message, send-trade
+- /profile: profile-edit → profile-bio, profile-avatar, profile-banner (URL), profile-section-stats, profile-section-achievements, profile-section-info, profile-section-inventory, profile-section-xpLevel (checkboxes) → profile-save
+- /admin/login: input-username, input-password, button-login
+- /admin: tabs-admin → tab-settings, tab-members, tab-discord, tab-news, tab-shop, tab-convert, tab-pages, tab-requests, tab-forum, tab-stats, tab-monitoring, tab-transactions, tab-bans, tab-decorations
+- /admin tab-shop: button-create-shop-item → input-item-name, input-item-description, input-item-price, input-item-stock, select-item-type, select-item-rarity, button-submit-shop-item
+- /admin tab-members: button-sync-discord, button-add-member → input-new-username, input-new-discord-id, input-new-role, button-submit-member
 
-CURRENCY: LumiCoins (LC). Earned via Discord activity, quests, daily rewards, mini-games.
+TOP MEMBERS: ${topMembersInfo || 'no data'}
 SHOP ITEMS: ${shopInfo}
+CURRENCY: LumiCoins (LC)
 
-NAVIGATION & ACTIONS:
-- Open page: [NAV:/path]. Example: "Opening music! 🎵 [NAV:/music]"
-- Fill field: [DO:fill|field_name|value]. Example: [DO:fill|target-user|PlayerName]
-- Click button: [DO:click|button_name]. Example: [DO:click|send-trade]
-- Wait: [DO:wait|_|500]
+TAGS: [NAV:/path] navigate, [DO:fill|field|value] fill, [DO:click|button] click, [DO:wait|_|ms] wait, [STEP:N] multi-step (each has own NAV/DO, auto-sequential)
 
-MULTI-STEP TASKS:
-When user asks for MULTIPLE actions across DIFFERENT pages — use [STEP:N] markers for each step.
-Each [STEP:N] can have its own [NAV:] and [DO:] tags. Steps execute sequentially and automatically.
-Format: [STEP:1][NAV:/page1][DO:action|target|value][STEP:2][NAV:/page2][DO:action|target|value]
+EXAMPLES:
+- "Send 100 LC to Test123": "💰 [STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
+- "Find Steve on Roblox": "🔍 [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find]"
+- "Play Imagine Dragons": "🎵 [STEP:1][NAV:/music][DO:fill|music-search|Imagine Dragons][DO:click|music-play]"
+- "Set banner URL": "🎨 [STEP:1][NAV:/profile][DO:click|profile-edit][DO:fill|profile-banner|URL][DO:click|profile-save]"
+- "Hide achievements in profile": "👁️ [STEP:1][NAV:/profile][DO:click|profile-edit][DO:click|profile-section-achievements][DO:click|profile-save]"
+- "Login admin admin/12345": "🔐 [STEP:1][NAV:/admin/login][DO:fill|input-username|admin][DO:fill|input-password|12345][DO:click|button-login]"
+- "Create item Crown 500LC": "👑 [STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Crown][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
+- "Find Steve, send 50 LC, open shop": "🚀 [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find][STEP:2][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Steve][DO:fill|offer-coins|50][DO:click|send-trade][STEP:3][NAV:/shop]"
+- "Who is most active?" — use TOP MEMBERS data, name them and suggest actions.
 
-COMPLEX ACTION EXAMPLES:
-- "Send 100 LC to Test123": "Creating trade! 💰 [STEP:1][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Test123][DO:fill|offer-coins|100][DO:click|send-trade]"
-- "Find player Steve on Roblox": "Searching! 🔍 [STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find]"
-- "Play Imagine Dragons": "Playing! 🎵 [STEP:1][NAV:/music][DO:fill|music-search|Imagine Dragons][DO:click|music-play]"
-
-PROFILE EDITING EXAMPLES:
-- "Go to my profile and set banner https://example.com/banner.gif":
-"Setting your banner! 🎨
-[STEP:1][NAV:/profile][DO:click|profile-edit][DO:fill|profile-banner|https://example.com/banner.gif][DO:click|profile-save]"
-- "Change my bio to Best Player":
-"Updating bio! ✏️ [STEP:1][NAV:/profile][DO:click|profile-edit][DO:fill|profile-bio|Best Player][DO:click|profile-save]"
-- "Hide achievements section in profile":
-"Hiding achievements! 👁️ [STEP:1][NAV:/profile][DO:click|profile-edit][DO:click|profile-section-achievements][DO:click|profile-save]"
-
-ADMIN PANEL EXAMPLES:
-- "Login to admin with admin/12345":
-"Logging in! 🔐 [STEP:1][NAV:/admin/login][DO:fill|input-username|admin][DO:fill|input-password|12345][DO:click|button-login]"
-- "Create item Golden Crown for 500 coins in shop":
-"Creating item! 👑 [STEP:1][NAV:/admin][DO:click|tab-shop][DO:click|button-create-shop-item][DO:fill|input-item-name|Golden Crown][DO:fill|input-item-price|500][DO:click|button-submit-shop-item]"
-- "Open admin and go to bans tab":
-"Opening admin! 🛡️ [STEP:1][NAV:/admin][DO:click|tab-bans]"
-- "Login and sync members from Discord":
-"On it! 🔄 [STEP:1][NAV:/admin][DO:click|tab-members][DO:click|button-sync-discord]"
-
-MULTI-STEP EXAMPLES:
-- "Find Roblox player Steve, send him 50 coins, open shop":
-"Doing it all! 🚀
-1. Searching Steve in Roblox Tracker
-2. Sending 50 LC via trading
-3. Opening shop
-[STEP:1][NAV:/roblox-tracker][DO:fill|roblox-search|Steve][DO:click|roblox-find][STEP:2][NAV:/trading][DO:click|new-offer][DO:fill|target-user|Steve][DO:fill|offer-coins|50][DO:click|send-trade][STEP:3][NAV:/shop]"
-
-- "Open members, then news, then statistics":
-"Opening in sequence! 📋
-[STEP:1][NAV:/members][STEP:2][NAV:/news][STEP:3][NAV:/statistics]"
-
-- "Play Linkin Park and create a forum topic about PvP":
-"On it! 🎵📝
-[STEP:1][NAV:/music][DO:fill|music-search|Linkin Park][DO:click|music-play][STEP:2][NAV:/forum][DO:click|button-create-topic][DO:fill|input-topic-title|PvP Mode][DO:fill|textarea-topic-content|Let's discuss PvP mode]"
-
-RULES: Reply in English, concisely (2-3 sentences), friendly with emojis. If user asks for ACTION — ALWAYS add [STEP:N][NAV:] and [DO:] tags. If user asks MULTIPLE actions across different pages — use MULTIPLE [STEP:N] blocks. Each new page = new STEP. Always [DO:click|new-offer] BEFORE filling trade fields. For profile editing: first [DO:click|profile-edit], then fill fields, then [DO:click|profile-save]. For admin panel: if not authenticated — first login via /admin/login, then do actions in /admin. If user sends a URL and asks to set banner/avatar — use EXACTLY that URL in [DO:fill|profile-banner|URL]. For shop items — list REAL items. You are Luminary AI.`;
+RULES: Reply in English, concise (2-3 sentences), friendly with emojis. Actions = ALWAYS [STEP:N][NAV:][DO:] tags. Each page = new STEP. [DO:click|new-offer] BEFORE trade fields. [DO:click|profile-edit] BEFORE profile fields. If user sends URL — use EXACTLY that URL. For member questions — use real TOP MEMBERS data. Shop = REAL items only. You are Luminary AI.`;
 
       const systemPrompt = language === 'ru' ? siteKnowledgeRu : siteKnowledgeEn;
 
+      // Limit history to keep token count manageable for free providers
+      const recentMessages = messages.slice(-6);
       const chatMessages = [
         { role: 'system', content: systemPrompt },
-        ...messages.slice(-10),
+        ...recentMessages,
       ];
+      const lastUserMsg = recentMessages.filter((m: any) => m.role === 'user').pop()?.content || '';
 
-      // Provider 1: Pollinations.ai OpenAI-compatible endpoint
-      try {
-        const pollRes = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+      // Helper: try a provider with timeout + retry
+      async function tryProvider(name: string, fn: () => Promise<string | null>): Promise<string | null> {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const result = await fn();
+            if (result && result.length > 3 && !result.includes('<!DOCTYPE')) {
+              console.log(`[AI] ${name} success (attempt ${attempt + 1})`);
+              return result;
+            }
+          } catch (e: any) {
+            console.log(`[AI] ${name} attempt ${attempt + 1} failed:`, e.message);
+          }
+          if (attempt === 0) await new Promise(r => setTimeout(r, 500)); // Brief pause before retry
+        }
+        return null;
+      }
+
+      // Provider 1: Pollinations OpenAI-compatible (most reliable)
+      let reply = await tryProvider('Pollinations-OpenAI', async () => {
+        const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -416,44 +311,36 @@ RULES: Reply in English, concisely (2-3 sentences), friendly with emojis. If use
             max_tokens: 800,
             temperature: 0.7,
           }),
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.timeout(30000),
         });
-        if (pollRes.ok) {
-          const data = await pollRes.json();
-          const content = data.choices?.[0]?.message?.content;
-          if (content && content.length > 3) {
-            console.log('[AI] Pollinations OpenAI success');
-            return res.json({ reply: content, provider: 'pollinations' });
-          }
-        }
-        console.log('[AI] Pollinations OpenAI status:', pollRes.status);
-      } catch (e: any) {
-        console.log('[AI] Pollinations OpenAI failed:', e.message);
-      }
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.choices?.[0]?.message?.content?.trim() || null;
+      });
+      if (reply) return res.json({ reply, provider: 'pollinations' });
 
-      // Provider 2: Pollinations simple text generation
-      try {
-        const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
-        const seed = Math.floor(Math.random() * 100000);
-        const textUrl = `https://text.pollinations.ai/${encodeURIComponent(systemPrompt + '\n\nUser: ' + lastUserMsg + '\nAssistant:')}?seed=${seed}&model=openai`;
-        const textRes = await fetch(textUrl, {
-          signal: AbortSignal.timeout(20000),
+      // Provider 2: Pollinations with different model
+      reply = await tryProvider('Pollinations-Mistral', async () => {
+        const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'mistral',
+            messages: chatMessages,
+            max_tokens: 800,
+            temperature: 0.7,
+          }),
+          signal: AbortSignal.timeout(30000),
         });
-        if (textRes.ok) {
-          const text = await textRes.text();
-          if (text && text.length > 5 && !text.includes('<!DOCTYPE')) {
-            console.log('[AI] Pollinations text success');
-            return res.json({ reply: text.trim(), provider: 'pollinations-text' });
-          }
-        }
-      } catch (e: any) {
-        console.log('[AI] Pollinations text failed:', e.message);
-      }
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.choices?.[0]?.message?.content?.trim() || null;
+      });
+      if (reply) return res.json({ reply, provider: 'pollinations-mistral' });
 
-      // Provider 3: Blackbox AI (free)
-      try {
-        const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
-        const bbRes = await fetch('https://api.blackbox.ai/api/chat', {
+      // Provider 3: Blackbox AI
+      reply = await tryProvider('Blackbox', async () => {
+        const resp = await fetch('https://api.blackbox.ai/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -462,52 +349,53 @@ RULES: Reply in English, concisely (2-3 sentences), friendly with emojis. If use
               { role: 'user', content: lastUserMsg }
             ],
             model: 'gpt-4o-mini',
-            max_tokens: 500,
+            max_tokens: 800,
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(25000),
         });
-        if (bbRes.ok) {
-          const text = await bbRes.text();
-          if (text && text.length > 5 && !text.includes('<!DOCTYPE')) {
-            console.log('[AI] Blackbox success');
-            return res.json({ reply: text.trim(), provider: 'blackbox' });
-          }
-        }
-      } catch (e: any) {
-        console.log('[AI] Blackbox failed:', e.message);
-      }
+        if (!resp.ok) return null;
+        const text = await resp.text();
+        return text?.trim() || null;
+      });
+      if (reply) return res.json({ reply, provider: 'blackbox' });
 
-      // Provider 4: HuggingFace free inference (Zephyr)
-      try {
-        const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
-        const hfRes = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
+      // Provider 4: Pollinations simple text (compact prompt for URL length)
+      reply = await tryProvider('Pollinations-Text', async () => {
+        // Use compact prompt to avoid URL length issues
+        const compactPrompt = `You are Luminary AI for a clan site. Use [NAV:/path], [DO:fill|field|val], [DO:click|btn], [STEP:N] for actions. Reply ${language === 'ru' ? 'in Russian' : 'in English'}, concise, with emojis.`;
+        const seed = Math.floor(Math.random() * 100000);
+        const resp = await fetch(`https://text.pollinations.ai/${encodeURIComponent(compactPrompt + '\n\nUser: ' + lastUserMsg + '\nAssistant:')}?seed=${seed}&model=openai`, {
+          signal: AbortSignal.timeout(25000),
+        });
+        if (!resp.ok) return null;
+        const text = await resp.text();
+        return text?.trim() || null;
+      });
+      if (reply) return res.json({ reply, provider: 'pollinations-text' });
+
+      // Provider 5: HuggingFace Zephyr (last resort)
+      reply = await tryProvider('HuggingFace', async () => {
+        const resp = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             inputs: `<|system|>\n${systemPrompt}</s>\n<|user|>\n${lastUserMsg}</s>\n<|assistant|>\n`,
-            parameters: { max_new_tokens: 300, temperature: 0.7 },
+            parameters: { max_new_tokens: 400, temperature: 0.7 },
           }),
-          signal: AbortSignal.timeout(25000),
+          signal: AbortSignal.timeout(30000),
         });
-        if (hfRes.ok) {
-          const hfData = await hfRes.json();
-          const text = Array.isArray(hfData) ? hfData[0]?.generated_text : hfData?.generated_text;
-          if (text) {
-            const assistantPart = text.split('<|assistant|>').pop()?.replace('</s>', '').trim();
-            if (assistantPart && assistantPart.length > 3) {
-              console.log('[AI] HuggingFace success');
-              return res.json({ reply: assistantPart, provider: 'huggingface' });
-            }
-          }
-        }
-      } catch (e: any) {
-        console.log('[AI] HuggingFace failed:', e.message);
-      }
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const text = Array.isArray(data) ? data[0]?.generated_text : data?.generated_text;
+        if (!text) return null;
+        return text.split('<|assistant|>').pop()?.replace('</s>', '').trim() || null;
+      });
+      if (reply) return res.json({ reply, provider: 'huggingface' });
 
-      // All providers failed
+      // All providers failed — give a helpful fallback, not just an error
       const fallback = language === 'ru' 
-        ? '😔 Все AI-сервисы временно недоступны. Попробуйте через минуту!'
-        : '😔 All AI services are temporarily unavailable. Try again in a minute!';
+        ? '⚡ AI-сервисы перегружены. Попробуй переформулировать запрос короче или подожди 30 секунд и повтори! Совет: короткие чёткие запросы работают лучше.'
+        : '⚡ AI services are overloaded. Try rephrasing shorter or wait 30s and retry! Tip: short clear requests work best.';
       res.json({ reply: fallback, provider: 'fallback' });
 
     } catch (error: any) {
