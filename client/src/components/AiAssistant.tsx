@@ -1,19 +1,31 @@
 ﻿import { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation } from 'wouter';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { 
-  Bot, Send, Sparkles, Mic, Volume2, X, 
-  ArrowUpRight, Loader2, RotateCcw, Minimize2
+import {
+  Send, Sparkles, Mic, MicOff, X,
+  ArrowUpRight, Loader2, Trash2, Minus
 } from 'lucide-react';
 
-// ======= ROUTE MAP FOR NAV DETECTION =======
-const NAV_ROUTES: Record<string, string> = {
-  '/': 'Dashboard', '/statistics': 'Statistics', '/leaderboard': 'Leaderboard',
-  '/members': 'Members', '/news': 'News', '/shop': 'Shop', '/inventory': 'Inventory',
-  '/music': 'Music', '/forum': 'Forum', '/requests': 'Requests', '/about': 'About',
-  '/achievements': 'Achievements', '/quests': 'Quests', '/trading': 'Trading',
-  '/boosters': 'Boosters', '/daily-rewards': 'Daily Rewards', '/profile': 'Profile',
-  '/mini-games': 'Mini Games', '/clan-wars': 'Clan Wars',
+const NAV_ROUTES: Record<string, { ru: string; en: string }> = {
+  '/': { ru: 'Главная', en: 'Dashboard' },
+  '/statistics': { ru: 'Статистика', en: 'Statistics' },
+  '/leaderboard': { ru: 'Рейтинг', en: 'Leaderboard' },
+  '/members': { ru: 'Участники', en: 'Members' },
+  '/news': { ru: 'Новости', en: 'News' },
+  '/shop': { ru: 'Магазин', en: 'Shop' },
+  '/inventory': { ru: 'Инвентарь', en: 'Inventory' },
+  '/music': { ru: 'Музыка', en: 'Music' },
+  '/forum': { ru: 'Форум', en: 'Forum' },
+  '/requests': { ru: 'Запросы', en: 'Requests' },
+  '/about': { ru: 'О клане', en: 'About' },
+  '/achievements': { ru: 'Достижения', en: 'Achievements' },
+  '/quests': { ru: 'Квесты', en: 'Quests' },
+  '/trading': { ru: 'Торговля', en: 'Trading' },
+  '/boosters': { ru: 'Бустеры', en: 'Boosters' },
+  '/daily-rewards': { ru: 'Награды', en: 'Daily Rewards' },
+  '/profile': { ru: 'Профиль', en: 'Profile' },
+  '/mini-games': { ru: 'Мини-игры', en: 'Mini Games' },
+  '/clan-wars': { ru: 'Войны', en: 'Clan Wars' },
 };
 
 interface ChatMsg {
@@ -30,72 +42,81 @@ export function AiAssistant() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
-  const [firstOpen, setFirstOpen] = useState(true);
+  const [greeted, setGreeted] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recogRef = useRef<any>(null);
   const idRef = useRef(0);
 
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { language } = useLanguage();
 
-  const t = language === 'ru' ? {
-    greeting: 'Привет! 👋 Я **Luminary AI** — ассистент клана. Задай любой вопрос, попроси открыть страницу, или просто поболтаем! 🚀',
-    placeholder: 'Напишите сообщение...',
+  const isRu = language === 'ru';
+  const txt = {
+    greeting: isRu
+      ? 'Привет! Я **Luminary AI** — ассистент сайта клана. Спрашивай что угодно, могу открыть любую страницу, рассказать о разделах или просто поболтать 💬'
+      : "Hi! I'm **Luminary AI** — your clan site assistant. Ask me anything, I can open any page, tell about sections, or just chat 💬",
+    placeholder: isRu ? 'Сообщение...' : 'Message...',
     title: 'Luminary AI',
-    error: 'Ошибка соединения. Попробуйте ещё раз.',
-    voiceNotSupported: 'Браузер не поддерживает голосовой ввод',
-  } : {
-    greeting: "Hey! 👋 I'm **Luminary AI** — your clan assistant. Ask me anything, request a page, or just chat! 🚀",
-    placeholder: 'Type a message...',
-    title: 'Luminary AI',
-    error: 'Connection error. Please try again.',
-    voiceNotSupported: "Your browser doesn't support voice input",
+    error: isRu ? 'Ошибка соединения, попробуй ещё раз' : 'Connection error, try again',
+    voiceUnsupported: isRu ? 'Голосовой ввод не поддерживается' : 'Voice input not supported',
+    listening: isRu ? 'Говорите...' : 'Speak...',
   };
 
+  // Scroll to bottom on new messages
   useEffect(() => {
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     });
-  }, [msgs, loading]);
+  }, [msgs]);
 
+  // Greeting on first open
   useEffect(() => {
-    if (open && firstOpen) {
-      setFirstOpen(false);
-      setMsgs([{ id: ++idRef.current, role: 'assistant', text: t.greeting }]);
+    if (open && !greeted) {
+      setGreeted(true);
+      setMsgs([{ id: ++idRef.current, role: 'assistant', text: txt.greeting }]);
     }
   }, [open]);
 
+  // Focus input
   useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 100);
+    if (open) setTimeout(() => inputRef.current?.focus(), 150);
   }, [open]);
 
-  function parseNav(text: string): { cleanText: string; navPath?: string } {
-    const match = text.match(/\[NAV:(\/[^\]]*)\]/);
-    if (match) return { cleanText: text.replace(match[0], '').trim(), navPath: match[1] };
-    return { cleanText: text };
+  // Parse [NAV:/path] from AI response
+  function parseNav(text: string): { clean: string; nav?: string } {
+    const m = text.match(/\[NAV:(\/[^\]]*)\]/);
+    if (m) return { clean: text.replace(m[0], '').trim(), nav: m[1] };
+    return { clean: text };
   }
 
-  function fmt(text: string): string {
-    return text
+  // Simple markdown
+  function fmt(s: string): string {
+    return s
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/`(.*?)`/g, '<code class="px-1 py-0.5 rounded bg-white/10 text-[11px]">$1</code>')
+      .replace(/`(.*?)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:11px">$1</code>')
       .replace(/\n/g, '<br/>');
   }
 
-  const sendMsg = useCallback(async (text?: string) => {
+  // Get current page display name
+  function pageName(path: string): string {
+    const route = NAV_ROUTES[path];
+    if (route) return route[isRu ? 'ru' : 'en'];
+    return path;
+  }
+
+  // Send message
+  const send = useCallback(async (text?: string) => {
     const content = (text || input).trim();
     if (!content || loading) return;
 
     const userMsg: ChatMsg = { id: ++idRef.current, role: 'user', text: content };
-    const loadingMsg: ChatMsg = { id: ++idRef.current, role: 'assistant', text: '', loading: true };
+    const placeholder: ChatMsg = { id: ++idRef.current, role: 'assistant', text: '', loading: true };
 
-    setMsgs(prev => [...prev, userMsg, loadingMsg]);
+    setMsgs(prev => [...prev, userMsg, placeholder]);
     setInput('');
     setLoading(true);
-
-    // Reset textarea height
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
     try {
@@ -107,154 +128,161 @@ export function AiAssistant() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ messages: history, language }),
+        body: JSON.stringify({
+          messages: history,
+          language,
+          currentPage: pageName(location),
+        }),
       });
 
-      if (!resp.ok) throw new Error('API error');
+      if (!resp.ok) throw new Error('fail');
       const data = await resp.json();
-      const { cleanText, navPath } = parseNav(data.reply || t.error);
+      const { clean, nav } = parseNav(data.reply || txt.error);
+
+      // Auto-navigate if AI returned a [NAV:] tag
+      if (nav && NAV_ROUTES[nav]) {
+        setTimeout(() => setLocation(nav), 600);
+      }
 
       setMsgs(prev => prev.map(m =>
-        m.id === loadingMsg.id ? { ...m, text: cleanText, loading: false, navPath } : m
+        m.id === placeholder.id ? { ...m, text: clean, loading: false, navPath: nav } : m
       ));
     } catch {
       setMsgs(prev => prev.map(m =>
-        m.id === loadingMsg.id ? { ...m, text: t.error, loading: false } : m
+        m.id === placeholder.id ? { ...m, text: txt.error, loading: false } : m
       ));
     }
     setLoading(false);
-  }, [input, loading, msgs, language, t.error]);
+  }, [input, loading, msgs, language, location, txt.error]);
 
-  const handleNav = useCallback((path: string) => setLocation(path), [setLocation]);
-
+  // Voice
   const toggleVoice = useCallback(() => {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      setMsgs(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: t.voiceNotSupported }]);
+    const hasSR = ('SpeechRecognition' in window) || ('webkitSpeechRecognition' in window);
+    if (!hasSR) {
+      setMsgs(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: txt.voiceUnsupported }]);
       return;
     }
-    if (listening) { recogRef.current?.stop(); setListening(false); return; }
+    if (listening) {
+      recogRef.current?.stop();
+      setListening(false);
+      return;
+    }
 
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recog = new SR();
-    recog.lang = language === 'ru' ? 'ru-RU' : 'en-US';
-    recog.interimResults = false;
-    recog.maxAlternatives = 1;
-    recog.onresult = (e: any) => { setListening(false); sendMsg(e.results[0][0].transcript); };
-    recog.onerror = () => setListening(false);
-    recog.onend = () => setListening(false);
-    recogRef.current = recog;
-    recog.start();
-    setListening(true);
-  }, [listening, language, sendMsg, t.voiceNotSupported]);
+    const r = new SR();
+    r.lang = isRu ? 'ru-RU' : 'en-US';
+    r.continuous = false;
+    r.interimResults = false;
+    r.maxAlternatives = 1;
 
-  const clearChat = () => setMsgs([{ id: ++idRef.current, role: 'assistant', text: t.greeting }]);
+    r.onresult = (ev: any) => {
+      const transcript = ev.results[0]?.[0]?.transcript;
+      setListening(false);
+      if (transcript) {
+        setInput(transcript);
+        // Auto-send after short delay so user can see what was recognized
+        setTimeout(() => send(transcript), 300);
+      }
+    };
+    r.onerror = () => setListening(false);
+    r.onend = () => setListening(false);
 
-  const suggestions = language === 'ru'
-    ? ['Открой музыку 🎵', 'Расскажи о квестах', 'Что есть в магазине?', 'Помоги с профилем']
-    : ['Open music 🎵', 'Tell me about quests', "What's in the shop?", 'Help with profile'];
+    recogRef.current = r;
+    try {
+      r.start();
+      setListening(true);
+    } catch {
+      setListening(false);
+    }
+  }, [listening, isRu, send, txt.voiceUnsupported]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+  const clearChat = () => {
+    setMsgs([{ id: ++idRef.current, role: 'assistant', text: txt.greeting }]);
+  };
+
+  const suggestions = isRu
+    ? ['Открой музыку', 'Что такое квесты?', 'Перейди в магазин', 'Расскажи о сайте']
+    : ['Open music', 'What are quests?', 'Go to shop', 'Tell me about the site'];
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
   return (
     <>
       <style>{`
-        @keyframes aiFadeUp { from { opacity:0; transform:translateY(12px) scale(0.97); } to { opacity:1; transform:translateY(0) scale(1); } }
-        @keyframes aiDot { 0%,80%,100% { opacity:.3; transform:scale(.8); } 40% { opacity:1; transform:scale(1.1); } }
-        @keyframes aiPulse { 0% { box-shadow:0 0 0 0 rgba(99,102,241,.5); } 70% { box-shadow:0 0 0 12px rgba(99,102,241,0); } 100% { box-shadow:0 0 0 0 rgba(99,102,241,0); } }
-        @keyframes voiceWave { 0%,100% { height:8px; } 50% { height:20px; } }
-        .ai-fade-up { animation: aiFadeUp .25s ease-out; }
-        .ai-dot { animation: aiDot 1.2s infinite ease-in-out; }
-        .ai-dot:nth-child(2) { animation-delay:.15s; }
-        .ai-dot:nth-child(3) { animation-delay:.3s; }
-        .ai-btn-pulse { animation: aiPulse 2s infinite; }
-        .voice-bar { animation: voiceWave .6s infinite ease-in-out; }
-        .voice-bar:nth-child(2) { animation-delay:.1s; }
-        .voice-bar:nth-child(3) { animation-delay:.2s; }
-        .voice-bar:nth-child(4) { animation-delay:.15s; }
+        @keyframes aiFade{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+        @keyframes aiDots{0%,80%,100%{opacity:.25;transform:scale(.7)}40%{opacity:1;transform:scale(1)}}
+        @keyframes aiBtnGlow{0%{box-shadow:0 0 0 0 rgba(139,92,246,.6)}70%{box-shadow:0 0 0 10px rgba(139,92,246,0)}100%{box-shadow:0 0 0 0 rgba(139,92,246,0)}}
+        .ai-fade{animation:aiFade .2s ease-out}
+        .ai-dots{animation:aiDots 1.2s infinite ease-in-out}
+        .ai-dots:nth-child(2){animation-delay:.12s}
+        .ai-dots:nth-child(3){animation-delay:.24s}
+        .ai-glow{animation:aiBtnGlow 2.5s infinite}
       `}</style>
 
-      {/* FAB Button */}
+      {/* Floating button */}
       <button
-        onClick={() => setOpen(!open)}
-        className={`fixed bottom-5 right-5 z-[200] w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-xl hover:scale-105 active:scale-95 ${
+        onClick={() => setOpen(v => !v)}
+        className={`fixed bottom-5 right-5 z-[200] w-[52px] h-[52px] rounded-[16px] flex items-center justify-center transition-all duration-200 shadow-lg hover:scale-105 active:scale-95 ${
           open
-            ? 'bg-zinc-800/90 backdrop-blur-md border border-white/10 shadow-black/30'
-            : 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-indigo-500/40 ai-btn-pulse'
+            ? 'bg-zinc-800 border border-white/10'
+            : 'bg-gradient-to-br from-violet-500 to-fuchsia-500 ai-glow'
         }`}
       >
-        {open ? (
-          <X className="w-5 h-5 text-white/80" />
-        ) : (
-          <>
-            <Sparkles className="w-6 h-6 text-white" />
-            <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full border-2 border-zinc-900" />
-          </>
-        )}
+        {open
+          ? <X className="w-5 h-5 text-white/70" />
+          : <Sparkles className="w-5 h-5 text-white" />
+        }
       </button>
 
-      {/* Chat Panel */}
+      {/* Panel */}
       {open && (
-        <div className="fixed bottom-[88px] right-5 z-[200] w-[360px] max-w-[calc(100vw-40px)] ai-fade-up">
+        <div className="fixed bottom-[80px] right-5 z-[200] w-[340px] max-w-[calc(100vw-40px)] ai-fade">
           <div
-            className="rounded-3xl overflow-hidden flex flex-col border border-white/[0.08] shadow-2xl shadow-black/50"
+            className="rounded-[20px] overflow-hidden flex flex-col border border-white/[0.06] shadow-2xl"
             style={{
-              maxHeight: 'min(580px, calc(100vh - 120px))',
-              background: 'linear-gradient(180deg, rgba(24,24,30,0.98) 0%, rgba(16,16,22,0.99) 100%)',
-              backdropFilter: 'blur(40px)',
+              maxHeight: 'min(560px, calc(100vh - 110px))',
+              background: 'linear-gradient(to bottom, rgba(20,20,28,.97), rgba(14,14,20,.98))',
+              backdropFilter: 'blur(30px)',
             }}
           >
             {/* Header */}
-            <div className="px-4 py-3.5 flex items-center gap-3 border-b border-white/[0.06]">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/20">
-                <Bot className="w-[18px] h-[18px] text-white" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold text-white/90">{t.title}</div>
-                <div className="text-[10px] text-white/30 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
-                  Online
-                </div>
-              </div>
-              <button onClick={clearChat} className="w-7 h-7 rounded-lg flex items-center justify-center text-white/25 hover:text-white/60 hover:bg-white/[0.05] transition-colors" title="Clear">
-                <RotateCcw className="w-3.5 h-3.5" />
+            <div className="h-[52px] px-4 flex items-center gap-2.5 border-b border-white/[0.05] shrink-0">
+              <div className="text-[13px] font-semibold text-white/90 flex-1">{txt.title}</div>
+              <button onClick={clearChat} className="w-6 h-6 flex items-center justify-center text-white/20 hover:text-white/50 transition-colors">
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
-              <button onClick={() => setOpen(false)} className="w-7 h-7 rounded-lg flex items-center justify-center text-white/25 hover:text-white/60 hover:bg-white/[0.05] transition-colors">
-                <Minimize2 className="w-3.5 h-3.5" />
+              <button onClick={() => setOpen(false)} className="w-6 h-6 flex items-center justify-center text-white/20 hover:text-white/50 transition-colors">
+                <Minus className="w-3.5 h-3.5" />
               </button>
             </div>
 
             {/* Messages */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3" style={{ minHeight: '180px', maxHeight: '380px' }}>
-              {msgs.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} ai-fade-up`}>
-                  {msg.role === 'assistant' && (
-                    <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center mr-2 mt-0.5 shrink-0">
-                      <Sparkles className="w-3 h-3 text-indigo-400" />
-                    </div>
-                  )}
-                  <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-[1.55] ${
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5" style={{ minHeight: '160px', maxHeight: '370px' }}>
+              {msgs.map(msg => (
+                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} ai-fade`}>
+                  <div className={`max-w-[82%] rounded-[14px] px-3 py-2 text-[13px] leading-[1.5] ${
                     msg.role === 'user'
-                      ? 'bg-indigo-500/80 text-white rounded-br-lg'
-                      : 'bg-white/[0.04] text-white/85 rounded-bl-lg'
+                      ? 'bg-violet-500/70 text-white'
+                      : 'bg-white/[0.05] text-white/80'
                   }`}>
                     {msg.loading ? (
-                      <div className="flex items-center gap-1 py-1 px-1">
-                        <div className="w-[6px] h-[6px] rounded-full bg-indigo-400 ai-dot" />
-                        <div className="w-[6px] h-[6px] rounded-full bg-indigo-400 ai-dot" />
-                        <div className="w-[6px] h-[6px] rounded-full bg-indigo-400 ai-dot" />
+                      <div className="flex gap-1 py-0.5 px-0.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-violet-400 ai-dots" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-violet-400 ai-dots" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-violet-400 ai-dots" />
                       </div>
                     ) : (
                       <>
                         <div dangerouslySetInnerHTML={{ __html: fmt(msg.text) }} />
                         {msg.navPath && NAV_ROUTES[msg.navPath] && (
                           <button
-                            onClick={() => handleNav(msg.navPath!)}
-                            className="mt-2 flex items-center gap-1.5 text-[11px] text-indigo-300 hover:text-indigo-200 transition-colors bg-indigo-500/10 rounded-lg px-2.5 py-1.5"
+                            onClick={() => setLocation(msg.navPath!)}
+                            className="mt-1.5 flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 transition-colors"
                           >
                             <ArrowUpRight className="w-3 h-3" />
-                            {language === 'ru' ? 'Перейти' : 'Go'} → {NAV_ROUTES[msg.navPath]}
+                            {pageName(msg.navPath)}
                           </button>
                         )}
                       </>
@@ -266,9 +294,9 @@ export function AiAssistant() {
 
             {/* Suggestions */}
             {msgs.length <= 2 && !loading && (
-              <div className="px-4 pb-2 flex flex-wrap gap-1.5">
-                {suggestions.map((s) => (
-                  <button key={s} onClick={() => sendMsg(s)} className="px-3 py-1.5 rounded-xl text-[11px] bg-white/[0.04] hover:bg-white/[0.08] text-white/50 hover:text-white/80 border border-white/[0.04] transition-all">
+              <div className="px-3.5 pb-2 flex flex-wrap gap-1">
+                {suggestions.map(s => (
+                  <button key={s} onClick={() => send(s)} className="px-2.5 py-1 rounded-[10px] text-[11px] bg-white/[0.04] text-white/40 hover:text-white/70 hover:bg-white/[0.07] transition-all">
                     {s}
                   </button>
                 ))}
@@ -276,52 +304,53 @@ export function AiAssistant() {
             )}
 
             {/* Input */}
-            <div className="p-3 border-t border-white/[0.06]">
-              {listening && (
-                <div className="flex items-center justify-center gap-1 mb-2 py-2">
-                  {[1,2,3,4].map(i => (
-                    <div key={i} className="w-[3px] rounded-full bg-indigo-400 voice-bar" style={{ height: '12px' }} />
-                  ))}
-                  <span className="text-[11px] text-indigo-300 ml-2">
-                    {language === 'ru' ? 'Слушаю...' : 'Listening...'}
-                  </span>
-                </div>
-              )}
-              <div className="flex items-end gap-2">
+            <div className="px-3 pb-3 pt-2 border-t border-white/[0.05] shrink-0">
+              <div className="flex items-end gap-1.5">
                 <button
                   onClick={toggleVoice}
-                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+                  className={`w-8 h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all ${
                     listening
-                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                      : 'bg-white/[0.04] text-white/30 hover:text-white/60 hover:bg-white/[0.08] border border-transparent'
+                      ? 'bg-red-500/25 text-red-400'
+                      : 'text-white/25 hover:text-white/50 hover:bg-white/[0.05]'
                   }`}
+                  title={listening ? (isRu ? 'Остановить' : 'Stop') : (isRu ? 'Голосовой ввод' : 'Voice input')}
                 >
-                  {listening ? <Volume2 className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  {listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => {
-                    setInput(e.target.value);
-                    e.target.style.height = 'auto';
-                    e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px';
-                  }}
-                  onKeyDown={handleKeyDown}
-                  placeholder={t.placeholder}
-                  rows={1}
-                  className="flex-1 bg-white/[0.04] border border-white/[0.06] rounded-xl text-[13px] text-white placeholder:text-white/20 px-3 py-2 resize-none outline-none focus:border-indigo-500/30 transition-colors"
-                  style={{ maxHeight: '100px', minHeight: '36px' }}
-                />
+
+                <div className="flex-1 relative">
+                  {listening && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/[0.03] rounded-[10px] border border-red-500/20 z-10">
+                      <span className="text-[11px] text-red-300 animate-pulse">{txt.listening}</span>
+                    </div>
+                  )}
+                  <textarea
+                    ref={inputRef}
+                    value={input}
+                    onChange={e => {
+                      setInput(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = Math.min(e.target.scrollHeight, 80) + 'px';
+                    }}
+                    onKeyDown={onKeyDown}
+                    placeholder={txt.placeholder}
+                    rows={1}
+                    disabled={listening}
+                    className="w-full bg-white/[0.04] border border-white/[0.06] rounded-[10px] text-[13px] text-white placeholder:text-white/15 px-3 py-[7px] resize-none outline-none focus:border-violet-500/30 transition-colors disabled:opacity-30"
+                    style={{ maxHeight: '80px', minHeight: '34px' }}
+                  />
+                </div>
+
                 <button
-                  onClick={() => sendMsg()}
+                  onClick={() => send()}
                   disabled={!input.trim() || loading}
-                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+                  className={`w-8 h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all ${
                     input.trim() && !loading
-                      ? 'bg-indigo-500 text-white hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
-                      : 'bg-white/[0.03] text-white/15 cursor-not-allowed'
+                      ? 'bg-violet-500 text-white hover:bg-violet-400'
+                      : 'bg-white/[0.03] text-white/10'
                   }`}
                 >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                 </button>
               </div>
             </div>

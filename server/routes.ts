@@ -159,23 +159,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // === AI Chat Proxy (free APIs, no key needed) ===
   app.post("/api/ai-chat", async (req, res) => {
     try {
-      const { messages, language } = req.body;
+      const { messages, language, currentPage } = req.body;
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: 'messages array required' });
       }
 
+      const pageContext = currentPage ? `Пользователь сейчас на странице: ${currentPage}.` : '';
       const systemPrompt = language === 'ru' 
-        ? `Ты — Luminary AI, умный ассистент клан-сайта Luminary. Отвечай по-русски, кратко и помогай пользователю. Ты знаешь о сайте всё: есть страницы — главная (/), статистика (/statistics), рейтинг (/leaderboard), участники (/members), магазин (/shop), инвентарь (/inventory), музыка (/music), форум (/forum), запросы (/requests), о клане (/about), достижения (/achievements), квесты (/quests), торговля (/trading), бустеры (/boosters), ежедневные награды (/daily-rewards), профиль (/profile), мини-игры (/mini-games), клановые войны (/clan-wars). На сайте можно слушать музыку, торговать предметами, выполнять квесты за LumiCoin, играть в мини-игры. Если пользователь хочет перейти куда-то, ответь СТРОГО в формате: [NAV:/path] в конце сообщения. Например: "Открываю музыку! [NAV:/music]". Отвечай дружелюбно, с эмодзи. Не упоминай что ты ИИ или модель — ты просто Luminary AI.`
-        : `You are Luminary AI, a smart assistant for the Luminary clan website. Reply in English, be concise and helpful. Site pages: dashboard (/), statistics (/statistics), leaderboard (/leaderboard), members (/members), shop (/shop), inventory (/inventory), music (/music), forum (/forum), requests (/requests), about (/about), achievements (/achievements), quests (/quests), trading (/trading), boosters (/boosters), daily rewards (/daily-rewards), profile (/profile), mini games (/mini-games), clan wars (/clan-wars). Users can listen to music, trade items, complete quests for LumiCoin, play mini-games. If user wants to navigate, end your message with [NAV:/path]. Example: "Opening music! [NAV:/music]". Be friendly, use emojis. Don't mention you're an AI model — you are Luminary AI.`;
+        ? `Ты — Luminary AI, умный ассистент клан-сайта Luminary. ${pageContext} Отвечай по-русски, кратко (2-4 предложения) и помогай пользователю. Ты знаешь о сайте: страницы — главная (/), статистика (/statistics), рейтинг (/leaderboard), участники (/members), магазин (/shop), инвентарь (/inventory), музыка (/music), форум (/forum), запросы (/requests), о клане (/about), достижения (/achievements), квесты (/quests), торговля (/trading), бустеры (/boosters), ежедневные награды (/daily-rewards), профиль (/profile), мини-игры (/mini-games), клановые войны (/clan-wars). Функции сайта: музыка (YouTube/SoundCloud), торговля предметами, квесты за LumiCoin, мини-игры, видео-платформа. Если пользователь хочет перейти куда-то, ОБЯЗАТЕЛЬНО добавь в конце ответа тег [NAV:/путь]. Пример: "Открываю музыку! 🎵 [NAV:/music]". Если просят навигацию — всегда ставь тег. Отвечай дружелюбно с эмодзи. Ты Luminary AI, не упоминай модели.`
+        : `You are Luminary AI, a smart assistant for the Luminary clan website. ${pageContext} Reply in English, concisely (2-4 sentences). Site pages: dashboard (/), statistics (/statistics), leaderboard (/leaderboard), members (/members), shop (/shop), inventory (/inventory), music (/music), forum (/forum), requests (/requests), about (/about), achievements (/achievements), quests (/quests), trading (/trading), boosters (/boosters), daily rewards (/daily-rewards), profile (/profile), mini games (/mini-games), clan wars (/clan-wars). Features: music (YouTube/SoundCloud), item trading, quests for LumiCoin, mini-games, video platform. If user wants to navigate, ALWAYS add [NAV:/path] at end. Example: "Opening music! 🎵 [NAV:/music]". Be friendly with emojis. You are Luminary AI.`;
 
       const chatMessages = [
         { role: 'system', content: systemPrompt },
-        ...messages.slice(-10), // last 10 messages for context
+        ...messages.slice(-10),
       ];
 
-      // Provider 1: Pollinations.ai (free, no key)
+      // Provider 1: Pollinations.ai OpenAI-compatible endpoint
       try {
-        const pollRes = await fetch('https://text.pollinations.ai/openai', {
+        const pollRes = await fetch('https://text.pollinations.ai/openai/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -184,29 +185,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
             max_tokens: 500,
             temperature: 0.7,
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(20000),
         });
         if (pollRes.ok) {
           const data = await pollRes.json();
           const content = data.choices?.[0]?.message?.content;
-          if (content) {
+          if (content && content.length > 3) {
+            console.log('[AI] Pollinations OpenAI success');
             return res.json({ reply: content, provider: 'pollinations' });
           }
         }
+        console.log('[AI] Pollinations OpenAI status:', pollRes.status);
       } catch (e: any) {
-        console.log('[AI] Pollinations failed:', e.message);
+        console.log('[AI] Pollinations OpenAI failed:', e.message);
       }
 
-      // Provider 2: Pollinations direct text endpoint
+      // Provider 2: Pollinations simple text generation
       try {
         const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
-        const prompt = encodeURIComponent(`${systemPrompt}\n\nUser: ${lastUserMsg}\nAssistant:`);
-        const textRes = await fetch(`https://text.pollinations.ai/${prompt}`, {
-          signal: AbortSignal.timeout(15000),
+        const seed = Math.floor(Math.random() * 100000);
+        const textUrl = `https://text.pollinations.ai/${encodeURIComponent(systemPrompt + '\n\nUser: ' + lastUserMsg + '\nAssistant:')}?seed=${seed}&model=openai`;
+        const textRes = await fetch(textUrl, {
+          signal: AbortSignal.timeout(20000),
         });
         if (textRes.ok) {
           const text = await textRes.text();
-          if (text && text.length > 5) {
+          if (text && text.length > 5 && !text.includes('<!DOCTYPE')) {
+            console.log('[AI] Pollinations text success');
             return res.json({ reply: text.trim(), provider: 'pollinations-text' });
           }
         }
@@ -214,7 +219,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('[AI] Pollinations text failed:', e.message);
       }
 
-      // Provider 3: HuggingFace free inference (Zephyr)
+      // Provider 3: Blackbox AI (free)
+      try {
+        const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
+        const bbRes = await fetch('https://api.blackbox.ai/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: lastUserMsg }
+            ],
+            model: 'gpt-4o-mini',
+            max_tokens: 500,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (bbRes.ok) {
+          const text = await bbRes.text();
+          if (text && text.length > 5 && !text.includes('<!DOCTYPE')) {
+            console.log('[AI] Blackbox success');
+            return res.json({ reply: text.trim(), provider: 'blackbox' });
+          }
+        }
+      } catch (e: any) {
+        console.log('[AI] Blackbox failed:', e.message);
+      }
+
+      // Provider 4: HuggingFace free inference (Zephyr)
       try {
         const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
         const hfRes = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
@@ -224,15 +256,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             inputs: `<|system|>\n${systemPrompt}</s>\n<|user|>\n${lastUserMsg}</s>\n<|assistant|>\n`,
             parameters: { max_new_tokens: 300, temperature: 0.7 },
           }),
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.timeout(25000),
         });
         if (hfRes.ok) {
           const hfData = await hfRes.json();
           const text = Array.isArray(hfData) ? hfData[0]?.generated_text : hfData?.generated_text;
           if (text) {
-            // Extract only the assistant's response
             const assistantPart = text.split('<|assistant|>').pop()?.replace('</s>', '').trim();
-            if (assistantPart) {
+            if (assistantPart && assistantPart.length > 3) {
+              console.log('[AI] HuggingFace success');
               return res.json({ reply: assistantPart, provider: 'huggingface' });
             }
           }
