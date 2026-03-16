@@ -139,7 +139,7 @@ export default function TradingPage() {
               <p className="text-muted-foreground">{t('trading.description')}</p>
             </div>
           </div>
-          <Button onClick={() => setShowCreateTrade(!showCreateTrade)} className="gap-2">
+          <Button onClick={() => setShowCreateTrade(!showCreateTrade)} className="gap-2" data-ai="new-offer">
             <Plus className="h-4 w-4" /> {t('trading.newOffer')}
           </Button>
         </div>
@@ -155,6 +155,7 @@ export default function TradingPage() {
                   onChange={e => setTargetUser(e.target.value)}
                   placeholder={t('trading.targetPlaceholder')}
                   className="glass glass-border"
+                  data-ai="target-user"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -166,6 +167,7 @@ export default function TradingPage() {
                     value={offerCoins}
                     onChange={e => setOfferCoins(Number(e.target.value))}
                     className="glass glass-border"
+                    data-ai="offer-coins"
                   />
                 </div>
                 <div>
@@ -176,6 +178,7 @@ export default function TradingPage() {
                     value={requestCoins}
                     onChange={e => setRequestCoins(Number(e.target.value))}
                     className="glass glass-border"
+                    data-ai="request-coins"
                   />
                 </div>
               </div>
@@ -186,6 +189,7 @@ export default function TradingPage() {
                   onChange={e => setMessage(e.target.value)}
                   placeholder={t('trading.messagePlaceholder')}
                   className="glass glass-border"
+                  data-ai="trade-message"
                 />
               </div>
               <div className="flex gap-2 justify-end">
@@ -202,6 +206,7 @@ export default function TradingPage() {
                   })}
                   disabled={!targetUser.trim() || (offerCoins === 0 && requestCoins === 0) || createTradeMutation.isPending}
                   className="bg-emerald-600 hover:bg-emerald-700 gap-2"
+                  data-ai="send-trade"
                 >
                   {createTradeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   {t('trading.send')}

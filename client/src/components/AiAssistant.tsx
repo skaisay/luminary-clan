@@ -31,6 +31,14 @@ const NAV_ROUTES: Record<string, { ru: string; en: string }> = {
   '/roblox-tracker': { ru: 'Roblox Трекер', en: 'Roblox Tracker' },
 };
 
+// Action step that AI can return
+interface AiAction {
+  do: 'fill' | 'click' | 'wait' | 'type';
+  ai: string;   // data-ai attribute value OR data-testid
+  val?: string;  // value for fill/type
+  ms?: number;   // ms for wait
+}
+
 interface ChatMsg {
   id: number;
   role: 'user' | 'assistant';
@@ -39,15 +47,137 @@ interface ChatMsg {
   loading?: boolean;
 }
 
+// ==================== ACTION EXECUTOR ====================
+function findElement(aiId: string): HTMLElement | null {
+  // Try data-ai first, then data-testid, then id
+  return (
+    document.querySelector(`[data-ai="${aiId}"]`) ||
+    document.querySelector(`[data-testid="${aiId}"]`) ||
+    document.getElementById(aiId)
+  ) as HTMLElement | null;
+}
+
+function fillInput(el: HTMLElement, value: string): Promise<void> {
+  return new Promise(resolve => {
+    const input = el as HTMLInputElement | HTMLTextAreaElement;
+    input.focus();
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    let i = 0;
+    const interval = setInterval(() => {
+      if (i >= value.length) {
+        clearInterval(interval);
+        // Trigger final events
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        resolve();
+        return;
+      }
+      const current = value.substring(0, i + 1);
+      // Use native setter for React controlled inputs
+      const isInput = input instanceof HTMLInputElement;
+      const isTextArea = input instanceof HTMLTextAreaElement;
+      const proto = isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) {
+        setter.call(input, current);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      i++;
+    }, 45);
+  });
+}
+
+function clickElement(el: HTMLElement): void {
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Small delay after scroll, then click
+  setTimeout(() => {
+    // Remove disabled attribute temporarily if present (for React state sync)
+    el.click();
+    // Also trigger mousedown/mouseup for components that listen to those
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  }, 150);
+}
+
+async function executeActions(actions: AiAction[]): Promise<void> {
+  for (const action of actions) {
+    // Wait action
+    if (action.do === 'wait') {
+      await new Promise(r => setTimeout(r, action.ms || 500));
+      continue;
+    }
+
+    // Find target element (retry a few times for elements that appear after interaction)
+    let el: HTMLElement | null = null;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      el = findElement(action.ai);
+      if (el) break;
+      await new Promise(r => setTimeout(r, 400));
+    }
+
+    if (!el) {
+      console.warn(`[AI Action] Element not found: ${action.ai}`);
+      continue;
+    }
+
+    switch (action.do) {
+      case 'fill':
+      case 'type':
+        await fillInput(el, action.val || '');
+        await new Promise(r => setTimeout(r, 200));
+        break;
+      case 'click':
+        clickElement(el);
+        await new Promise(r => setTimeout(r, 600));
+        break;
+    }
+  }
+}
+
+// Parse [DO:action|target|value] tags from AI response
+function parseActions(text: string): { clean: string; nav?: string; actions: AiAction[] } {
+  let clean = text;
+  let nav: string | undefined;
+  const actions: AiAction[] = [];
+
+  // Parse [NAV:/path]
+  const navMatch = clean.match(/\[NAV:(\/[^\]]*)\]/);
+  if (navMatch) { nav = navMatch[1]; clean = clean.replace(navMatch[0], '').trim(); }
+
+  // Parse [DO:action|target|value] tags
+  const doRegex = /\[DO:(\w+)\|([^\]|]+)(?:\|([^\]]*))?\]/g;
+  let m;
+  while ((m = doRegex.exec(text)) !== null) {
+    const doType = m[1] as AiAction['do'];
+    const ai = m[2];
+    const val = m[3];
+    if (['fill', 'click', 'wait', 'type'].includes(doType)) {
+      actions.push({ do: doType, ai, val, ms: doType === 'wait' ? parseInt(val || '500') : undefined });
+    }
+    clean = clean.replace(m[0], '');
+  }
+
+  // Backwards compat: parse [TYPE:text] (single input fill)
+  const typeMatch = clean.match(/\[TYPE:([^\]]*)\]/);
+  if (typeMatch && actions.length === 0) {
+    actions.push({ do: 'type', ai: '_auto_', val: typeMatch[1] });
+    clean = clean.replace(typeMatch[0], '');
+  }
+
+  return { clean: clean.trim(), nav, actions };
+}
+
+// ==================== COMPONENT ====================
 export function AiAssistant() {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
+  const [voiceText, setVoiceText] = useState('');
   const [greeted, setGreeted] = useState(false);
   const [navAction, setNavAction] = useState<{ path: string; label: string } | null>(null);
-  const [pendingType, setPendingType] = useState<string | null>(null);
+  const [pendingActions, setPendingActions] = useState<AiAction[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recogRef = useRef<any>(null);
@@ -59,23 +189,21 @@ export function AiAssistant() {
   const isRu = language === 'ru';
   const txt = {
     greeting: isRu
-      ? 'Привет! Я **Luminary AI** — ассистент сайта клана. Спрашивай что угодно, могу открыть любую страницу, рассказать о разделах или просто поболтать 💬'
-      : "Hi! I'm **Luminary AI** — your clan site assistant. Ask me anything, I can open any page, tell about sections, or just chat 💬",
+      ? 'Привет! Я **Luminary AI** — ассистент клана. Могу открыть страницы, заполнить формы, искать игроков, отправлять торговые предложения и многое другое. Просто скажи что нужно! 🤖'
+      : "Hi! I'm **Luminary AI** — clan assistant. I can open pages, fill forms, search players, send trade offers, and more. Just tell me what you need! 🤖",
     placeholder: isRu ? 'Сообщение...' : 'Message...',
     title: 'Luminary AI',
     error: isRu ? 'Ошибка соединения, попробуй ещё раз' : 'Connection error, try again',
-    voiceUnsupported: isRu ? 'Голосовой ввод не поддерживается' : 'Voice input not supported',
+    voiceUnsupported: isRu ? 'Голосовой ввод не поддерживается в этом браузере' : 'Voice input not supported in this browser',
     listening: isRu ? 'Говорите...' : 'Speak...',
   };
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     });
   }, [msgs]);
 
-  // Greeting on first open
   useEffect(() => {
     if (open && !greeted) {
       setGreeted(true);
@@ -83,27 +211,10 @@ export function AiAssistant() {
     }
   }, [open]);
 
-  // Focus input
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 150);
   }, [open]);
 
-  // Parse [NAV:/path] and [TYPE:text] from AI response
-  function parseNav(text: string): { clean: string; nav?: string; typeText?: string } {
-    let clean = text;
-    let nav: string | undefined;
-    let typeText: string | undefined;
-
-    const navMatch = clean.match(/\[NAV:(\/[^\]]*)\]/);
-    if (navMatch) { nav = navMatch[1]; clean = clean.replace(navMatch[0], '').trim(); }
-
-    const typeMatch = clean.match(/\[TYPE:([^\]]*)\]/);
-    if (typeMatch) { typeText = typeMatch[1]; clean = clean.replace(typeMatch[0], '').trim(); }
-
-    return { clean, nav, typeText };
-  }
-
-  // Simple markdown
   function fmt(s: string): string {
     return s
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -118,50 +229,41 @@ export function AiAssistant() {
     return path;
   }
 
-  // Type text into an input on the page after navigation
-  function typeIntoInput(text: string) {
+  // Auto-find first input on current page and type into it (fallback for [TYPE:])
+  function autoTypeIntoInput(text: string) {
     setTimeout(() => {
       const el = document.querySelector(
-        'input[type="search"], input[type="text"], input[placeholder], input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="password"])'
+        '[data-ai] input, [data-ai] textarea, input[data-ai], textarea[data-ai], input[type="search"], input[type="text"]:not([type="hidden"]):not(.ai-chat-input)'
       ) as HTMLInputElement | null;
-
       if (!el) return;
-      el.focus();
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-      let i = 0;
-      const interval = setInterval(() => {
-        if (i >= text.length) {
-          clearInterval(interval);
-          // Submit via Enter key
-          setTimeout(() => {
-            el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-            const form = el.closest('form');
-            if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-          }, 200);
-          return;
-        }
-        const current = text.substring(0, i + 1);
-        // Use native setter for React controlled inputs
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        if (setter) {
-          setter.call(el, current);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        i++;
-      }, 55);
-    }, 900); // Wait for new page to render
+      fillInput(el, text).then(() => {
+        setTimeout(() => {
+          el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+          const form = el.closest('form');
+          if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        }, 200);
+      });
+    }, 900);
   }
 
-  // Handle navigation overlay completion
+  // After navigation overlay completes
   const handleNavComplete = useCallback(() => {
-    if (pendingType) {
-      typeIntoInput(pendingType);
-      setPendingType(null);
+    if (pendingActions.length > 0) {
+      const actions = [...pendingActions];
+      setPendingActions([]);
+      // Execute actions after page renders
+      setTimeout(() => {
+        // Handle _auto_ type (backwards compat)
+        const autoType = actions.find(a => a.ai === '_auto_');
+        if (autoType) {
+          autoTypeIntoInput(autoType.val || '');
+        } else {
+          executeActions(actions);
+        }
+      }, 800);
     }
     setNavAction(null);
-  }, [pendingType]);
+  }, [pendingActions]);
 
   // Send message
   const send = useCallback(async (text?: string) => {
@@ -173,6 +275,7 @@ export function AiAssistant() {
 
     setMsgs(prev => [...prev, userMsg, placeholder]);
     setInput('');
+    setVoiceText('');
     setLoading(true);
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
@@ -194,12 +297,15 @@ export function AiAssistant() {
 
       if (!resp.ok) throw new Error('fail');
       const data = await resp.json();
-      const { clean, nav, typeText } = parseNav(data.reply || txt.error);
+      const { clean, nav, actions } = parseActions(data.reply || txt.error);
 
-      // Trigger visual navigation overlay instead of direct setLocation
+      // Navigation with visual overlay
       if (nav && NAV_ROUTES[nav]) {
-        if (typeText) setPendingType(typeText);
+        if (actions.length > 0) setPendingActions(actions);
         setNavAction({ path: nav, label: pageName(nav) });
+      } else if (actions.length > 0) {
+        // Actions on current page without navigation
+        setTimeout(() => executeActions(actions), 300);
       }
 
       setMsgs(prev => prev.map(m =>
@@ -213,53 +319,92 @@ export function AiAssistant() {
     setLoading(false);
   }, [input, loading, msgs, language, location, txt.error]);
 
-  // Voice recognition
+  // ==================== VOICE ====================
   const toggleVoice = useCallback(() => {
-    const hasSR = ('SpeechRecognition' in window) || ('webkitSpeechRecognition' in window);
-    if (!hasSR) {
-      setMsgs(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: txt.voiceUnsupported }]);
-      return;
-    }
     if (listening) {
       recogRef.current?.stop();
       setListening(false);
+      // If we have interim text, send it
+      if (voiceText.trim()) {
+        setTimeout(() => send(voiceText.trim()), 100);
+      }
       return;
     }
 
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      setMsgs(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: txt.voiceUnsupported }]);
+      return;
+    }
+
     const r = new SR();
     r.lang = isRu ? 'ru-RU' : 'en-US';
-    r.continuous = false;
-    r.interimResults = false;
+    r.continuous = true;
+    r.interimResults = true;
     r.maxAlternatives = 1;
 
     r.onresult = (ev: any) => {
-      const transcript = ev.results[0]?.[0]?.transcript;
-      setListening(false);
-      if (transcript) {
-        setInput(transcript);
-        setTimeout(() => send(transcript), 300);
+      let interim = '';
+      let final = '';
+      for (let i = 0; i < ev.results.length; i++) {
+        const result = ev.results[i];
+        if (result.isFinal) {
+          final += result[0].transcript;
+        } else {
+          interim += result[0].transcript;
+        }
+      }
+      const combined = (final + interim).trim();
+      setVoiceText(combined);
+      setInput(combined);
+
+      // If we got final result, auto-send after brief pause
+      if (final.trim()) {
+        recogRef.current?.stop();
+        setListening(false);
+        setTimeout(() => send(final.trim()), 400);
       }
     };
-    r.onerror = () => setListening(false);
-    r.onend = () => setListening(false);
+
+    r.onerror = (e: any) => {
+      console.log('[Voice] Error:', e.error);
+      setListening(false);
+      if (e.error === 'not-allowed') {
+        setMsgs(prev => [...prev, {
+          id: ++idRef.current, role: 'assistant',
+          text: isRu ? '⚠️ Доступ к микрофону заблокирован. Разреши микрофон в настройках браузера (значок 🔒 в адресной строке).' : '⚠️ Microphone access blocked. Allow microphone in browser settings (🔒 icon in address bar).',
+        }]);
+      }
+    };
+
+    r.onend = () => {
+      // If stopped without final result but we have interim text, send it
+      if (listening && voiceText.trim()) {
+        setListening(false);
+        setTimeout(() => send(voiceText.trim()), 200);
+      } else {
+        setListening(false);
+      }
+    };
 
     recogRef.current = r;
+    setVoiceText('');
     try {
       r.start();
       setListening(true);
-    } catch {
+    } catch (e) {
+      console.log('[Voice] Start error:', e);
       setListening(false);
     }
-  }, [listening, isRu, send, txt.voiceUnsupported]);
+  }, [listening, isRu, send, txt.voiceUnsupported, voiceText]);
 
   const clearChat = () => {
     setMsgs([{ id: ++idRef.current, role: 'assistant', text: txt.greeting }]);
   };
 
   const suggestions = isRu
-    ? ['Открой музыку', 'Что такое квесты?', 'Что в магазине?', 'Расскажи о сайте']
-    : ['Open music', 'What are quests?', "What's in the shop?", 'Tell me about the site'];
+    ? ['Открой музыку', 'Что в магазине?', 'Найди игрока Roblox', 'Создай торговое предложение']
+    : ['Open music', "What's in the shop?", 'Find Roblox player', 'Create trade offer'];
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -271,14 +416,15 @@ export function AiAssistant() {
         @keyframes aiFade{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
         @keyframes aiDots{0%,80%,100%{opacity:.25;transform:scale(.7)}40%{opacity:1;transform:scale(1)}}
         @keyframes aiBtnGlow{0%{box-shadow:0 0 0 0 rgba(139,92,246,.6)}70%{box-shadow:0 0 0 10px rgba(139,92,246,0)}100%{box-shadow:0 0 0 0 rgba(139,92,246,0)}}
+        @keyframes aiPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.15);opacity:.7}}
         .ai-fade{animation:aiFade .2s ease-out}
         .ai-dots{animation:aiDots 1.2s infinite ease-in-out}
         .ai-dots:nth-child(2){animation-delay:.12s}
         .ai-dots:nth-child(3){animation-delay:.24s}
         .ai-glow{animation:aiBtnGlow 2.5s infinite}
+        .ai-mic-pulse{animation:aiPulse 1.2s ease-in-out infinite}
       `}</style>
 
-      {/* Navigation overlay with visual cursor animation */}
       <AiNavigationOverlay
         action={navAction}
         onNavigate={(path) => setLocation(path)}
@@ -294,10 +440,7 @@ export function AiAssistant() {
             : 'bg-gradient-to-br from-violet-500 to-fuchsia-500 ai-glow'
         }`}
       >
-        {open
-          ? <X className="w-5 h-5 text-white/70" />
-          : <Sparkles className="w-5 h-5 text-white" />
-        }
+        {open ? <X className="w-5 h-5 text-white/70" /> : <Sparkles className="w-5 h-5 text-white" />}
       </button>
 
       {/* Panel */}
@@ -367,25 +510,25 @@ export function AiAssistant() {
               </div>
             )}
 
-            {/* Input */}
+            {/* Input bar — items-center for vertical alignment */}
             <div className="px-3 pb-3 pt-2 border-t border-white/[0.05] shrink-0">
-              <div className="flex items-end gap-1.5">
+              <div className="flex items-center gap-1.5">
                 <button
                   onClick={toggleVoice}
                   className={`w-8 h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-all ${
                     listening
-                      ? 'bg-red-500/25 text-red-400'
+                      ? 'bg-red-500/25 text-red-400 ai-mic-pulse'
                       : 'text-white/25 hover:text-white/50 hover:bg-white/[0.05]'
                   }`}
-                  title={listening ? (isRu ? 'Остановить' : 'Stop') : (isRu ? 'Голосовой ввод' : 'Voice input')}
+                  title={listening ? (isRu ? 'Остановить запись' : 'Stop recording') : (isRu ? 'Голосовой ввод' : 'Voice input')}
                 >
                   {listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
 
                 <div className="flex-1 relative">
                   {listening && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-white/[0.03] rounded-[10px] border border-red-500/20 z-10">
-                      <span className="text-[11px] text-red-300 animate-pulse">{txt.listening}</span>
+                    <div className="absolute inset-0 flex items-center justify-center bg-red-500/[0.06] rounded-[10px] border border-red-500/20 z-10 pointer-events-none">
+                      <span className="text-[11px] text-red-300 animate-pulse">{voiceText || txt.listening}</span>
                     </div>
                   )}
                   <textarea
@@ -400,7 +543,7 @@ export function AiAssistant() {
                     placeholder={txt.placeholder}
                     rows={1}
                     disabled={listening}
-                    className="w-full bg-white/[0.04] border border-white/[0.06] rounded-[10px] text-[13px] text-white placeholder:text-white/15 px-3 py-[7px] resize-none outline-none focus:border-violet-500/30 transition-colors disabled:opacity-30"
+                    className="ai-chat-input w-full bg-white/[0.04] border border-white/[0.06] rounded-[10px] text-[13px] text-white placeholder:text-white/15 px-3 py-[7px] resize-none outline-none focus:border-violet-500/30 transition-colors disabled:opacity-30"
                     style={{ maxHeight: '80px', minHeight: '34px' }}
                   />
                 </div>

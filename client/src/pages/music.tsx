@@ -426,12 +426,14 @@ export default function MusicPage() {
                     placeholder={t('music.searchPlaceholder')}
                     className="pl-10 glass glass-border"
                     disabled={playMutation.isPending || !selectedChannel}
+                    data-ai="music-search"
                   />
                 </div>
                 <Button
                   onClick={handlePlay}
                   disabled={!searchQuery.trim() || playMutation.isPending || !selectedChannel}
                   className="bg-primary hover:bg-primary/90 gap-2"
+                  data-ai="music-play"
                 >
                   {playMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -445,6 +447,7 @@ export default function MusicPage() {
                   disabled={!searchQuery.trim() || searchMutation.isPending}
                   className="glass glass-border"
                   title={t('music.search')}
+                  data-ai="music-search-btn"
                 >
                   {searchMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

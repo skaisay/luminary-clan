@@ -783,12 +783,14 @@ export default function RobloxTracker() {
               onChange={(e) => setSearchInput(e.target.value)}
               className="pl-10 h-12 text-base glass glass-border"
               maxLength={20}
+              data-ai="roblox-search"
             />
           </div>
           <Button 
             type="submit" 
             disabled={isLoading || searchInput.trim().length < 3} 
             className="h-12 px-6 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500"
+            data-ai="roblox-find"
           >
             {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
             <span className="ml-2 hidden sm:inline">{t('roblox.find')}</span>
