@@ -12,6 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { apiRequest } from "@/lib/queryClient";
 
 interface Tournament {
@@ -50,21 +51,22 @@ interface LeaderboardEntry {
   score: number;
 }
 
-const statusLabels: Record<string, { label: string; color: string }> = {
-  upcoming: { label: "Скоро", color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
-  active: { label: "Идёт", color: "text-green-400 bg-green-500/10 border-green-500/20" },
-  finished: { label: "Завершён", color: "text-muted-foreground bg-muted/30 border-muted" },
-  pending: { label: "Ожидание", color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20" },
+const statusLabels: Record<string, { ru: string; en: string; color: string }> = {
+  upcoming: { ru: "Скоро", en: "Soon", color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
+  active: { ru: "Идёт", en: "Active", color: "text-green-400 bg-green-500/10 border-green-500/20" },
+  finished: { ru: "Завершён", en: "Finished", color: "text-muted-foreground bg-muted/30 border-muted" },
+  pending: { ru: "Ожидание", en: "Pending", color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20" },
 };
 
-const typeLabels: Record<string, string> = {
-  "1v1": "1 на 1",
-  team: "Команда",
-  clan: "Клан",
+const typeLabels: Record<string, { ru: string; en: string }> = {
+  "1v1": { ru: "1 на 1", en: "1v1" },
+  team: { ru: "Команда", en: "Team" },
+  clan: { ru: "Клан", en: "Clan" },
 };
 
 export default function ClanWarsPage() {
   const { user } = useAuth();
+  const { t, language } = useLanguage();
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [newTournament, setNewTournament] = useState({
@@ -124,30 +126,30 @@ export default function ClanWarsPage() {
         <div className="flex items-center gap-3">
           <Swords className="h-7 w-7 text-red-400" />
           <div>
-            <h1 className="text-2xl font-bold">Клановые войны и Турниры</h1>
-            <p className="text-sm text-muted-foreground">Соревнуйся и побеждай</p>
+            <h1 className="text-2xl font-bold">{t('clanWars.title')}</h1>
+            <p className="text-sm text-muted-foreground">{t('clanWars.description')}</p>
           </div>
         </div>
 
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button size="sm" className="gap-1" disabled={!user?.discordId}>
-              <Plus className="h-4 w-4" /> Создать турнир
+              <Plus className="h-4 w-4" /> {t('clanWars.createTournament')}
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Создать турнир</DialogTitle>
-              <DialogDescription>Заполните параметры нового турнира</DialogDescription>
+              <DialogTitle>{t('clanWars.createTournament')}</DialogTitle>
+              <DialogDescription>{t('clanWars.fillParams')}</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-2">
               <Input
-                placeholder="Название турнира"
+                placeholder={t('clanWars.tournamentName')}
                 value={newTournament.name}
                 onChange={e => setNewTournament(p => ({ ...p, name: e.target.value }))}
               />
               <Input
-                placeholder="Описание"
+                placeholder={t('clanWars.tournamentDesc')}
                 value={newTournament.description}
                 onChange={e => setNewTournament(p => ({ ...p, description: e.target.value }))}
               />
@@ -159,13 +161,13 @@ export default function ClanWarsPage() {
                     size="sm"
                     onClick={() => setNewTournament(p => ({ ...p, type }))}
                   >
-                    {typeLabels[type]}
+                    {typeLabels[type][language as 'ru' | 'en'] || typeLabels[type].ru}
                   </Button>
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground">Макс. участников</label>
+                  <label className="text-xs text-muted-foreground">{t('clanWars.maxParticipants')}</label>
                   <Input
                     type="number"
                     value={newTournament.maxParticipants}
@@ -173,7 +175,7 @@ export default function ClanWarsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground">Награда (LC)</label>
+                  <label className="text-xs text-muted-foreground">{t('clanWars.rewardLC')}</label>
                   <Input
                     type="number"
                     value={newTournament.reward}
@@ -186,7 +188,7 @@ export default function ClanWarsPage() {
                 onClick={() => createMutation.mutate()}
                 disabled={createMutation.isPending || !newTournament.name}
               >
-                {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Создать"}
+                {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : t('clanWars.create')}
               </Button>
             </div>
           </DialogContent>
@@ -196,13 +198,13 @@ export default function ClanWarsPage() {
       <Tabs defaultValue="tournaments">
         <TabsList className="w-full mb-6">
           <TabsTrigger value="tournaments" className="flex-1 gap-1">
-            <Trophy className="h-3.5 w-3.5" /> Турниры
+            <Trophy className="h-3.5 w-3.5" /> {t('clanWars.tournamentsTab')}
           </TabsTrigger>
           <TabsTrigger value="wars" className="flex-1 gap-1">
-            <Swords className="h-3.5 w-3.5" /> Клановые войны
+            <Swords className="h-3.5 w-3.5" /> {t('clanWars.clanWarsTab')}
           </TabsTrigger>
           <TabsTrigger value="leaderboard" className="flex-1 gap-1">
-            <Crown className="h-3.5 w-3.5" /> Рейтинг
+            <Crown className="h-3.5 w-3.5" /> {t('clanWars.leaderboardTab')}
           </TabsTrigger>
         </TabsList>
 
@@ -216,7 +218,7 @@ export default function ClanWarsPage() {
               {activeTournaments.length > 0 && (
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-1">
-                    <Flame className="h-3.5 w-3.5 text-red-400" /> Активные
+                    <Flame className="h-3.5 w-3.5 text-red-400" /> {t('clanWars.active')}
                   </h3>
                   <div className="space-y-3">
                     {activeTournaments.map(t => (
@@ -229,7 +231,7 @@ export default function ClanWarsPage() {
               {upcomingTournaments.length > 0 && (
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-1">
-                    <Calendar className="h-3.5 w-3.5 text-blue-400" /> Предстоящие
+                    <Calendar className="h-3.5 w-3.5 text-blue-400" /> {t('clanWars.upcoming')}
                   </h3>
                   <div className="space-y-3">
                     {upcomingTournaments.map(t => (
@@ -242,7 +244,7 @@ export default function ClanWarsPage() {
               {finishedTournaments.length > 0 && (
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5" /> Завершённые
+                    <Clock className="h-3.5 w-3.5" /> {t('clanWars.finished')}
                   </h3>
                   <div className="space-y-3">
                     {finishedTournaments.slice(0, 5).map(t => (
@@ -254,8 +256,8 @@ export default function ClanWarsPage() {
               {(!tournaments || tournaments.length === 0) && (
                 <div className="text-center py-12 text-muted-foreground">
                   <Trophy className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                  <p>Нет турниров</p>
-                  <p className="text-sm">Создайте первый турнир!</p>
+                  <p>{t('clanWars.noTournaments')}</p>
+                  <p className="text-sm">{t('clanWars.createFirst')}</p>
                 </div>
               )}
             </>
@@ -269,7 +271,7 @@ export default function ClanWarsPage() {
           ) : !clanWars || clanWars.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Swords className="h-12 w-12 mx-auto mb-3 opacity-20" />
-              <p>Нет клановых войн</p>
+              <p>{t('clanWars.noClanWars')}</p>
             </div>
           ) : (
             clanWars.map(war => (
@@ -277,7 +279,7 @@ export default function ClanWarsPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-3">
                     <Badge variant="outline" className={statusLabels[war.status]?.color}>
-                      {statusLabels[war.status]?.label}
+                      {statusLabels[war.status]?.[language as 'ru' | 'en'] || statusLabels[war.status]?.ru}
                     </Badge>
                     <Badge variant="secondary" className="gap-1">
                       <Trophy className="h-3 w-3 text-yellow-500" />
@@ -299,7 +301,7 @@ export default function ClanWarsPage() {
                   </div>
                   {war.startDate && (
                     <p className="text-xs text-muted-foreground text-center mt-3">
-                      {new Date(war.startDate).toLocaleDateString("ru-RU")}
+                      {new Date(war.startDate).toLocaleDateString()}
                     </p>
                   )}
                 </CardContent>
@@ -313,12 +315,12 @@ export default function ClanWarsPage() {
           <Card className="glass glass-border">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <Crown className="h-4 w-4 text-yellow-500" /> Рейтинг турниров
+                <Crown className="h-4 w-4 text-yellow-500" /> {t('clanWars.tournamentLeaderboard')}
               </CardTitle>
             </CardHeader>
             <CardContent>
               {!leaderboard || leaderboard.length === 0 ? (
-                <p className="text-center text-muted-foreground py-6">Нет данных</p>
+                <p className="text-center text-muted-foreground py-6">{t('clanWars.noData')}</p>
               ) : (
                 <div className="space-y-2">
                   {leaderboard.map((entry, idx) => (
@@ -361,6 +363,7 @@ export default function ClanWarsPage() {
 }
 
 function TournamentCard({ tournament: t, onJoin, joining }: { tournament: Tournament; onJoin?: () => void; joining?: boolean }) {
+  const { t: tr, language } = useLanguage();
   const fillPercent = Math.round((t.currentParticipants / t.maxParticipants) * 100);
 
   return (
@@ -372,23 +375,23 @@ function TournamentCard({ tournament: t, onJoin, joining }: { tournament: Tourna
             {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[10px]">{typeLabels[t.type]}</Badge>
+            <Badge variant="outline" className="text-[10px]">{typeLabels[t.type]?.[language as 'ru' | 'en'] || typeLabels[t.type]?.ru}</Badge>
             <Badge variant="outline" className={statusLabels[t.status]?.color}>
-              {statusLabels[t.status]?.label}
+              {statusLabels[t.status]?.[language as 'ru' | 'en'] || statusLabels[t.status]?.ru}
             </Badge>
           </div>
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
           <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {t.currentParticipants}/{t.maxParticipants}</span>
           <span className="flex items-center gap-1"><Trophy className="h-3 w-3 text-yellow-500" /> {t.reward} LC</span>
-          <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {new Date(t.startDate).toLocaleDateString("ru-RU")}</span>
+          <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {new Date(t.startDate).toLocaleDateString()}</span>
         </div>
         <div className="flex items-center gap-3">
           <Progress value={fillPercent} className="h-1.5 flex-1" />
           {onJoin && t.status !== "finished" && t.currentParticipants < t.maxParticipants && (
             <Button size="sm" onClick={onJoin} disabled={joining} className="gap-1 shrink-0">
               {joining ? <Loader2 className="h-3 w-3 animate-spin" /> : <ChevronRight className="h-3 w-3" />}
-              Участвовать
+              {tr('clanWars.participate')}
             </Button>
           )}
         </div>

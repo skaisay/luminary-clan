@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   User, Trophy, Coins, Zap, Shield, Star, Clock, BarChart3,
   Loader2, Flame, Medal, Crown, Package, Award, TrendingUp,
-  Search, ArrowLeftRight, ExternalLink, Copy, Check
+  Search, ArrowLeftRight, ArrowLeft, ExternalLink, Copy, Check, Pencil, Save, X as XIcon
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,9 @@ import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { useParams } from "wouter";
 import { Link, useLocation } from "wouter";
 
@@ -58,14 +60,14 @@ interface InventoryItem {
   isEquipped: boolean;
 }
 
-const rankBadges: Record<string, { label: string; color: string; icon: any }> = {
-  legend: { label: "Легенда", color: "text-yellow-400 bg-yellow-500/10", icon: Crown },
-  elite: { label: "Элита", color: "text-purple-400 bg-purple-500/10", icon: Star },
-  veteran: { label: "Ветеран", color: "text-blue-400 bg-blue-500/10", icon: Shield },
-  fighter: { label: "Боец", color: "text-green-400 bg-green-500/10", icon: Medal },
+const rankBadges: Record<string, { ru: string; en: string; color: string; icon: any }> = {
+  legend: { ru: "Легенда", en: "Legend", color: "text-yellow-400 bg-yellow-500/10", icon: Crown },
+  elite: { ru: "Элита", en: "Elite", color: "text-purple-400 bg-purple-500/10", icon: Star },
+  veteran: { ru: "Ветеран", en: "Veteran", color: "text-blue-400 bg-blue-500/10", icon: Shield },
+  fighter: { ru: "Боец", en: "Fighter", color: "text-green-400 bg-green-500/10", icon: Medal },
 };
 
-function getRankTitle(level: number): { label: string; color: string; icon: any } {
+function getRankTitle(level: number): { ru: string; en: string; color: string; icon: any } {
   if (level >= 50) return rankBadges.legend;
   if (level >= 30) return rankBadges.elite;
   if (level >= 15) return rankBadges.veteran;
@@ -78,12 +80,67 @@ function getXpForNextLevel(level: number): number {
 
 export default function ProfilePage() {
   const { user } = useAuth();
+  const { t, language } = useLanguage();
   const params = useParams<{ discordId?: string }>();
   const [, navigate] = useLocation();
   const [searchInput, setSearchInput] = useState("");
   const [copiedId, setCopiedId] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  interface CustomProfileData {
+    bannerColor1: string;
+    bannerColor2: string;
+    cardColor: string;
+    bio: string;
+    customAvatar: string;
+  }
+
+  const defaultCustom: CustomProfileData = {
+    bannerColor1: "",
+    bannerColor2: "",
+    cardColor: "",
+    bio: "",
+    customAvatar: "",
+  };
+
+  const [customData, setCustomData] = useState<CustomProfileData>(defaultCustom);
+  const [editData, setEditData] = useState<CustomProfileData>(defaultCustom);
+
   const targetDiscordId = params.discordId || user?.discordId;
   const isOwnProfile = !params.discordId || params.discordId === user?.discordId;
+
+  // Load custom profile data from localStorage
+  useEffect(() => {
+    if (targetDiscordId) {
+      try {
+        const stored = localStorage.getItem(`profile_custom_${targetDiscordId}`);
+        if (stored) {
+          const parsed = JSON.parse(stored) as CustomProfileData;
+          setCustomData(parsed);
+          setEditData(parsed);
+        } else {
+          setCustomData(defaultCustom);
+          setEditData(defaultCustom);
+        }
+      } catch {
+        setCustomData(defaultCustom);
+        setEditData(defaultCustom);
+      }
+    }
+  }, [targetDiscordId]);
+
+  const saveCustomProfile = () => {
+    if (targetDiscordId) {
+      localStorage.setItem(`profile_custom_${targetDiscordId}`, JSON.stringify(editData));
+      setCustomData(editData);
+      setEditing(false);
+    }
+  };
+
+  const cancelEditing = () => {
+    setEditData(customData);
+    setEditing(false);
+  };
 
   const { data: profile, isLoading: loadingProfile } = useQuery<MemberProfile>({
     queryKey: [`/api/profile/${targetDiscordId}`],
@@ -119,18 +176,18 @@ export default function ProfilePage() {
     return (
       <div className="container mx-auto px-4 py-8 max-w-4xl pt-24 text-center">
         <User className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
-        <h1 className="text-2xl font-bold mb-2">Профиль</h1>
-        <p className="text-muted-foreground mb-6">Войдите через Discord или найдите участника</p>
+        <h1 className="text-2xl font-bold mb-2">{t('profile.title')}</h1>
+        <p className="text-muted-foreground mb-6">{t('profile.loginHint')}</p>
         <div className="flex gap-2 max-w-md mx-auto">
           <Input
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleSearch()}
-            placeholder="Discord ID или username..."
+            placeholder={t('profile.searchPlaceholder')}
             className="glass glass-border"
           />
           <Button onClick={handleSearch} className="gap-1.5">
-            <Search className="h-4 w-4" /> Найти
+            <Search className="h-4 w-4" /> {t('profile.find')}
           </Button>
         </div>
       </div>
@@ -149,8 +206,8 @@ export default function ProfilePage() {
     return (
       <div className="container mx-auto px-4 py-8 max-w-4xl pt-24 text-center">
         <User className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
-        <h1 className="text-2xl font-bold mb-2">Профиль не найден</h1>
-        <p className="text-muted-foreground">Участник с таким Discord ID не найден</p>
+        <h1 className="text-2xl font-bold mb-2">{t('profile.notFound')}</h1>
+        <p className="text-muted-foreground">{t('profile.notFoundDesc')}</p>
       </div>
     );
   }
@@ -169,11 +226,14 @@ export default function ProfilePage() {
     <div className="container mx-auto px-4 py-8 max-w-5xl pt-24">
       {/* Search bar */}
       <div className="flex gap-2 mb-6">
+        <Button onClick={() => window.history.back()} variant="outline" size="icon" className="shrink-0">
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
         <Input
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
           onKeyDown={e => e.key === "Enter" && handleSearch()}
-          placeholder="Найти участника по Discord ID или username..."
+          placeholder={t('profile.searchMember')}
           className="glass glass-border"
         />
         <Button onClick={handleSearch} size="icon" variant="outline">
@@ -182,17 +242,36 @@ export default function ProfilePage() {
       </div>
 
       {/* Profile Header */}
-      <Card className="glass glass-border overflow-hidden mb-6">
-        <div className="h-32 bg-gradient-to-r from-primary/30 to-[hsl(var(--accent))]/30 relative">
-          {profile.equippedBanner && (
+      <Card className="glass glass-border overflow-hidden mb-6" style={customData.cardColor ? { borderColor: customData.cardColor + '40' } : undefined}>
+        <div
+          className="h-32 relative"
+          style={customData.bannerColor1
+            ? { background: `linear-gradient(to right, ${customData.bannerColor1}, ${customData.bannerColor2 || customData.bannerColor1})` }
+            : undefined
+          }
+        >
+          {!customData.bannerColor1 && (
+            <div className="absolute inset-0 bg-gradient-to-r from-primary/30 to-[hsl(var(--accent))]/30" />
+          )}
+          {profile.equippedBanner && !customData.bannerColor1 && (
             <img src={profile.equippedBanner} alt="" className="w-full h-full object-cover absolute inset-0" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent" />
+          {isOwnProfile && !editing && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="absolute top-3 right-3 gap-1 text-xs opacity-80 hover:opacity-100 z-10"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className="h-3 w-3" /> {t('profile.editProfile')}
+            </Button>
+          )}
         </div>
         <CardContent className="relative -mt-12 pb-6">
           <div className="flex flex-col md:flex-row items-start md:items-end gap-4">
             <Avatar className="w-24 h-24 border-4 border-background shadow-xl">
-              <AvatarImage src={profile.avatar || undefined} />
+              <AvatarImage src={customData.customAvatar || profile.avatar || undefined} />
               <AvatarFallback className="text-2xl">{profile.username[0]}</AvatarFallback>
             </Avatar>
             <div className="flex-1">
@@ -204,15 +283,15 @@ export default function ProfilePage() {
               </div>
               <div className="flex items-center gap-3 mt-1 flex-wrap">
                 <Badge variant="outline" className={`${rankInfo.color} gap-1`}>
-                  <RankIcon className="h-3 w-3" /> {rankInfo.label}
+                  <RankIcon className="h-3 w-3" /> {rankInfo[language as 'ru' | 'en'] || rankInfo.ru}
                 </Badge>
                 <span className="text-sm text-muted-foreground">{profile.role}</span>
-                <span className="text-sm text-muted-foreground">Уровень {profile.level}</span>
+                <span className="text-sm text-muted-foreground">{t('profile.level')} {profile.level}</span>
               </div>
               {/* XP Progress */}
               <div className="mt-3 max-w-md">
                 <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                  <span>Опыт</span>
+                  <span>{t('profile.experience')}</span>
                   <span>{profile.experience % xpForNext} / {xpForNext} XP</span>
                 </div>
                 <Progress value={xpProgress} className="h-2" />
@@ -230,15 +309,82 @@ export default function ProfilePage() {
                   ID
                 </Button>
                 {!isOwnProfile && user?.discordId && (
-                  <Link href="/trading">
+                  <Link href={`/trading?target=${encodeURIComponent(profile.username)}`}>
                     <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
-                      <ArrowLeftRight className="h-3 w-3" /> Торговля
+                      <ArrowLeftRight className="h-3 w-3" /> {t('profile.trade')}
                     </Button>
                   </Link>
                 )}
               </div>
             </div>
           </div>
+
+          {/* Bio */}
+          {customData.bio && !editing && (
+            <p className="text-sm text-muted-foreground mt-4 italic">{customData.bio}</p>
+          )}
+
+          {/* Edit Panel */}
+          {editing && isOwnProfile && (
+            <div className="mt-4 p-4 rounded-xl bg-muted/20 border border-border/50 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">{t('profile.bannerColor')}</label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="color"
+                      value={editData.bannerColor1 || "#6366f1"}
+                      onChange={e => setEditData(d => ({ ...d, bannerColor1: e.target.value }))}
+                      className="w-10 h-9 p-1 cursor-pointer"
+                    />
+                    <Input
+                      type="color"
+                      value={editData.bannerColor2 || "#8b5cf6"}
+                      onChange={e => setEditData(d => ({ ...d, bannerColor2: e.target.value }))}
+                      className="w-10 h-9 p-1 cursor-pointer"
+                    />
+                    <span className="text-xs text-muted-foreground self-center">Gradient</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">{t('profile.cardColor')}</label>
+                  <Input
+                    type="color"
+                    value={editData.cardColor || "#6366f1"}
+                    onChange={e => setEditData(d => ({ ...d, cardColor: e.target.value }))}
+                    className="w-10 h-9 p-1 cursor-pointer"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">{t('profile.bio')}</label>
+                <Textarea
+                  value={editData.bio}
+                  onChange={e => setEditData(d => ({ ...d, bio: e.target.value }))}
+                  placeholder={t('profile.bioPlaceholder')}
+                  className="glass glass-border resize-none h-20"
+                  maxLength={200}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">{t('profile.customAvatar')}</label>
+                <Input
+                  value={editData.customAvatar}
+                  onChange={e => setEditData(d => ({ ...d, customAvatar: e.target.value }))}
+                  placeholder={t('profile.avatarPlaceholder')}
+                  className="glass glass-border"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button size="sm" variant="outline" className="gap-1" onClick={cancelEditing}>
+                  <XIcon className="h-3 w-3" /> {t('profile.back')}
+                </Button>
+                <Button size="sm" className="gap-1" onClick={saveCustomProfile}>
+                  <Save className="h-3 w-3" /> {t('profile.saveProfile')}
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -251,28 +397,28 @@ export default function ProfilePage() {
               <CardContent className="p-4 text-center">
                 <Trophy className="h-5 w-5 mx-auto mb-1 text-green-400" />
                 <p className="text-xl font-bold">{profile.wins}</p>
-                <p className="text-xs text-muted-foreground">Побед</p>
+                <p className="text-xs text-muted-foreground">{t('profile.wins')}</p>
               </CardContent>
             </Card>
             <Card className="glass glass-border">
               <CardContent className="p-4 text-center">
                 <BarChart3 className="h-5 w-5 mx-auto mb-1 text-blue-400" />
                 <p className="text-xl font-bold">{winRate}%</p>
-                <p className="text-xs text-muted-foreground">Винрейт</p>
+                <p className="text-xs text-muted-foreground">{t('profile.winRate')}</p>
               </CardContent>
             </Card>
             <Card className="glass glass-border">
               <CardContent className="p-4 text-center">
                 <Zap className="h-5 w-5 mx-auto mb-1 text-red-400" />
                 <p className="text-xl font-bold">{kd}</p>
-                <p className="text-xs text-muted-foreground">K/D</p>
+                <p className="text-xs text-muted-foreground">{t('profile.kd')}</p>
               </CardContent>
             </Card>
             <Card className="glass glass-border">
               <CardContent className="p-4 text-center">
                 <TrendingUp className="h-5 w-5 mx-auto mb-1 text-purple-400" />
                 <p className="text-xl font-bold">{profile.kills}</p>
-                <p className="text-xs text-muted-foreground">Убийств</p>
+                <p className="text-xs text-muted-foreground">{t('profile.kills')}</p>
               </CardContent>
             </Card>
           </div>
@@ -282,12 +428,12 @@ export default function ProfilePage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Award className="h-4 w-4 text-yellow-500" />
-                Достижения ({completedAchievements.length})
+                                {t('profile.achievements')} ({completedAchievements.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
               {completedAchievements.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-6">Нет достижений</p>
+                <p className="text-sm text-muted-foreground text-center py-6">{t('profile.noAchievements')}</p>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   {completedAchievements.slice(0, 9).map(a => (
@@ -310,23 +456,23 @@ export default function ProfilePage() {
           {/* Info */}
           <Card className="glass glass-border">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Информация</CardTitle>
+              <CardTitle className="text-base">{t('profile.info')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Роль</span>
+                <span className="text-muted-foreground">{t('profile.role')}</span>
                 <span>{profile.role}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Ранг</span>
+                <span className="text-muted-foreground">{t('profile.rank')}</span>
                 <span>#{profile.rank || '—'}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground flex items-center gap-1"><Clock className="h-3 w-3" /> В клане с</span>
-                <span>{new Date(profile.joinedAt).toLocaleDateString("ru-RU")}</span>
+                <span className="text-muted-foreground flex items-center gap-1"><Clock className="h-3 w-3" /> {t('profile.inClanSince')}</span>
+                <span>{new Date(profile.joinedAt).toLocaleDateString()}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Ассисты</span>
+                <span className="text-muted-foreground">{t('profile.assists')}</span>
                 <span>{profile.assists}</span>
               </div>
             </CardContent>
@@ -337,12 +483,12 @@ export default function ProfilePage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Package className="h-4 w-4 text-primary" />
-                Инвентарь
+                                {t('profile.inventory')}
               </CardTitle>
             </CardHeader>
             <CardContent>
               {!inventory || inventory.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">Пусто</p>
+                <p className="text-sm text-muted-foreground text-center py-4">{t('profile.empty')}</p>
               ) : (
                 <div className="space-y-2">
                   {inventory.slice(0, 5).map(item => (
@@ -352,7 +498,7 @@ export default function ProfilePage() {
                     </div>
                   ))}
                   {inventory.length > 5 && (
-                    <p className="text-xs text-muted-foreground text-center">...и ещё {inventory.length - 5}</p>
+                    <p className="text-xs text-muted-foreground text-center">{t('profile.andMore')} {inventory.length - 5}</p>
                   )}
                 </div>
               )}

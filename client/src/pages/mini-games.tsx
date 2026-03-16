@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { apiRequest } from "@/lib/queryClient";
 
 // ============= WHEEL OF FORTUNE =============
@@ -31,6 +32,7 @@ const WHEEL_SEGMENTS = [
 
 function WheelOfFortune() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [spinning, setSpinning] = useState(false);
   const [rotation, setRotation] = useState(0);
@@ -125,7 +127,7 @@ function WheelOfFortune() {
 
       {/* Bet controls */}
       <div className="flex items-center justify-center gap-3">
-        <span className="text-sm text-muted-foreground">Ставка:</span>
+        <span className="text-sm text-muted-foreground">{t('miniGames.bet')}:</span>
         <div className="flex gap-1">
           {[10, 25, 50, 100].map(val => (
             <Button
@@ -159,7 +161,7 @@ function WheelOfFortune() {
           className="gap-2"
         >
           {spinning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
-          {spinning ? "Крутится..." : `Крутить (${betAmount} LC)`}
+          {spinning ? t('miniGames.spinning') : `${t('miniGames.spin')} (${betAmount} LC)`}
         </Button>
       </div>
     </div>
@@ -175,14 +177,15 @@ const RPS_ICONS: Record<RPSChoice, any> = {
   paper: Square,
   scissors: Scissors,
 };
-const RPS_LABELS: Record<RPSChoice, string> = {
-  rock: "Камень",
-  paper: "Бумага",
-  scissors: "Ножницы",
+const RPS_LABELS: Record<RPSChoice, { ru: string; en: string }> = {
+  rock: { ru: "Камень", en: "Rock" },
+  paper: { ru: "Бумага", en: "Paper" },
+  scissors: { ru: "Ножницы", en: "Scissors" },
 };
 
 function RockPaperScissors() {
   const { user } = useAuth();
+  const { t, language } = useLanguage();
   const queryClient = useQueryClient();
   const [playerChoice, setPlayerChoice] = useState<RPSChoice | null>(null);
   const [botChoice, setBotChoice] = useState<RPSChoice | null>(null);
@@ -205,8 +208,8 @@ function RockPaperScissors() {
         setBotChoice(data.botChoice);
         setReward(data.reward);
         setResultText(
-          data.result === "win" ? "Победа!" :
-          data.result === "lose" ? "Поражение" : "Ничья"
+          data.result === "win" ? t('miniGames.win') :
+          data.result === "lose" ? t('miniGames.lose') : t('miniGames.draw')
         );
         setAnimating(false);
         queryClient.invalidateQueries({ queryKey: ["/api/mini-games/history"] });
@@ -223,8 +226,8 @@ function RockPaperScissors() {
     playMutation.mutate(choice);
   };
 
-  const resultColor = resultText === "Победа!" ? "text-green-400" :
-    resultText === "Поражение" ? "text-red-400" : "text-yellow-400";
+  const resultColor = resultText === t('miniGames.win') ? "text-green-400" :
+    resultText === t('miniGames.lose') ? "text-red-400" : "text-yellow-400";
 
   return (
     <div className="space-y-6">
@@ -232,7 +235,7 @@ function RockPaperScissors() {
       <div className="flex items-center justify-center gap-8">
         {/* Player */}
         <div className="text-center">
-          <p className="text-sm text-muted-foreground mb-2">Вы</p>
+          <p className="text-sm text-muted-foreground mb-2">{t('miniGames.you')}</p>
           <div className={`w-20 h-20 rounded-xl border-2 flex items-center justify-center transition-all ${
             playerChoice ? "border-primary bg-primary/10" : "border-muted bg-muted/20"
           }`}>
@@ -241,14 +244,14 @@ function RockPaperScissors() {
               return <Icon className="h-8 w-8" />;
             })() : <Hand className="h-8 w-8 text-muted-foreground/30" />}
           </div>
-          {playerChoice && <p className="text-xs mt-1">{RPS_LABELS[playerChoice]}</p>}
+          {playerChoice && <p className="text-xs mt-1">{RPS_LABELS[playerChoice][language as 'ru' | 'en'] || RPS_LABELS[playerChoice].ru}</p>}
         </div>
 
         <div className="text-2xl font-bold text-muted-foreground">VS</div>
 
         {/* Bot */}
         <div className="text-center">
-          <p className="text-sm text-muted-foreground mb-2">Бот</p>
+          <p className="text-sm text-muted-foreground mb-2">{t('miniGames.bot')}</p>
           <div className={`w-20 h-20 rounded-xl border-2 flex items-center justify-center transition-all ${
             botChoice ? "border-red-500 bg-red-500/10" :
             animating ? "border-muted animate-pulse bg-muted/20" : "border-muted bg-muted/20"
@@ -259,7 +262,7 @@ function RockPaperScissors() {
                return <Icon className="h-8 w-8" />;
              })() : <Gamepad2 className="h-8 w-8 text-muted-foreground/30" />}
           </div>
-          {botChoice && <p className="text-xs mt-1">{RPS_LABELS[botChoice]}</p>}
+          {botChoice && <p className="text-xs mt-1">{RPS_LABELS[botChoice][language as 'ru' | 'en'] || RPS_LABELS[botChoice].ru}</p>}
         </div>
       </div>
 
@@ -278,7 +281,7 @@ function RockPaperScissors() {
 
       {/* Bet */}
       <div className="flex items-center justify-center gap-3">
-        <span className="text-sm text-muted-foreground">Ставка:</span>
+        <span className="text-sm text-muted-foreground">{t('miniGames.bet')}:</span>
         <div className="flex gap-1">
           {[10, 25, 50, 100].map(val => (
             <Button
@@ -309,7 +312,7 @@ function RockPaperScissors() {
               className="flex-col h-auto py-3 px-6 gap-1"
             >
               <Icon className="h-6 w-6" />
-              <span className="text-xs">{RPS_LABELS[choice]}</span>
+              <span className="text-xs">{RPS_LABELS[choice][language as 'ru' | 'en'] || RPS_LABELS[choice].ru}</span>
             </Button>
           );
         })}
@@ -331,6 +334,7 @@ interface GameHistoryItem {
 
 function GameHistory() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const { data: history, isLoading } = useQuery<GameHistoryItem[]>({
     queryKey: ["/api/mini-games/history", user?.discordId],
     queryFn: async () => {
@@ -348,7 +352,7 @@ function GameHistory() {
     return (
       <div className="text-center py-8 text-muted-foreground">
         <History className="h-10 w-10 mx-auto mb-2 opacity-30" />
-        <p className="text-sm">Нет истории игр</p>
+        <p className="text-sm">{t('miniGames.noHistory')}</p>
       </div>
     );
   }
@@ -365,10 +369,10 @@ function GameHistory() {
             )}
             <div>
               <p className="text-sm font-medium">
-                {item.game === "wheel" ? "Колесо фортуны" : "Камень-Ножницы-Бумага"}
+                {item.game === "wheel" ? t('miniGames.wheelGame') : t('miniGames.rpsGame')}
               </p>
               <p className="text-xs text-muted-foreground">
-                Ставка: {item.bet} LC • {new Date(item.playedAt).toLocaleString("ru-RU")}
+                {t('miniGames.betLabel')}: {item.bet} LC • {new Date(item.playedAt).toLocaleString()}
               </p>
             </div>
           </div>
@@ -387,26 +391,27 @@ function GameHistory() {
 // ============= MAIN PAGE =============
 
 export default function MiniGamesPage() {
+  const { t } = useLanguage();
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl pt-24">
       <div className="flex items-center gap-3 mb-6">
         <Gamepad2 className="h-7 w-7 text-primary" />
         <div>
-          <h1 className="text-2xl font-bold">Мини-игры</h1>
-          <p className="text-sm text-muted-foreground">Играй и зарабатывай LumiCoins</p>
+          <h1 className="text-2xl font-bold">{t('miniGames.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('miniGames.description')}</p>
         </div>
       </div>
 
       <Tabs defaultValue="wheel">
         <TabsList className="w-full mb-6">
           <TabsTrigger value="wheel" className="flex-1 gap-1">
-            <RotateCw className="h-3.5 w-3.5" /> Колесо фортуны
+            <RotateCw className="h-3.5 w-3.5" /> {t('miniGames.wheelOfFortune')}
           </TabsTrigger>
           <TabsTrigger value="rps" className="flex-1 gap-1">
-            <Scissors className="h-3.5 w-3.5" /> Камень-Ножницы-Бумага
+            <Scissors className="h-3.5 w-3.5" /> {t('miniGames.rps')}
           </TabsTrigger>
           <TabsTrigger value="history" className="flex-1 gap-1">
-            <History className="h-3.5 w-3.5" /> История
+            <History className="h-3.5 w-3.5" /> {t('miniGames.historyTab')}
           </TabsTrigger>
         </TabsList>
 
@@ -415,9 +420,9 @@ export default function MiniGamesPage() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <RotateCw className="h-4 w-4 text-purple-400" />
-                Колесо фортуны
+                {t('miniGames.wheelOfFortune')}
               </CardTitle>
-              <CardDescription>Крути колесо — испытай удачу!</CardDescription>
+              <CardDescription>{t('miniGames.wheelDesc')}</CardDescription>
             </CardHeader>
             <CardContent>
               <WheelOfFortune />
@@ -430,9 +435,9 @@ export default function MiniGamesPage() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Scissors className="h-4 w-4 text-blue-400" />
-                Камень-Ножницы-Бумага
+                {t('miniGames.rps')}
               </CardTitle>
-              <CardDescription>Обыграй бота и удвой ставку!</CardDescription>
+              <CardDescription>{t('miniGames.rpsDesc')}</CardDescription>
             </CardHeader>
             <CardContent>
               <RockPaperScissors />
@@ -445,7 +450,7 @@ export default function MiniGamesPage() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <History className="h-4 w-4" />
-                История игр
+                {t('miniGames.gameHistory')}
               </CardTitle>
             </CardHeader>
             <CardContent>

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ClanStats, ClanMember, News, ClanSettings } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { Link } from "wouter";
 import heroBackground from "@assets/generated_images/Futuristic_hero_background_cityscape_2d39cec6.png";
 
 interface DiscordInfo {
@@ -121,9 +122,10 @@ export default function Dashboard() {
               ) : (
                 <div className="space-y-2">
                   {topMembers?.slice(0, 5).map((member, index) => (
-                    <div
+                    <Link
                       key={member.id}
-                      className="flex items-center gap-3 p-2.5 rounded-xl bg-gradient-to-r from-background/50 to-transparent border border-border/50 hover:border-primary/30 transition-colors"
+                      href={`/profile/${member.discordId || member.username}`}
+                      className="flex items-center gap-3 p-2.5 rounded-xl bg-gradient-to-r from-background/50 to-transparent border border-border/50 hover:border-primary/30 transition-colors cursor-pointer"
                       data-testid={`card-member-${member.id}`}
                     >
                       <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 font-bold text-xs">
@@ -148,7 +150,7 @@ export default function Dashboard() {
                         <p className="font-bold text-base tabular-nums text-primary">{member.lumiCoins ?? 0}</p>
                         <p className="text-[10px] text-muted-foreground uppercase">LC</p>
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               )}

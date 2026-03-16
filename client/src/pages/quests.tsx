@@ -35,15 +35,15 @@ interface UserQuest {
   quest: Quest;
 }
 
-const questTypeLabels: Record<string, { label: string; color: string; icon: any }> = {
-  daily: { label: "Ежедневный", color: "text-blue-400 bg-blue-500/10 border-blue-500/20", icon: Calendar },
-  weekly: { label: "Еженедельный", color: "text-purple-400 bg-purple-500/10 border-purple-500/20", icon: Clock },
-  special: { label: "Особый", color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20", icon: Star },
+const questTypeLabels: Record<string, { ru: string; en: string; color: string; icon: any }> = {
+  daily: { ru: "Ежедневный", en: "Daily", color: "text-blue-400 bg-blue-500/10 border-blue-500/20", icon: Calendar },
+  weekly: { ru: "Еженедельный", en: "Weekly", color: "text-purple-400 bg-purple-500/10 border-purple-500/20", icon: Clock },
+  special: { ru: "Особый", en: "Special", color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20", icon: Star },
 };
 
 export default function QuestsPage() {
   const [activeTab, setActiveTab] = useState("active");
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -96,8 +96,8 @@ export default function QuestsPage() {
     return (
       <div className="container mx-auto px-4 py-8 max-w-4xl pt-24 text-center">
         <Scroll className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
-        <h1 className="text-2xl font-bold mb-2">Квесты</h1>
-        <p className="text-muted-foreground">Войдите через Discord, чтобы выполнять квесты</p>
+        <h1 className="text-2xl font-bold mb-2">{t('quests.title')}</h1>
+        <p className="text-muted-foreground">{t('quests.loginRequired')}</p>
       </div>
     );
   }
@@ -112,9 +112,9 @@ export default function QuestsPage() {
           </div>
           <div>
             <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent">
-              Квесты
+              {t('quests.title')}
             </h1>
-            <p className="text-muted-foreground">Выполняйте задания и получайте награды</p>
+            <p className="text-muted-foreground">{t('quests.description')}</p>
           </div>
         </div>
 
@@ -124,21 +124,21 @@ export default function QuestsPage() {
             <CardContent className="p-4 text-center">
               <Target className="h-6 w-6 mx-auto mb-1 text-blue-400" />
               <p className="text-2xl font-bold">{activeQuests.length}</p>
-              <p className="text-xs text-muted-foreground">Активных</p>
+              <p className="text-xs text-muted-foreground">{t('quests.activeCount')}</p>
             </CardContent>
           </Card>
           <Card className="glass glass-border">
             <CardContent className="p-4 text-center">
               <CheckCircle2 className="h-6 w-6 mx-auto mb-1 text-green-400" />
               <p className="text-2xl font-bold">{completedQuests.length}</p>
-              <p className="text-xs text-muted-foreground">Выполнено</p>
+              <p className="text-xs text-muted-foreground">{t('quests.completedCount')}</p>
             </CardContent>
           </Card>
           <Card className="glass glass-border">
             <CardContent className="p-4 text-center">
               <Sparkles className="h-6 w-6 mx-auto mb-1 text-yellow-400" />
               <p className="text-2xl font-bold">{availableQuests.length}</p>
-              <p className="text-xs text-muted-foreground">Доступно</p>
+              <p className="text-xs text-muted-foreground">{t('quests.availableCount')}</p>
             </CardContent>
           </Card>
         </div>
@@ -148,13 +148,13 @@ export default function QuestsPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="glass glass-border w-full justify-start mb-6">
           <TabsTrigger value="active" className="gap-1.5">
-            <Target className="h-4 w-4" /> Активные ({activeQuests.length})
+            <Target className="h-4 w-4" /> {t('quests.activeTab')} ({activeQuests.length})
           </TabsTrigger>
           <TabsTrigger value="available" className="gap-1.5">
-            <Scroll className="h-4 w-4" /> Доступные ({availableQuests.length})
+            <Scroll className="h-4 w-4" /> {t('quests.availableTab')} ({availableQuests.length})
           </TabsTrigger>
           <TabsTrigger value="completed" className="gap-1.5">
-            <CheckCircle2 className="h-4 w-4" /> Выполненные ({completedQuests.length})
+            <CheckCircle2 className="h-4 w-4" /> {t('quests.completedTab')} ({completedQuests.length})
           </TabsTrigger>
         </TabsList>
 
@@ -169,8 +169,8 @@ export default function QuestsPage() {
               {activeQuests.length === 0 ? (
                 <div className="text-center py-16">
                   <Target className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-                  <p className="text-muted-foreground">Нет активных квестов</p>
-                  <p className="text-sm text-muted-foreground/60">Примите квест из доступных</p>
+                  <p className="text-muted-foreground">{t('quests.noActiveQuests')}</p>
+                  <p className="text-sm text-muted-foreground/60">{t('quests.acceptHint')}</p>
                 </div>
               ) : (
                 activeQuests.map(uq => {
@@ -192,14 +192,14 @@ export default function QuestsPage() {
                             <div className="flex items-center gap-2 mb-1">
                               <Badge variant="outline" className={`text-xs ${typeInfo.color}`}>
                                 <TypeIcon className="h-3 w-3 mr-1" />
-                                {typeInfo.label}
+                                {typeInfo[language as 'ru' | 'en'] || typeInfo.ru}
                               </Badge>
                               <h3 className="font-semibold text-sm">{quest.name}</h3>
                             </div>
                             <p className="text-xs text-muted-foreground">{quest.description}</p>
                             <div className="mt-3">
                               <div className="flex justify-between text-xs mb-1">
-                                <span>Прогресс</span>
+                                <span>{t('quests.progress')}</span>
                                 <span>{progressPercent}%</span>
                               </div>
                               <Progress value={progressPercent} className="h-2" />
@@ -220,7 +220,7 @@ export default function QuestsPage() {
                               disabled={claimRewardMutation.isPending}
                               className="bg-green-600 hover:bg-green-700"
                             >
-                              <Sparkles className="h-4 w-4 mr-1" /> Забрать
+                              <Sparkles className="h-4 w-4 mr-1" /> {t('quests.claim')}
                             </Button>
                           )}
                         </div>
@@ -236,8 +236,8 @@ export default function QuestsPage() {
               {availableQuests.length === 0 ? (
                 <div className="text-center py-16">
                   <Scroll className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-                  <p className="text-muted-foreground">Нет доступных квестов</p>
-                  <p className="text-sm text-muted-foreground/60">Новые квесты скоро появятся!</p>
+                  <p className="text-muted-foreground">{t('quests.noAvailableQuests')}</p>
+                  <p className="text-sm text-muted-foreground/60">{t('quests.comingSoon')}</p>
                 </div>
               ) : (
                 availableQuests.map(quest => {
@@ -251,7 +251,7 @@ export default function QuestsPage() {
                             <div className="flex items-center gap-2 mb-1">
                               <Badge variant="outline" className={`text-xs ${typeInfo.color}`}>
                                 <TypeIcon className="h-3 w-3 mr-1" />
-                                {typeInfo.label}
+                                {typeInfo[language as 'ru' | 'en'] || typeInfo.ru}
                               </Badge>
                               <h3 className="font-semibold text-sm">{quest.name}</h3>
                             </div>
@@ -271,7 +271,7 @@ export default function QuestsPage() {
                             onClick={() => acceptQuestMutation.mutate(quest.id)}
                             disabled={acceptQuestMutation.isPending}
                           >
-                            Принять <ChevronRight className="h-4 w-4" />
+                            {t('quests.accept')} <ChevronRight className="h-4 w-4" />
                           </Button>
                         </div>
                       </CardContent>
@@ -286,7 +286,7 @@ export default function QuestsPage() {
               {completedQuests.length === 0 ? (
                 <div className="text-center py-16">
                   <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-                  <p className="text-muted-foreground">Пока ничего не выполнено</p>
+                  <p className="text-muted-foreground">{t('quests.nothingCompleted')}</p>
                 </div>
               ) : (
                 completedQuests.map(uq => {
@@ -299,11 +299,11 @@ export default function QuestsPage() {
                           <div className="flex-1">
                             <h3 className="font-semibold text-sm">{quest.name}</h3>
                             <p className="text-xs text-muted-foreground">
-                              Выполнено {uq.completedAt ? new Date(uq.completedAt).toLocaleDateString("ru-RU") : ""}
+                              Выполнено {uq.completedAt ? new Date(uq.completedAt).toLocaleDateString() : ""}
                             </p>
                           </div>
                           {uq.claimedAt ? (
-                            <Badge variant="secondary" className="text-xs">Награда получена</Badge>
+                            <Badge variant="secondary" className="text-xs">{t('quests.rewardReceived')}</Badge>
                           ) : (
                             <Button
                               size="sm"
@@ -311,7 +311,7 @@ export default function QuestsPage() {
                               disabled={claimRewardMutation.isPending}
                               className="bg-green-600 hover:bg-green-700"
                             >
-                              Забрать
+                              {t('quests.claim')}
                             </Button>
                           )}
                         </div>

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface DailyRewardInfo {
   canClaim: boolean;
@@ -21,17 +22,18 @@ interface DailyRewardInfo {
 }
 
 const streakRewards = [
-  { day: 1, coins: 10, label: "День 1" },
-  { day: 2, coins: 15, label: "День 2" },
-  { day: 3, coins: 20, label: "День 3" },
-  { day: 4, coins: 25, label: "День 4" },
-  { day: 5, coins: 30, label: "День 5" },
-  { day: 6, coins: 40, label: "День 6" },
-  { day: 7, coins: 75, label: "День 7", special: true },
+  { day: 1, coins: 10 },
+  { day: 2, coins: 15 },
+  { day: 3, coins: 20 },
+  { day: 4, coins: 25 },
+  { day: 5, coins: 30 },
+  { day: 6, coins: 40 },
+  { day: 7, coins: 75, special: true },
 ];
 
 export default function DailyRewardsPage() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [countdown, setCountdown] = useState("");
 
@@ -89,8 +91,8 @@ export default function DailyRewardsPage() {
     return (
       <div className="container mx-auto px-4 py-8 max-w-4xl pt-24 text-center">
         <Gift className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
-        <h1 className="text-2xl font-bold mb-2">Ежедневные награды</h1>
-        <p className="text-muted-foreground">Войдите через Discord для получения наград</p>
+        <h1 className="text-2xl font-bold mb-2">{t('dailyRewards.title')}</h1>
+        <p className="text-muted-foreground">{t('dailyRewards.loginRequired')}</p>
       </div>
     );
   }
@@ -106,9 +108,9 @@ export default function DailyRewardsPage() {
           <Gift className="h-10 w-10 text-white" />
         </div>
         <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-transparent">
-          Ежедневные награды
+          {t('dailyRewards.title')}
         </h1>
-        <p className="text-muted-foreground mt-2">Заходите каждый день для получения бонусов</p>
+        <p className="text-muted-foreground mt-2">{t('dailyRewards.description')}</p>
 
         {/* Streak info */}
         <div className="flex justify-center gap-6 mt-6">
@@ -117,14 +119,14 @@ export default function DailyRewardsPage() {
               <Flame className="h-5 w-5" />
               <span className="text-2xl font-bold">{currentStreak}</span>
             </div>
-            <p className="text-xs text-muted-foreground">Стрик дней</p>
+            <p className="text-xs text-muted-foreground">{t('dailyRewards.streakDays')}</p>
           </div>
           <div className="text-center">
             <div className="flex items-center justify-center gap-1.5 text-yellow-400">
               <Calendar className="h-5 w-5" />
               <span className="text-2xl font-bold">{rewardInfo?.totalClaims || 0}</span>
             </div>
-            <p className="text-xs text-muted-foreground">Всего забрано</p>
+            <p className="text-xs text-muted-foreground">{t('dailyRewards.totalClaimed')}</p>
           </div>
         </div>
       </div>
@@ -151,7 +153,7 @@ export default function DailyRewardsPage() {
                   }`}
                 >
                   <CardContent className="p-3 text-center">
-                    <p className="text-[10px] text-muted-foreground mb-1">{day.label}</p>
+                    <p className="text-[10px] text-muted-foreground mb-1">{t('dailyRewards.day')} {day.day}</p>
                     <div className={`w-10 h-10 mx-auto rounded-full flex items-center justify-center mb-1 ${
                       isPast ? "bg-green-500/20" :
                       isCurrent ? "bg-gradient-to-br from-amber-500 to-orange-500" :
@@ -191,16 +193,16 @@ export default function DailyRewardsPage() {
                 ) : (
                   <Gift className="h-5 w-5" />
                 )}
-                Забрать награду (+{rewardInfo.nextReward} LC)
+                {t('dailyRewards.claimReward')} (+{rewardInfo.nextReward} LC)
               </Button>
             ) : (
               <div>
                 <Button size="lg" disabled className="gap-2 text-lg px-8 py-6 opacity-50">
-                  <Clock className="h-5 w-5" /> Уже забрано
+                  <Clock className="h-5 w-5" /> {t('dailyRewards.alreadyClaimed')}
                 </Button>
                 {countdown && (
                   <p className="text-sm text-muted-foreground mt-3">
-                    Следующая награда через: <span className="text-amber-400 font-mono font-bold">{countdown}</span>
+                    {t('dailyRewards.nextRewardIn')}: <span className="text-amber-400 font-mono font-bold">{countdown}</span>
                   </p>
                 )}
               </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   ArrowLeftRight, Coins, Package, Search, Loader2, Plus, Check, X,
@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface TradeOffer {
   id: string;
@@ -28,11 +29,11 @@ interface TradeOffer {
   toUsername?: string;
 }
 
-const statusStyles: Record<string, { label: string; class: string }> = {
-  pending: { label: "Ожидает", class: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" },
-  accepted: { label: "Принято", class: "bg-green-500/10 text-green-400 border-green-500/20" },
-  rejected: { label: "Отклонено", class: "bg-red-500/10 text-red-400 border-red-500/20" },
-  cancelled: { label: "Отменено", class: "bg-gray-500/10 text-gray-400 border-gray-500/20" },
+const statusStylesMap: Record<string, { ru: string; en: string; class: string }> = {
+  pending: { ru: "Ожидает", en: "Pending", class: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" },
+  accepted: { ru: "Принято", en: "Accepted", class: "bg-green-500/10 text-green-400 border-green-500/20" },
+  rejected: { ru: "Отклонено", en: "Rejected", class: "bg-red-500/10 text-red-400 border-red-500/20" },
+  cancelled: { ru: "Отменено", en: "Cancelled", class: "bg-gray-500/10 text-gray-400 border-gray-500/20" },
 };
 
 export default function TradingPage() {
@@ -43,7 +44,18 @@ export default function TradingPage() {
   const [message, setMessage] = useState("");
   const [showCreateTrade, setShowCreateTrade] = useState(false);
   const { user } = useAuth();
+  const { t, language } = useLanguage();
   const { toast } = useToast();
+
+  // Auto-fill target user from URL query param (e.g., /trading?target=username)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const target = params.get("target");
+    if (target) {
+      setTargetUser(decodeURIComponent(target));
+      setShowCreateTrade(true);
+    }
+  }, []);
 
   const { data: trades, isLoading } = useQuery<{ incoming: TradeOffer[]; outgoing: TradeOffer[] }>({
     queryKey: [`/api/trades/${user?.discordId}`],
@@ -98,8 +110,8 @@ export default function TradingPage() {
     return (
       <div className="container mx-auto px-4 py-8 max-w-4xl pt-24 text-center">
         <ArrowLeftRight className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
-        <h1 className="text-2xl font-bold mb-2">Торговля</h1>
-        <p className="text-muted-foreground">Войдите через Discord для торговли</p>
+        <h1 className="text-2xl font-bold mb-2">{t('trading.title')}</h1>
+        <p className="text-muted-foreground">{t('trading.loginRequired')}</p>
       </div>
     );
   }
@@ -122,13 +134,13 @@ export default function TradingPage() {
             </div>
             <div>
               <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-emerald-500 to-teal-500 bg-clip-text text-transparent">
-                Торговля
+                {t('trading.title')}
               </h1>
-              <p className="text-muted-foreground">Обменивайтесь LumiCoins с другими участниками</p>
+              <p className="text-muted-foreground">{t('trading.description')}</p>
             </div>
           </div>
           <Button onClick={() => setShowCreateTrade(!showCreateTrade)} className="gap-2">
-            <Plus className="h-4 w-4" /> Новое предложение
+            <Plus className="h-4 w-4" /> {t('trading.newOffer')}
           </Button>
         </div>
 
@@ -137,17 +149,17 @@ export default function TradingPage() {
           <Card className="glass glass-border mb-6">
             <CardContent className="pt-6 space-y-4">
               <div>
-                <label className="text-sm font-medium mb-1.5 block">Кому (Discord ID или имя)</label>
+                <label className="text-sm font-medium mb-1.5 block">{t('trading.targetLabel')}</label>
                 <Input
                   value={targetUser}
                   onChange={e => setTargetUser(e.target.value)}
-                  placeholder="Введите Discord ID или username"
+                  placeholder={t('trading.targetPlaceholder')}
                   className="glass glass-border"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm font-medium mb-1.5 block">Вы отдаёте (LC)</label>
+                  <label className="text-sm font-medium mb-1.5 block">{t('trading.youGive')}</label>
                   <Input
                     type="number"
                     min={0}
@@ -157,7 +169,7 @@ export default function TradingPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1.5 block">Вы получаете (LC)</label>
+                  <label className="text-sm font-medium mb-1.5 block">{t('trading.youReceive')}</label>
                   <Input
                     type="number"
                     min={0}
@@ -168,16 +180,16 @@ export default function TradingPage() {
                 </div>
               </div>
               <div>
-                <label className="text-sm font-medium mb-1.5 block">Сообщение (необязательно)</label>
+                <label className="text-sm font-medium mb-1.5 block">{t('trading.messageLabel')}</label>
                 <Input
                   value={message}
                   onChange={e => setMessage(e.target.value)}
-                  placeholder="Напишите комментарий..."
+                  placeholder={t('trading.messagePlaceholder')}
                   className="glass glass-border"
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <Button variant="ghost" onClick={() => setShowCreateTrade(false)}>Отмена</Button>
+                <Button variant="ghost" onClick={() => setShowCreateTrade(false)}>{t('trading.cancel')}</Button>
                 <Button
                   onClick={() => createTradeMutation.mutate({
                     discordId: user.discordId,
@@ -192,7 +204,7 @@ export default function TradingPage() {
                   className="bg-emerald-600 hover:bg-emerald-700 gap-2"
                 >
                   {createTradeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Отправить
+                  {t('trading.send')}
                 </Button>
               </div>
             </CardContent>
@@ -204,13 +216,13 @@ export default function TradingPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="glass glass-border w-full justify-start mb-6">
           <TabsTrigger value="incoming" className="gap-1.5">
-            <Inbox className="h-4 w-4" /> Входящие ({incoming.length})
+            <Inbox className="h-4 w-4" /> {t('trading.incoming')} ({incoming.length})
           </TabsTrigger>
           <TabsTrigger value="outgoing" className="gap-1.5">
-            <Send className="h-4 w-4" /> Исходящие ({outgoing.length})
+            <Send className="h-4 w-4" /> {t('trading.outgoing')} ({outgoing.length})
           </TabsTrigger>
           <TabsTrigger value="history" className="gap-1.5">
-            <Clock className="h-4 w-4" /> История ({history.length})
+            <Clock className="h-4 w-4" /> {t('trading.history')} ({history.length})
           </TabsTrigger>
         </TabsList>
 
@@ -224,7 +236,7 @@ export default function TradingPage() {
               {incoming.length === 0 ? (
                 <div className="text-center py-16">
                   <Inbox className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-                  <p className="text-muted-foreground">Нет входящих предложений</p>
+                  <p className="text-muted-foreground">{t('trading.noIncoming')}</p>
                 </div>
               ) : (
                 incoming.map(trade => (
@@ -234,19 +246,19 @@ export default function TradingPage() {
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <UserIcon className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-semibold text-sm">{trade.fromUsername || 'Участник'}</span>
+                            <span className="font-semibold text-sm">{trade.fromUsername || t('trading.member')}</span>
                             <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm">Вам</span>
+                            <span className="text-sm">{t('trading.toYou')}</span>
                           </div>
                           <div className="flex items-center gap-4 mt-2">
                             {trade.offerCoins > 0 && (
                               <Badge variant="secondary" className="text-xs gap-1">
-                                <Coins className="h-3 w-3 text-green-400" /> Даёт: {trade.offerCoins} LC
+                                <Coins className="h-3 w-3 text-green-400" /> {t('trading.gives')}: {trade.offerCoins} LC
                               </Badge>
                             )}
                             {trade.requestCoins > 0 && (
                               <Badge variant="outline" className="text-xs gap-1">
-                                <Coins className="h-3 w-3 text-red-400" /> Хочет: {trade.requestCoins} LC
+                                <Coins className="h-3 w-3 text-red-400" /> {t('trading.wants')}: {trade.requestCoins} LC
                               </Badge>
                             )}
                           </div>
@@ -261,7 +273,7 @@ export default function TradingPage() {
                             onClick={() => respondTradeMutation.mutate({ tradeId: trade.id, action: "accept" })}
                             disabled={respondTradeMutation.isPending}
                           >
-                            <Check className="h-4 w-4" /> Принять
+                            <Check className="h-4 w-4" /> {t('trading.acceptTrade')}
                           </Button>
                           <Button
                             size="sm"
@@ -270,7 +282,7 @@ export default function TradingPage() {
                             onClick={() => respondTradeMutation.mutate({ tradeId: trade.id, action: "reject" })}
                             disabled={respondTradeMutation.isPending}
                           >
-                            <X className="h-4 w-4" /> Отклонить
+                            <X className="h-4 w-4" /> {t('trading.reject')}
                           </Button>
                         </div>
                       </div>
@@ -284,7 +296,7 @@ export default function TradingPage() {
               {outgoing.length === 0 ? (
                 <div className="text-center py-16">
                   <Send className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-                  <p className="text-muted-foreground">Нет исходящих предложений</p>
+                  <p className="text-muted-foreground">{t('trading.noOutgoing')}</p>
                 </div>
               ) : (
                 outgoing.map(trade => (
@@ -293,20 +305,20 @@ export default function TradingPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm">Вы</span>
+                            <span className="text-sm">{t('trading.you')}</span>
                             <ArrowRight className="h-4 w-4 text-muted-foreground" />
                             <UserIcon className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-semibold text-sm">{trade.toUsername || 'Участник'}</span>
+                            <span className="font-semibold text-sm">{trade.toUsername || t('trading.member')}</span>
                           </div>
                           <div className="flex items-center gap-4 mt-2">
                             {trade.offerCoins > 0 && (
                               <Badge variant="secondary" className="text-xs gap-1">
-                                <Coins className="h-3 w-3" /> Отдаёте: {trade.offerCoins} LC
+                                <Coins className="h-3 w-3" /> {t('trading.youGiveLabel')}: {trade.offerCoins} LC
                               </Badge>
                             )}
                             {trade.requestCoins > 0 && (
                               <Badge variant="outline" className="text-xs gap-1">
-                                <Coins className="h-3 w-3" /> Просите: {trade.requestCoins} LC
+                                <Coins className="h-3 w-3" /> {t('trading.youAskLabel')}: {trade.requestCoins} LC
                               </Badge>
                             )}
                           </div>
@@ -318,7 +330,7 @@ export default function TradingPage() {
                           onClick={() => cancelTradeMutation.mutate(trade.id)}
                           disabled={cancelTradeMutation.isPending}
                         >
-                          Отменить
+                          {t('trading.cancelOffer')}
                         </Button>
                       </div>
                     </CardContent>
@@ -331,11 +343,11 @@ export default function TradingPage() {
               {history.length === 0 ? (
                 <div className="text-center py-16">
                   <Clock className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-                  <p className="text-muted-foreground">История торгов пуста</p>
+                  <p className="text-muted-foreground">{t('trading.historyEmpty')}</p>
                 </div>
               ) : (
                 history.map(trade => {
-                  const statusInfo = statusStyles[trade.status] || statusStyles.cancelled;
+                  const statusInfo = statusStylesMap[trade.status] || statusStylesMap.cancelled;
                   return (
                     <Card key={trade.id} className="glass glass-border opacity-75">
                       <CardContent className="p-4">
@@ -348,15 +360,15 @@ export default function TradingPage() {
                             </div>
                             <div className="flex items-center gap-2 mt-1">
                               {trade.offerCoins > 0 && <span className="text-xs text-muted-foreground">{trade.offerCoins} LC</span>}
-                              {trade.requestCoins > 0 && <span className="text-xs text-muted-foreground">за {trade.requestCoins} LC</span>}
+                              {trade.requestCoins > 0 && <span className="text-xs text-muted-foreground">{t('trading.forLC')} {trade.requestCoins} LC</span>}
                             </div>
                           </div>
                           <div className="text-right">
                             <Badge variant="outline" className={`text-xs ${statusInfo.class}`}>
-                              {statusInfo.label}
+                              {statusInfo[language as 'ru' | 'en'] || statusInfo.ru}
                             </Badge>
                             <p className="text-[10px] text-muted-foreground/50 mt-1">
-                              {new Date(trade.createdAt).toLocaleDateString("ru-RU")}
+                              {new Date(trade.createdAt).toLocaleDateString()}
                             </p>
                           </div>
                         </div>

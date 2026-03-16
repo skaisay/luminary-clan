@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface ActiveBoost {
   id: string;
@@ -16,10 +17,10 @@ interface ActiveBoost {
   itemName?: string;
 }
 
-const boostTypeInfo: Record<string, { label: string; icon: any; color: string; gradient: string }> = {
-  exp: { label: "XP Бустер", icon: Zap, color: "text-blue-400", gradient: "from-blue-500 to-cyan-500" },
-  coins: { label: "Монеты Бустер", icon: Coins, color: "text-yellow-400", gradient: "from-yellow-500 to-orange-500" },
-  luck: { label: "Удача Бустер", icon: Sparkles, color: "text-purple-400", gradient: "from-purple-500 to-pink-500" },
+const boostTypeInfo: Record<string, { ru: string; en: string; icon: any; color: string; gradient: string }> = {
+  exp: { ru: "XP Бустер", en: "XP Booster", icon: Zap, color: "text-blue-400", gradient: "from-blue-500 to-cyan-500" },
+  coins: { ru: "Монеты Бустер", en: "Coins Booster", icon: Coins, color: "text-yellow-400", gradient: "from-yellow-500 to-orange-500" },
+  luck: { ru: "Удача Бустер", en: "Luck Booster", icon: Sparkles, color: "text-purple-400", gradient: "from-purple-500 to-pink-500" },
 };
 
 function getTimeRemaining(expiresAt: string): { text: string; percent: number; isExpired: boolean } {
@@ -27,7 +28,7 @@ function getTimeRemaining(expiresAt: string): { text: string; percent: number; i
   const end = new Date(expiresAt).getTime();
   const diff = end - now;
 
-  if (diff <= 0) return { text: "Истёк", percent: 0, isExpired: true };
+  if (diff <= 0) return { text: "expired", percent: 0, isExpired: true };
 
   const hours = Math.floor(diff / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
@@ -42,6 +43,7 @@ function getTimeRemaining(expiresAt: string): { text: string; percent: number; i
 
 export default function BoostersPage() {
   const { user } = useAuth();
+  const { t, language } = useLanguage();
 
   const { data: boosts, isLoading } = useQuery<ActiveBoost[]>({
     queryKey: [`/api/boosts/${user?.discordId}`],
@@ -53,8 +55,8 @@ export default function BoostersPage() {
     return (
       <div className="container mx-auto px-4 py-8 max-w-4xl pt-24 text-center">
         <Flame className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
-        <h1 className="text-2xl font-bold mb-2">Бустеры</h1>
-        <p className="text-muted-foreground">Войдите через Discord для просмотра бустеров</p>
+        <h1 className="text-2xl font-bold mb-2">{t('boosters.title')}</h1>
+        <p className="text-muted-foreground">{t('boosters.loginRequired')}</p>
       </div>
     );
   }
@@ -72,9 +74,9 @@ export default function BoostersPage() {
           </div>
           <div>
             <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">
-              Бустеры
+              {t('boosters.title')}
             </h1>
-            <p className="text-muted-foreground">Активные усиления вашего профиля</p>
+            <p className="text-muted-foreground">{t('boosters.description')}</p>
           </div>
         </div>
       </div>
@@ -86,8 +88,8 @@ export default function BoostersPage() {
       ) : activeBoosts.length === 0 && expiredBoosts.length === 0 ? (
         <div className="text-center py-20">
           <Flame className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
-          <p className="text-muted-foreground text-lg">Нет активных бустеров</p>
-          <p className="text-sm text-muted-foreground/60 mt-1">Купите бустер в магазине или получите за квест!</p>
+          <p className="text-muted-foreground text-lg">{t('boosters.noActive')}</p>
+          <p className="text-sm text-muted-foreground/60 mt-1">{t('boosters.buyHint')}</p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -95,7 +97,7 @@ export default function BoostersPage() {
           {activeBoosts.length > 0 && (
             <div>
               <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                <Zap className="h-5 w-5 text-yellow-500" /> Активные ({activeBoosts.length})
+                <Zap className="h-5 w-5 text-yellow-500" /> {t('boosters.active')} ({activeBoosts.length})
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {activeBoosts.map(boost => {
@@ -111,7 +113,7 @@ export default function BoostersPage() {
                             <Icon className="h-6 w-6 text-white" />
                           </div>
                           <div className="flex-1">
-                            <h3 className="font-semibold">{info.label}</h3>
+                            <h3 className="font-semibold">{info[language as 'ru' | 'en'] || info.ru}</h3>
                             <div className="flex items-center gap-2 mt-1">
                               <Badge variant="secondary" className="text-xs">
                                 <TrendingUp className="h-3 w-3 mr-1" />
@@ -123,7 +125,7 @@ export default function BoostersPage() {
                         <div className="mt-4">
                           <div className="flex justify-between text-xs text-muted-foreground mb-1">
                             <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" /> Осталось
+                              <Clock className="h-3 w-3" /> {t('boosters.remaining')}
                             </span>
                             <span className={info.color}>{remaining.text}</span>
                           </div>
@@ -140,7 +142,7 @@ export default function BoostersPage() {
           {/* Expired boosts */}
           {expiredBoosts.length > 0 && (
             <div>
-              <h2 className="text-lg font-semibold mb-3 text-muted-foreground">Завершённые</h2>
+              <h2 className="text-lg font-semibold mb-3 text-muted-foreground">{t('boosters.expired')}</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {expiredBoosts.map(boost => {
                   const info = boostTypeInfo[boost.boostType] || boostTypeInfo.exp;
@@ -152,8 +154,8 @@ export default function BoostersPage() {
                             <info.icon className="h-5 w-5 text-muted-foreground" />
                           </div>
                           <div>
-                            <p className="text-sm font-medium">{info.label} x{boost.multiplier}</p>
-                            <p className="text-xs text-muted-foreground">Истёк</p>
+                            <p className="text-sm font-medium">{info[language as 'ru' | 'en'] || info.ru} x{boost.multiplier}</p>
+                            <p className="text-xs text-muted-foreground">{t('boosters.expiredLabel')}</p>
                           </div>
                         </div>
                       </CardContent>

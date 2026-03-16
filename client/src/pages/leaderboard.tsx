@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ClanMember } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { Link } from "wouter";
 import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -61,9 +62,10 @@ export default function Leaderboard() {
           ) : (
             <div className="space-y-2">
               {sortedMembers.map((member, index) => (
-                <div
+                <Link
                   key={member.id}
-                  className="flex items-center gap-3 p-2.5 rounded-xl bg-gradient-to-r from-background/50 to-transparent border border-border/50 hover:border-primary/30 transition-colors"
+                  href={`/profile/${member.discordId || member.username}`}
+                  className="flex items-center gap-3 p-2.5 rounded-xl bg-gradient-to-r from-background/50 to-transparent border border-border/50 hover:border-primary/30 transition-colors cursor-pointer"
                   data-testid={`row-leaderboard-${index}`}
                 >
                   <div className="flex items-center justify-center min-w-[28px]">
@@ -103,7 +105,7 @@ export default function Leaderboard() {
                     </div>
                     <p className="text-[10px] text-muted-foreground uppercase">LC</p>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}

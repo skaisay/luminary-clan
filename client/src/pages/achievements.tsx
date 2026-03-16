@@ -88,9 +88,9 @@ export default function AchievementsPage() {
           </div>
           <div>
             <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-yellow-500 to-orange-500 bg-clip-text text-transparent">
-              Достижения
+              {t('achievements.title')}
             </h1>
-            <p className="text-muted-foreground">Открывайте достижения и получайте награды</p>
+            <p className="text-muted-foreground">{t('achievements.description')}</p>
           </div>
         </div>
 
@@ -101,7 +101,7 @@ export default function AchievementsPage() {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Award className="h-5 w-5 text-yellow-500" />
-                  <span className="font-semibold">Общий прогресс</span>
+                  <span className="font-semibold">{t('achievements.overallProgress')}</span>
                 </div>
                 <span className="text-sm text-muted-foreground">
                   {totalCompleted} / {totalAchievements} ({completionPercent}%)
@@ -111,11 +111,11 @@ export default function AchievementsPage() {
               <div className="flex gap-4 mt-4 text-sm">
                 <div className="flex items-center gap-1.5">
                   <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  <span>{totalCompleted} выполнено</span>
+                  <span>{totalCompleted} {t('achievements.completed')}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Target className="h-4 w-4 text-blue-500" />
-                  <span>{totalAchievements - totalCompleted} осталось</span>
+                  <span>{totalAchievements - totalCompleted} {t('achievements.remaining')}</span>
                 </div>
               </div>
             </CardContent>
@@ -131,7 +131,7 @@ export default function AchievementsPage() {
             return (
               <TabsTrigger key={cat} value={cat} className="gap-1.5 capitalize">
                 {cat !== "all" && <Icon className="h-4 w-4" />}
-                {cat === "all" ? "Все" : cat === "general" ? "Общие" : cat === "activity" ? "Активность" : cat === "economy" ? "Экономика" : "Социальные"}
+                {cat === "all" ? t('achievements.all') : cat === "general" ? t('achievements.general') : cat === "activity" ? t('achievements.activity') : cat === "economy" ? t('achievements.economy') : t('achievements.social')}
               </TabsTrigger>
             );
           })}
@@ -146,8 +146,8 @@ export default function AchievementsPage() {
       ) : !filtered || filtered.length === 0 ? (
         <div className="text-center py-20">
           <Trophy className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
-          <p className="text-muted-foreground text-lg">Достижений пока нет</p>
-          <p className="text-sm text-muted-foreground/60 mt-1">Скоро здесь появятся новые достижения!</p>
+          <p className="text-muted-foreground text-lg">{t('achievements.noAchievements')}</p>
+          <p className="text-sm text-muted-foreground/60 mt-1">{t('achievements.comingSoon')}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -196,7 +196,7 @@ export default function AchievementsPage() {
                   {user?.discordId && !isCompleted && (
                     <div className="mt-3">
                       <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                        <span>Прогресс</span>
+                        <span>{t('achievements.progress')}</span>
                         <span>{userProgress?.progress || 0} / {achievement.requirement?.count || "?"}</span>
                       </div>
                       <Progress value={progressPercent} className="h-1.5" />
@@ -208,17 +208,17 @@ export default function AchievementsPage() {
                     <div className="mt-3 flex items-center gap-2">
                       <Badge variant="secondary" className="text-xs gap-1">
                         <Sparkles className="h-3 w-3" />
-                        {achievement.reward.coins ? `+${achievement.reward.coins} LC` : "Награда"}
+                        {achievement.reward.coins ? `+${achievement.reward.coins} LC` : t('achievements.reward')}
                       </Badge>
                       <Badge variant="outline" className="text-xs capitalize">
-                        {achievement.category === "general" ? "Общее" : achievement.category === "activity" ? "Активность" : achievement.category === "economy" ? "Экономика" : "Социальное"}
+                        {achievement.category === "general" ? t('achievements.general') : achievement.category === "activity" ? t('achievements.activity') : achievement.category === "economy" ? t('achievements.economy') : t('achievements.social')}
                       </Badge>
                     </div>
                   )}
 
                   {isCompleted && userProgress?.completedAt && (
                     <p className="text-[10px] text-muted-foreground/50 mt-2">
-                      Выполнено: {new Date(userProgress.completedAt).toLocaleDateString("ru-RU")}
+                      {t('achievements.completedAt')}: {new Date(userProgress.completedAt).toLocaleDateString()}
                     </p>
                   )}
                 </CardContent>
