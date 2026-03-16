@@ -23,6 +23,7 @@ import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useAllDecorations } from "@/components/member-decorations";
 import { AvatarFrame, StyledUsername, UserBadges, useEquippedBanner } from "@/components/UserBadges";
+import { MemberDecorations } from "@/components/member-decorations";
 
 interface MemberProfile {
   id: string;
@@ -195,6 +196,7 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
       if (data.newBalance !== undefined) updateBalance(data.newBalance);
       queryClient.invalidateQueries({ queryKey: ["/api/decorations/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/decorations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/decorations/all-equipped"] });
       // Refresh profile balance too
       queryClient.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith('/api/profile/') });
       toast({ title: isRu ? "Куплено!" : "Purchased!", description: data.message });
@@ -556,7 +558,7 @@ export default function ProfilePage() {
     enabled: !!targetDiscordId,
   });
 
-  useAllDecorations(); // keep query warm for other components
+  const { data: allEquippedData } = useAllDecorations(); // keep query warm + pass to MemberDecorations
   const equippedBanner = useEquippedBanner(targetDiscordId || undefined);
 
   const handleSearch = () => {
@@ -654,10 +656,27 @@ export default function ProfilePage() {
           if (hasBannerColors && !hasBannerImage) {
             bannerStyle = { background: `linear-gradient(to right, ${cd.bannerColor1}, ${cd.bannerColor2 || cd.bannerColor1})` };
           } else if (!hasBannerImage && !hasBannerColors && hasBannerDecor) {
-            bannerStyle = { background: equippedBanner!.cssEffect! };
+            // Parse cssEffect that may contain multiple CSS properties separated by ;
+            const parsed: Record<string, string> = {};
+            equippedBanner!.cssEffect!.split(";").forEach((rule: string) => {
+              const idx = rule.indexOf(":");
+              if (idx === -1) {
+                // No colon means this is just a value (e.g. a gradient as first segment)
+                if (rule.trim()) parsed.background = rule.trim();
+                return;
+              }
+              const prop = rule.slice(0, idx).trim();
+              const val = rule.slice(idx + 1).trim();
+              if (prop && val) {
+                const camelProp = prop.replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase());
+                parsed[camelProp] = val;
+              }
+            });
+            if (!parsed.background) parsed.background = equippedBanner!.cssEffect!;
+            bannerStyle = parsed as React.CSSProperties;
           }
           return (
-            <div className="h-32 relative" style={bannerStyle}>
+            <div className="h-48 relative" style={bannerStyle}>
               {hasBannerImage && (
                 <img src={cd.bannerImage} alt="" className="w-full h-full object-cover absolute inset-0" />
               )}
@@ -680,6 +699,7 @@ export default function ProfilePage() {
                 <h1 className="text-2xl font-bold flex items-center gap-1.5">
                   <StyledUsername discordId={profile.discordId} username={profile.username} />
                   <UserBadges discordId={profile.discordId} />
+                  <MemberDecorations discordId={profile.discordId} decorations={allEquippedData} />
                 </h1>
                 {profile.equippedTitle && (
                   <Badge variant="secondary" className="text-xs">{profile.equippedTitle}</Badge>

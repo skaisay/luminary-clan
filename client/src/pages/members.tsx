@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import type { ClanMember } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
+import { StyledUsername } from "@/components/UserBadges";
 import { Link } from "wouter";
 
 interface DiscordInfo {
@@ -113,7 +114,7 @@ export default function Members() {
                   )}
                   <div className="flex-1 min-w-0">
                     <CardTitle className="text-base mb-0.5 truncate">
-                      {member.username}
+                      <StyledUsername discordId={member.discordId || ''} username={member.username} />
                       <MemberDecorations discordId={member.discordId} decorations={decorations} />
                     </CardTitle>
                     <div className="flex items-center gap-1.5">

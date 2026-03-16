@@ -50,11 +50,6 @@ const menuItemsConfig = [
     icon: Users,
   },
   {
-    key: "nav.news",
-    url: "/news",
-    icon: Newspaper,
-  },
-  {
     key: "nav.about",
     url: "/about",
     icon: Info,

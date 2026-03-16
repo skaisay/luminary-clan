@@ -4,11 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ClanStats, ClanMember, News, ClanSettings } from "@shared/schema";
+import type { ClanStats, ClanMember, ClanSettings } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Link } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
+import { StyledUsername } from "@/components/UserBadges";
 import { RobloxAvatarCard } from "@/components/RobloxAvatarCard";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -43,10 +44,6 @@ export default function Dashboard() {
 
   const { data: topMembers, isLoading: membersLoading } = useQuery<ClanMember[]>({
     queryKey: ["/api/members/top"],
-  });
-
-  const { data: latestNews, isLoading: newsLoading } = useQuery<News[]>({
-    queryKey: ["/api/news/latest"],
   });
 
   const { data: discordInfo, isLoading: discordLoading } = useQuery<DiscordInfo>({
@@ -186,7 +183,7 @@ export default function Dashboard() {
                       )}
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm truncate">
-                          {member.username}
+                          <StyledUsername discordId={member.discordId || ''} username={member.username} />
                           <MemberDecorations discordId={member.discordId} decorations={decorations} />
                         </p>
                         <p className="text-xs text-muted-foreground truncate">{member.role}</p>
@@ -250,42 +247,6 @@ export default function Dashboard() {
                     {buyAdMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Megaphone className="h-3.5 w-3.5" />}
                     {(t as any)('dashboard.buyAdSpot') || 'Купить место — 500 000 LC'}
                   </Button>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="glass glass-border border-0 shadow-lg">
-              <CardHeader>
-                <CardTitle className="text-xl font-bold flex items-center gap-2">
-                  <Activity className="h-6 w-6 text-accent" />
-                  {t('dashboard.latestNews')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {newsLoading ? (
-                  <div className="space-y-3">
-                    {[1, 2].map((i) => (
-                      <Skeleton key={i} className="h-20 w-full" />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {latestNews?.slice(0, 3).map((article) => (
-                      <div
-                        key={article.id}
-                        className="p-2.5 rounded-xl bg-gradient-to-r from-background/50 to-transparent border border-border/50 hover:border-accent/30 cursor-pointer transition-colors"
-                        data-testid={`card-news-${article.id}`}
-                      >
-                        <Badge className="mb-1.5 text-[10px] px-2 py-0.5" variant="outline">
-                          {article.category}
-                        </Badge>
-                        <h3 className="font-semibold text-sm mb-0.5 line-clamp-2">{article.title}</h3>
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(article.createdAt).toLocaleDateString('ru-RU')}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
                 )}
               </CardContent>
             </Card>

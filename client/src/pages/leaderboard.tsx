@@ -7,6 +7,7 @@ import type { ClanMember } from "@shared/schema";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Link } from "wouter";
 import { useAllDecorations, MemberDecorations } from "@/components/member-decorations";
+import { StyledUsername } from "@/components/UserBadges";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default function Leaderboard() {
@@ -86,7 +87,7 @@ export default function Leaderboard() {
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <h3 className="text-sm font-bold truncate">{member.username}</h3>
+                      <h3 className="text-sm font-bold truncate"><StyledUsername discordId={member.discordId || ''} username={member.username} /></h3>
                       <MemberDecorations discordId={member.discordId} decorations={decorations} />
                       <Badge className="text-[10px] px-1.5 py-0 h-5" variant="outline">
                         {getRankBadge(index)}
