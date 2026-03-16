@@ -275,14 +275,57 @@ async function ensureSoundCloudInit() {
   }
 }
 
+/** Clean a title for SoundCloud search: remove special chars, pipe separators, excessive words */
+function cleanTitleForSearch(title: string): string {
+  // Remove common noise: pipe separators, brackets, special suffixes
+  let cleaned = title
+    .replace(/\s*[|｜]\s*/g, ' ')           // pipe separators
+    .replace(/\[.*?\]/g, '')                 // [brackets]
+    .replace(/\(.*?\)/g, '')                 // (parentheses) 
+    .replace(/【.*?】/g, '')                   // 【japanese brackets】
+    .replace(/\s*(official\s*(video|audio|lyric|music\s*video)|lyrics?|hd|hq|mv|m\/v|full\s*album|playlist|плейлист|visualizer|audio)\s*/gi, ' ')
+    .replace(/[🎵🎶💋🔥⚡✨💫🌙🌊🎤🎧🎸🎹🎺🎻🥁👑💜💙💚💛🧡❤️🖤🤍💕💖]/g, '')  // emoji
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  
+  // If still too long (>60 chars), take first meaningful part
+  if (cleaned.length > 60) {
+    const parts = cleaned.split(/[-–—:]/); // split on dashes/colons
+    if (parts.length > 1 && parts[0].trim().length > 5) {
+      cleaned = parts[0].trim();
+    } else {
+      cleaned = cleaned.substring(0, 60).trim();
+    }
+  }
+  
+  return cleaned;
+}
+
 async function streamFromSoundCloud(songTitle: string): Promise<{ resource: any; scUrl: string; scTitle: string }> {
   await ensureSoundCloudInit();
   
-  musicLog(`SC: searching SoundCloud for "${songTitle}"...`);
-  const results = await withTimeout(
-    play.search(songTitle, { limit: 3, source: { soundcloud: 'tracks' } }),
+  // Clean the title for better SoundCloud search results
+  const cleanedTitle = cleanTitleForSearch(songTitle);
+  const searchQuery = cleanedTitle || songTitle;
+  musicLog(`SC: searching SoundCloud for "${searchQuery}" (original: "${songTitle.substring(0, 50)}")...`);
+  
+  let results = await withTimeout(
+    play.search(searchQuery, { limit: 3, source: { soundcloud: 'tracks' } }),
     12000, 'sc-search'
   );
+  
+  // If cleaned title found nothing and it differs from original, try shorter version
+  if ((!results || results.length === 0) && cleanedTitle !== songTitle) {
+    const words = cleanedTitle.split(/\s+/);
+    if (words.length > 3) {
+      const shorterQuery = words.slice(0, 3).join(' ');
+      musicLog(`SC: retrying with shorter query "${shorterQuery}"...`);
+      results = await withTimeout(
+        play.search(shorterQuery, { limit: 3, source: { soundcloud: 'tracks' } }),
+        12000, 'sc-search-short'
+      );
+    }
+  }
   
   if (!results || results.length === 0) {
     throw new Error('Не найдено на SoundCloud');
@@ -333,18 +376,81 @@ async function resolveSpotifyTitle(spotifyUrl: string): Promise<string | null> {
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.adminforge.de',
-  'https://pipedapi.in.projectsegfau.lt',
-  'https://api.piped.projectsegfau.lt',
-  'https://pipedapi.darkness.services',
+  'https://watchapi.whatever.social',
+  'https://pipedapi.leptons.xyz',
+  'https://pipedapi.drgns.space',
 ];
 
 const INVIDIOUS_INSTANCES = [
   'https://inv.nadeko.net',
   'https://invidious.nerdvpn.de',
-  'https://invidious.privacyredirect.com',
-  'https://invidious.protokolla.fi',
-  'https://iv.datura.network',
+  'https://yewtu.be',
+  'https://vid.puffyan.us',
+  'https://invidious.snopyta.org',
+  'https://inv.tux.pizza',
+  'https://invidious.fdn.fr',
 ];
+
+// ========= Cobalt API Strategy =========
+// Cobalt (cobalt.tools) is a public media download API that works from cloud IPs
+const COBALT_INSTANCES = [
+  'https://api.cobalt.tools',
+];
+
+async function getCobaltAudioUrl(videoId: string): Promise<string> {
+  const errors: string[] = [];
+  const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  
+  for (const instance of COBALT_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      const resp = await fetch(`${instance}/`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: youtubeUrl,
+          downloadMode: 'audio',
+          audioFormat: 'opus',
+        }),
+      });
+      clearTimeout(timer);
+      
+      if (!resp.ok) {
+        errors.push(`${instance}: HTTP ${resp.status}`);
+        continue;
+      }
+      
+      const data: any = await resp.json();
+      
+      if (data.status === 'tunnel' || data.status === 'redirect') {
+        const audioUrl = data.url;
+        if (audioUrl) {
+          musicLog(`Cobalt(${instance}): got audio URL (status=${data.status})`);
+          return audioUrl;
+        }
+      }
+      
+      if (data.status === 'picker' && data.picker?.length > 0) {
+        const audioItem = data.picker.find((p: any) => p.type === 'audio') || data.picker[0];
+        if (audioItem?.url) {
+          musicLog(`Cobalt(${instance}): got picker audio URL`);
+          return audioItem.url;
+        }
+      }
+      
+      errors.push(`${instance}: unexpected response status=${data.status}`);
+    } catch (err: any) {
+      errors.push(`${instance}: ${err.message}`);
+    }
+  }
+  
+  throw new Error(`All Cobalt instances failed: ${errors.join('; ')}`);
+}
 
 /** Get direct audio URL via Piped API (public YouTube proxy) */
 async function getPipedAudioUrl(videoId: string): Promise<string> {
@@ -497,6 +603,24 @@ async function playSong(guildId: string): Promise<{ success: boolean; error?: st
           musicLog(`✅ P2 OK`);
         } catch (p2Err: any) {
           const msg = `P2(Invidious): ${p2Err.message}`;
+          errors.push(msg);
+          musicLog(msg);
+        }
+      }
+
+      // Strategy P3: Cobalt API — public media download API (works from cloud IPs)
+      if (!resource && videoId) {
+        setLoadingStatus(guildId, 'streaming', 65 + attempt * 5, 'Cobalt API...', { songTitle: song.title });
+        try {
+          musicLog(`P3: Cobalt API for videoId=${videoId}...`);
+          const audioUrl = await getCobaltAudioUrl(videoId);
+          musicLog(`P3: got audio URL, starting ffmpeg...`);
+          setLoadingStatus(guildId, 'streaming', 73, 'Запуск аудиопотока (Cobalt)...', { songTitle: song.title });
+          resource = await streamViaFfmpeg(audioUrl);
+          strategyUsed = 'Cobalt API + ffmpeg';
+          musicLog(`✅ P3 OK`);
+        } catch (p3Err: any) {
+          const msg = `P3(Cobalt): ${p3Err.message}`;
           errors.push(msg);
           musicLog(msg);
         }
@@ -998,7 +1122,7 @@ export async function addSong(
             url: `https://www.youtube.com/watch?v=${videoId}`,
             duration: video?.durationFormatted || '0:00',
             durationSec: (video?.duration || 0) / 1000,
-            thumbnail: video?.thumbnail?.url,
+            thumbnail: video?.thumbnail?.url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
             requestedBy,
           };
         } else {
@@ -1019,12 +1143,35 @@ export async function addSong(
           };
         }
       } catch {
-        // Fallback: just use the URL with minimal info
+        // youtube-sr failed — try oEmbed for title, use standard YouTube thumbnail
+        const videoId = cleanedQuery.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
+        let title = 'YouTube видео';
+        let thumbnail: string | undefined;
+        
+        if (videoId) {
+          thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 6000);
+            const oembedResp = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+            if (oembedResp.ok) {
+              const oembedData: any = await oembedResp.json();
+              if (oembedData.title) title = oembedData.title;
+              if (oembedData.thumbnail_url) thumbnail = oembedData.thumbnail_url;
+            }
+          } catch { /* oEmbed also failed */ }
+        }
+        
+        musicLog(`addSong: youtube-sr failed, oEmbed fallback title="${title}"`);
         songInfo = {
-          title: 'YouTube видео',
+          title,
           url: cleanedQuery,
           duration: '0:00',
           durationSec: 0,
+          thumbnail,
           requestedBy,
         };
       }
@@ -1267,6 +1414,7 @@ export async function getQueue(guildId: string): Promise<{ success: boolean; mes
       title: song.title,
       duration: song.duration,
       url: song.url,
+      thumbnail: song.thumbnail,
       isPlaying: index === 0,
     }));
 
@@ -1398,9 +1546,16 @@ export async function jumpToSong(guildId: string, position: number): Promise<{ s
       return { success: true, message: `▶️ Уже играет: **${q.songs[0].title}**` };
     }
 
-    // Remove songs before the target position so target becomes songs[0]
+    // Move the target to position 0, keeping all other songs in queue
     const target = q.songs[position - 1];
-    q.songs = q.songs.slice(position - 1);
+    q.songs.splice(position - 1, 1);  // remove target from its current position
+    q.songs[0] = target;               // replace current playing song with target
+    // The previously playing song is dropped (already played/heard)
+    
+    // Reset retry state for the new song
+    q.streamRetryCount = 0;
+    q.playStartedAt = 0;
+    q.currentStrategy = '';
     
     // Directly start playing the new songs[0] — do NOT use stop() because
     // that triggers handleNextSong which would shift() the target song away

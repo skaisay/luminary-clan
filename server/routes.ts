@@ -3977,6 +3977,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true, message: "Tournament creation coming soon" });
   });
 
+  // ============================================================
+  // PROFILE CUSTOMIZATION API (in-memory + file, no DB)
+  // ============================================================
+  const profileCustomPath = path.join(process.cwd(), 'uploads', 'profile-customs.json');
+  let profileCustoms: Record<string, any> = {};
+  try {
+    if (fs.existsSync(profileCustomPath)) {
+      profileCustoms = JSON.parse(fs.readFileSync(profileCustomPath, 'utf-8'));
+    }
+  } catch { /* fresh start */ }
+
+  function saveProfileCustoms() {
+    try {
+      const dir = path.dirname(profileCustomPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(profileCustomPath, JSON.stringify(profileCustoms, null, 2));
+    } catch (err: any) {
+      console.error('Failed to save profile customs:', err.message);
+    }
+  }
+
+  app.get("/api/profile-custom/:discordId", (req, res) => {
+    const data = profileCustoms[req.params.discordId] || {};
+    res.json(data);
+  });
+
+  app.post("/api/profile-custom/:discordId", (req, res) => {
+    const user = (req as any).user;
+    if (!user || (user.discordId !== req.params.discordId && user.type !== 'admin')) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    const { bannerColor1, bannerColor2, cardColor, bio, customAvatar, hiddenSections } = req.body;
+    profileCustoms[req.params.discordId] = {
+      bannerColor1: bannerColor1 || '',
+      bannerColor2: bannerColor2 || '',
+      cardColor: cardColor || '',
+      bio: (bio || '').substring(0, 200),
+      customAvatar: customAvatar || '',
+      hiddenSections: hiddenSections || [],
+      updatedAt: new Date().toISOString(),
+    };
+    saveProfileCustoms();
+    res.json({ success: true });
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;

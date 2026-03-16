@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   User, Trophy, Coins, Zap, Shield, Star, Clock, BarChart3,
   Loader2, Flame, Medal, Crown, Package, Award, TrendingUp,
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useParams } from "wouter";
 import { Link, useLocation } from "wouter";
 
@@ -93,6 +94,7 @@ export default function ProfilePage() {
     cardColor: string;
     bio: string;
     customAvatar: string;
+    hiddenSections: string[];
   }
 
   const defaultCustom: CustomProfileData = {
@@ -101,45 +103,58 @@ export default function ProfilePage() {
     cardColor: "",
     bio: "",
     customAvatar: "",
+    hiddenSections: [],
   };
 
-  const [customData, setCustomData] = useState<CustomProfileData>(defaultCustom);
   const [editData, setEditData] = useState<CustomProfileData>(defaultCustom);
 
   const targetDiscordId = params.discordId || user?.discordId;
   const isOwnProfile = !params.discordId || params.discordId === user?.discordId;
 
-  // Load custom profile data from localStorage
+  // Load custom profile data from server (visible to all users)
+  const { data: customData } = useQuery<CustomProfileData>({
+    queryKey: [`/api/profile-custom/${targetDiscordId}`],
+    enabled: !!targetDiscordId,
+  });
+
+  const cd = customData || defaultCustom;
+
+  // Sync editData when customData loads
   useEffect(() => {
-    if (targetDiscordId) {
-      try {
-        const stored = localStorage.getItem(`profile_custom_${targetDiscordId}`);
-        if (stored) {
-          const parsed = JSON.parse(stored) as CustomProfileData;
-          setCustomData(parsed);
-          setEditData(parsed);
-        } else {
-          setCustomData(defaultCustom);
-          setEditData(defaultCustom);
-        }
-      } catch {
-        setCustomData(defaultCustom);
-        setEditData(defaultCustom);
-      }
+    if (customData) {
+      setEditData({ ...defaultCustom, ...customData });
     }
-  }, [targetDiscordId]);
+  }, [customData]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (data: CustomProfileData) => {
+      const resp = await apiRequest("POST", `/api/profile-custom/${targetDiscordId}`, data);
+      return resp.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/profile-custom/${targetDiscordId}`] });
+      setEditing(false);
+    },
+  });
 
   const saveCustomProfile = () => {
     if (targetDiscordId) {
-      localStorage.setItem(`profile_custom_${targetDiscordId}`, JSON.stringify(editData));
-      setCustomData(editData);
-      setEditing(false);
+      saveMutation.mutate(editData);
     }
   };
 
   const cancelEditing = () => {
-    setEditData(customData);
+    setEditData({ ...defaultCustom, ...cd });
     setEditing(false);
+  };
+
+  const toggleHiddenSection = (section: string) => {
+    setEditData(d => ({
+      ...d,
+      hiddenSections: d.hiddenSections.includes(section)
+        ? d.hiddenSections.filter(s => s !== section)
+        : [...d.hiddenSections, section],
+    }));
   };
 
   const { data: profile, isLoading: loadingProfile } = useQuery<MemberProfile>({
@@ -242,36 +257,37 @@ export default function ProfilePage() {
       </div>
 
       {/* Profile Header */}
-      <Card className="glass glass-border overflow-hidden mb-6" style={customData.cardColor ? { borderColor: customData.cardColor + '40' } : undefined}>
+      <Card className="glass glass-border overflow-hidden mb-6" style={cd.cardColor ? { borderColor: cd.cardColor + '40' } : undefined}>
         <div
           className="h-32 relative"
-          style={customData.bannerColor1
-            ? { background: `linear-gradient(to right, ${customData.bannerColor1}, ${customData.bannerColor2 || customData.bannerColor1})` }
+          style={cd.bannerColor1
+            ? { background: `linear-gradient(to right, ${cd.bannerColor1}, ${cd.bannerColor2 || cd.bannerColor1})` }
             : undefined
           }
         >
-          {!customData.bannerColor1 && (
+          {!cd.bannerColor1 && (
             <div className="absolute inset-0 bg-gradient-to-r from-primary/30 to-[hsl(var(--accent))]/30" />
           )}
-          {profile.equippedBanner && !customData.bannerColor1 && (
+          {profile.equippedBanner && !cd.bannerColor1 && (
             <img src={profile.equippedBanner} alt="" className="w-full h-full object-cover absolute inset-0" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent" />
           {isOwnProfile && !editing && (
             <Button
-              size="sm"
+              size="icon"
               variant="secondary"
-              className="absolute top-3 right-3 gap-1 text-xs opacity-80 hover:opacity-100 z-10"
+              className="absolute top-2 right-2 h-8 w-8 rounded-full opacity-70 hover:opacity-100 z-10 shadow-md"
               onClick={() => setEditing(true)}
+              title={t('profile.editProfile')}
             >
-              <Pencil className="h-3 w-3" /> {t('profile.editProfile')}
+              <Pencil className="h-3.5 w-3.5" />
             </Button>
           )}
         </div>
         <CardContent className="relative -mt-12 pb-6">
           <div className="flex flex-col md:flex-row items-start md:items-end gap-4">
             <Avatar className="w-24 h-24 border-4 border-background shadow-xl">
-              <AvatarImage src={customData.customAvatar || profile.avatar || undefined} />
+              <AvatarImage src={cd.customAvatar || profile.avatar || undefined} />
               <AvatarFallback className="text-2xl">{profile.username[0]}</AvatarFallback>
             </Avatar>
             <div className="flex-1">
@@ -320,8 +336,8 @@ export default function ProfilePage() {
           </div>
 
           {/* Bio */}
-          {customData.bio && !editing && (
-            <p className="text-sm text-muted-foreground mt-4 italic">{customData.bio}</p>
+          {cd.bio && !editing && (
+            <p className="text-sm text-muted-foreground mt-4 italic">{cd.bio}</p>
           )}
 
           {/* Edit Panel */}
@@ -375,6 +391,28 @@ export default function ProfilePage() {
                   className="glass glass-border"
                 />
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-2 block">{t('profile.showSections')}</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['stats', 'achievements', 'info', 'inventory'] as const).map(section => (
+                    <label key={section} className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={!editData.hiddenSections?.includes(section)}
+                        onChange={() => {
+                          setEditData(d => {
+                            const hidden = d.hiddenSections || [];
+                            const next = hidden.includes(section) ? hidden.filter(s => s !== section) : [...hidden, section];
+                            return { ...d, hiddenSections: next };
+                          });
+                        }}
+                        className="rounded accent-primary"
+                      />
+                      {t(`profile.section${section.charAt(0).toUpperCase() + section.slice(1)}`)}
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="flex gap-2 justify-end">
                 <Button size="sm" variant="outline" className="gap-1" onClick={cancelEditing}>
                   <XIcon className="h-3 w-3" /> {t('profile.back')}
@@ -392,7 +430,7 @@ export default function ProfilePage() {
         {/* Stats */}
         <div className="md:col-span-2 space-y-6">
           {/* Stat cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {!cd.hiddenSections?.includes('stats') && (<div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Card className="glass glass-border">
               <CardContent className="p-4 text-center">
                 <Trophy className="h-5 w-5 mx-auto mb-1 text-green-400" />
@@ -421,10 +459,10 @@ export default function ProfilePage() {
                 <p className="text-xs text-muted-foreground">{t('profile.kills')}</p>
               </CardContent>
             </Card>
-          </div>
+          </div>)}
 
           {/* Achievements */}
-          <Card className="glass glass-border">
+          {!cd.hiddenSections?.includes('achievements') && (<Card className="glass glass-border">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Award className="h-4 w-4 text-yellow-500" />
@@ -448,13 +486,13 @@ export default function ProfilePage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </Card>)}
         </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Info */}
-          <Card className="glass glass-border">
+          {!cd.hiddenSections?.includes('info') && (<Card className="glass glass-border">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">{t('profile.info')}</CardTitle>
             </CardHeader>
@@ -476,10 +514,10 @@ export default function ProfilePage() {
                 <span>{profile.assists}</span>
               </div>
             </CardContent>
-          </Card>
+          </Card>)}
 
           {/* Inventory preview */}
-          <Card className="glass glass-border">
+          {!cd.hiddenSections?.includes('inventory') && (<Card className="glass glass-border">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Package className="h-4 w-4 text-primary" />
@@ -503,7 +541,7 @@ export default function ProfilePage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </Card>)}
         </div>
       </div>
     </div>

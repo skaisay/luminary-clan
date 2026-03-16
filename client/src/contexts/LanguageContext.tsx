@@ -592,6 +592,11 @@ const translations = {
       bioPlaceholder: 'Расскажите о себе...',
       customAvatar: 'Свой аватар (URL)',
       avatarPlaceholder: 'https://...',
+      showSections: 'Видимость секций',
+      sectionStats: 'Статистика',
+      sectionAchievements: 'Достижения',
+      sectionInfo: 'Информация',
+      sectionInventory: 'Инвентарь',
     },
     miniGames: {
       title: 'Мини-игры',
@@ -1185,6 +1190,11 @@ const translations = {
       bioPlaceholder: 'Tell about yourself...',
       customAvatar: 'Custom Avatar (URL)',
       avatarPlaceholder: 'https://...',
+      showSections: 'Section Visibility',
+      sectionStats: 'Statistics',
+      sectionAchievements: 'Achievements',
+      sectionInfo: 'Information',
+      sectionInventory: 'Inventory',
     },
     miniGames: {
       title: 'Mini-games',
