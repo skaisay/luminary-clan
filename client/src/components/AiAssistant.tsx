@@ -5,6 +5,7 @@ import {
   Send, Sparkles, Mic, MicOff, X,
   ArrowUpRight, Loader2, Trash2, Minus
 } from 'lucide-react';
+import { AiNavigationOverlay } from './AiNavigationOverlay';
 
 const NAV_ROUTES: Record<string, { ru: string; en: string }> = {
   '/': { ru: 'Главная', en: 'Dashboard' },
@@ -14,6 +15,7 @@ const NAV_ROUTES: Record<string, { ru: string; en: string }> = {
   '/news': { ru: 'Новости', en: 'News' },
   '/shop': { ru: 'Магазин', en: 'Shop' },
   '/inventory': { ru: 'Инвентарь', en: 'Inventory' },
+  '/convert': { ru: 'Конвертация', en: 'Convert' },
   '/music': { ru: 'Музыка', en: 'Music' },
   '/forum': { ru: 'Форум', en: 'Forum' },
   '/requests': { ru: 'Запросы', en: 'Requests' },
@@ -26,6 +28,7 @@ const NAV_ROUTES: Record<string, { ru: string; en: string }> = {
   '/profile': { ru: 'Профиль', en: 'Profile' },
   '/mini-games': { ru: 'Мини-игры', en: 'Mini Games' },
   '/clan-wars': { ru: 'Войны', en: 'Clan Wars' },
+  '/roblox-tracker': { ru: 'Roblox Трекер', en: 'Roblox Tracker' },
 };
 
 interface ChatMsg {
@@ -43,6 +46,8 @@ export function AiAssistant() {
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const [greeted, setGreeted] = useState(false);
+  const [navAction, setNavAction] = useState<{ path: string; label: string } | null>(null);
+  const [pendingType, setPendingType] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recogRef = useRef<any>(null);
@@ -83,11 +88,19 @@ export function AiAssistant() {
     if (open) setTimeout(() => inputRef.current?.focus(), 150);
   }, [open]);
 
-  // Parse [NAV:/path] from AI response
-  function parseNav(text: string): { clean: string; nav?: string } {
-    const m = text.match(/\[NAV:(\/[^\]]*)\]/);
-    if (m) return { clean: text.replace(m[0], '').trim(), nav: m[1] };
-    return { clean: text };
+  // Parse [NAV:/path] and [TYPE:text] from AI response
+  function parseNav(text: string): { clean: string; nav?: string; typeText?: string } {
+    let clean = text;
+    let nav: string | undefined;
+    let typeText: string | undefined;
+
+    const navMatch = clean.match(/\[NAV:(\/[^\]]*)\]/);
+    if (navMatch) { nav = navMatch[1]; clean = clean.replace(navMatch[0], '').trim(); }
+
+    const typeMatch = clean.match(/\[TYPE:([^\]]*)\]/);
+    if (typeMatch) { typeText = typeMatch[1]; clean = clean.replace(typeMatch[0], '').trim(); }
+
+    return { clean, nav, typeText };
   }
 
   // Simple markdown
@@ -99,12 +112,56 @@ export function AiAssistant() {
       .replace(/\n/g, '<br/>');
   }
 
-  // Get current page display name
   function pageName(path: string): string {
     const route = NAV_ROUTES[path];
     if (route) return route[isRu ? 'ru' : 'en'];
     return path;
   }
+
+  // Type text into an input on the page after navigation
+  function typeIntoInput(text: string) {
+    setTimeout(() => {
+      const el = document.querySelector(
+        'input[type="search"], input[type="text"], input[placeholder], input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="password"])'
+      ) as HTMLInputElement | null;
+
+      if (!el) return;
+      el.focus();
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      let i = 0;
+      const interval = setInterval(() => {
+        if (i >= text.length) {
+          clearInterval(interval);
+          // Submit via Enter key
+          setTimeout(() => {
+            el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+            const form = el.closest('form');
+            if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+          }, 200);
+          return;
+        }
+        const current = text.substring(0, i + 1);
+        // Use native setter for React controlled inputs
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        if (setter) {
+          setter.call(el, current);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        i++;
+      }, 55);
+    }, 900); // Wait for new page to render
+  }
+
+  // Handle navigation overlay completion
+  const handleNavComplete = useCallback(() => {
+    if (pendingType) {
+      typeIntoInput(pendingType);
+      setPendingType(null);
+    }
+    setNavAction(null);
+  }, [pendingType]);
 
   // Send message
   const send = useCallback(async (text?: string) => {
@@ -137,11 +194,12 @@ export function AiAssistant() {
 
       if (!resp.ok) throw new Error('fail');
       const data = await resp.json();
-      const { clean, nav } = parseNav(data.reply || txt.error);
+      const { clean, nav, typeText } = parseNav(data.reply || txt.error);
 
-      // Auto-navigate if AI returned a [NAV:] tag
+      // Trigger visual navigation overlay instead of direct setLocation
       if (nav && NAV_ROUTES[nav]) {
-        setTimeout(() => setLocation(nav), 600);
+        if (typeText) setPendingType(typeText);
+        setNavAction({ path: nav, label: pageName(nav) });
       }
 
       setMsgs(prev => prev.map(m =>
@@ -155,7 +213,7 @@ export function AiAssistant() {
     setLoading(false);
   }, [input, loading, msgs, language, location, txt.error]);
 
-  // Voice
+  // Voice recognition
   const toggleVoice = useCallback(() => {
     const hasSR = ('SpeechRecognition' in window) || ('webkitSpeechRecognition' in window);
     if (!hasSR) {
@@ -180,7 +238,6 @@ export function AiAssistant() {
       setListening(false);
       if (transcript) {
         setInput(transcript);
-        // Auto-send after short delay so user can see what was recognized
         setTimeout(() => send(transcript), 300);
       }
     };
@@ -201,8 +258,8 @@ export function AiAssistant() {
   };
 
   const suggestions = isRu
-    ? ['Открой музыку', 'Что такое квесты?', 'Перейди в магазин', 'Расскажи о сайте']
-    : ['Open music', 'What are quests?', 'Go to shop', 'Tell me about the site'];
+    ? ['Открой музыку', 'Что такое квесты?', 'Что в магазине?', 'Расскажи о сайте']
+    : ['Open music', 'What are quests?', "What's in the shop?", 'Tell me about the site'];
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -220,6 +277,13 @@ export function AiAssistant() {
         .ai-dots:nth-child(3){animation-delay:.24s}
         .ai-glow{animation:aiBtnGlow 2.5s infinite}
       `}</style>
+
+      {/* Navigation overlay with visual cursor animation */}
+      <AiNavigationOverlay
+        action={navAction}
+        onNavigate={(path) => setLocation(path)}
+        onComplete={handleNavComplete}
+      />
 
       {/* Floating button */}
       <button
