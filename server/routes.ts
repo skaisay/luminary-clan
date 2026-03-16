@@ -212,6 +212,7 @@ tab-settings: input-clan-name, input-clan-tag, textarea-description, input-hero-
         if (cp.includes('convert')) f += `convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion\n`;
         if (cp.includes('forum')) f += `forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic\n`;
         if (cp.includes('request')) f += `requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request\n`;
+        if (cp.includes('mini-game') || !cp.includes('admin')) f += `mini-games: game-wheel(таб колесо), game-rps(таб камень-ножницы), game-history(история). wheel-bet-10/25/50/100(ставки), wheel-spin(крутить). rps-rock/rps-paper/rps-scissors(выбор), rps-bet-10/25/50/100(ставки)\n`;
         if (!cp.includes('admin')) f += `admin/login: input-username, input-password, button-login\n`;
         return f.trim();
       }
@@ -230,6 +231,7 @@ tab-settings: input-clan-name, input-clan-tag, textarea-description, input-hero-
         if (cp.includes('convert')) f += `convert: input-discord-id, input-username, input-roblox-username, input-lumicoin-amount, button-submit-conversion\n`;
         if (cp.includes('forum')) f += `forum: button-create-topic → input-topic-title, input-topic-author, textarea-topic-content, button-submit-topic\n`;
         if (cp.includes('request')) f += `requests: button-create-request → input-username, input-discord-id, select-request-type, textarea-content, button-submit-request\n`;
+        if (cp.includes('mini-game') || !cp.includes('admin')) f += `mini-games: game-wheel(wheel tab), game-rps(rock-paper-scissors tab), game-history(history). wheel-bet-10/25/50/100(bets), wheel-spin(spin). rps-rock/rps-paper/rps-scissors(choice), rps-bet-10/25/50/100(bets)\n`;
         if (!cp.includes('admin')) f += `admin/login: input-username, input-password, button-login\n`;
         return f.trim();
       }
@@ -360,7 +362,23 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         return res.json({ reply: raceResult.reply, provider: raceResult.provider });
       }
 
-      // All providers failed — give a helpful fallback, not just an error
+      // All providers failed — silent auto-retry once after 2s
+      console.log('[AI] All providers failed, auto-retrying...');
+      await new Promise(r => setTimeout(r, 2000));
+      const retryResult = await Promise.any([
+        pollinationsProvider('openai', 25000),
+        pollinationsProvider('mistral', 25000),
+        pollinationsProvider('deepseek', 25000),
+        pollinationsProvider('llama', 25000),
+        pollinationsProvider('qwen', 25000),
+        pollinationsProvider('claude-hybridspace', 25000),
+      ]).catch(() => null);
+
+      if (retryResult) {
+        return res.json({ reply: retryResult.reply, provider: retryResult.provider + '-retry' });
+      }
+
+      // All providers failed twice — give a helpful fallback
       const fallback = language === 'ru' 
         ? '⚡ AI-сервисы перегружены. Попробуй переформулировать запрос короче или подожди 30 секунд и повтори! Совет: короткие чёткие запросы работают лучше.'
         : '⚡ AI services are overloaded. Try rephrasing shorter or wait 30s and retry! Tip: short clear requests work best.';

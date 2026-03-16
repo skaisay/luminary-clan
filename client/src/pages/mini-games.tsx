@@ -137,6 +137,7 @@ function WheelOfFortune() {
               onClick={() => setBetAmount(val)}
               disabled={spinning}
               className="text-xs"
+              data-ai={`wheel-bet-${val}`}
             >
               {val}
             </Button>
@@ -159,6 +160,7 @@ function WheelOfFortune() {
           onClick={() => { setResult(null); spinMutation.mutate(); }}
           disabled={spinning || spinMutation.isPending || !user?.discordId}
           className="gap-2"
+          data-ai="wheel-spin"
         >
           {spinning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
           {spinning ? t('miniGames.spinning') : `${t('miniGames.spin')} (${betAmount} LC)`}
@@ -291,6 +293,7 @@ function RockPaperScissors() {
               onClick={() => setBetAmount(val)}
               disabled={animating}
               className="text-xs"
+              data-ai={`rps-bet-${val}`}
             >
               {val}
             </Button>
@@ -310,6 +313,7 @@ function RockPaperScissors() {
               onClick={() => handlePlay(choice)}
               disabled={animating || playMutation.isPending || !user?.discordId}
               className="flex-col h-auto py-3 px-6 gap-1"
+              data-ai={`rps-${choice}`}
             >
               <Icon className="h-6 w-6" />
               <span className="text-xs">{RPS_LABELS[choice][language as 'ru' | 'en'] || RPS_LABELS[choice].ru}</span>
@@ -404,13 +408,13 @@ export default function MiniGamesPage() {
 
       <Tabs defaultValue="wheel">
         <TabsList className="w-full mb-6">
-          <TabsTrigger value="wheel" className="flex-1 gap-1">
+          <TabsTrigger value="wheel" className="flex-1 gap-1" data-ai="game-wheel">
             <RotateCw className="h-3.5 w-3.5" /> {t('miniGames.wheelOfFortune')}
           </TabsTrigger>
-          <TabsTrigger value="rps" className="flex-1 gap-1">
+          <TabsTrigger value="rps" className="flex-1 gap-1" data-ai="game-rps">
             <Scissors className="h-3.5 w-3.5" /> {t('miniGames.rps')}
           </TabsTrigger>
-          <TabsTrigger value="history" className="flex-1 gap-1">
+          <TabsTrigger value="history" className="flex-1 gap-1" data-ai="game-history">
             <History className="h-3.5 w-3.5" /> {t('miniGames.historyTab')}
           </TabsTrigger>
         </TabsList>

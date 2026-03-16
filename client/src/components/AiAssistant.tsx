@@ -244,30 +244,50 @@ function splitTasks(text: string): string[] {
   const expanded = expandMultiCreate(text);
   if (expanded && expanded.length > 1) return expanded;
 
-  // Delimiters: "после этого", "потом", "затем", "далее", "и ещё", "а также", etc.
-  const delimiters = /(?:\s*(?:,\s*(?:потом|затем|далее|после|и|а))\s+|\s+(?:после\s+этого|потом|затем|далее|и\s+ещ[её]|а\s+также|а\s+потом|после\s+чего|и\s+также|плюс|ну\s+и|then|after\s+that|and\s+then|also|next|afterwards)\s*[,.]?\s*)/gi;
-  const parts = text.split(delimiters).map(s => s.trim()).filter(s => s.length > 2);
+  // Phase 1: Split by strong delimiters: "после этого", "потом", "затем", "далее", etc.
+  const strongDelimiters = /(?:\s*(?:после\s+этого|а?\s*потом|затем|далее|и\s+ещ[её]|а\s+также|а\s+потом|после\s+чего|и\s+также|плюс|ну\s+и|then|after\s+that|and\s+then|also|next|afterwards)\s*[,.]?\s*)/gi;
+  let parts = text.split(strongDelimiters).map(s => s.trim()).filter(s => s.length > 2);
   if (parts.length > 1) return parts;
 
-  // Also try splitting by just commas for list-style requests like "открой музыку, статистику, магазин"
-  // Only if the text has navigation-style words
-  const hasNavWord = /(?:открой|зайди|перейди|покажи|go to|open|show|visit)/i.test(text);
-  if (hasNavWord && text.includes(',')) {
+  // Phase 2: Split by commas for list-style requests
+  if (text.includes(',')) {
     const commaParts = text.split(',').map(s => s.trim()).filter(s => s.length > 2);
     if (commaParts.length > 1) {
-      // Propagate the navigation verb from the first part to subsequent parts that lack one
       const firstPart = commaParts[0];
       const verbMatch = firstPart.match(/^(открой|зайди в|зайди на|перейди в|перейди на|покажи|go to|open|show|visit)\s+/i);
       if (verbMatch) {
         const verb = verbMatch[1];
         return commaParts.map((part, i) => {
           if (i === 0) return part;
-          // Only add verb if part doesn't already start with one
-          if (/^(открой|зайди|перейди|покажи|go to|open|show|visit)/i.test(part)) return part;
+          if (/^(открой|зайди|перейди|покажи|go to|open|show|visit|создай|добавь|удали|измени)/i.test(part)) return part;
           return `${verb} ${part}`;
         });
       }
       return commaParts;
+    }
+  }
+
+  // Phase 3: Split by "и" when it separates action clauses (not "камень и ножницы")
+  // Only split by "и" if both sides look like independent action phrases (start with verbs)
+  const verbPattern = /^(?:открой|зайди|перейди|покажи|создай|добавь|удали|измени|поставь|включи|выключи|найди|сыграй|крути|верни|забань|дай|выдай|посмотри|go|open|show|create|add|delete|edit|play|find|spin|return|ban|give|check)/i;
+  // Try splitting by " и " only if the result has verb-starting parts
+  if (/\s+и\s+/i.test(text)) {
+    const iParts = text.split(/\s+и\s+/i).map(s => s.trim()).filter(s => s.length > 2);
+    if (iParts.length > 1) {
+      // Check if at least 2 parts start with action verbs
+      const verbParts = iParts.filter(p => verbPattern.test(p));
+      if (verbParts.length >= 2 || (iParts.length >= 2 && verbPattern.test(iParts[0]))) {
+        // Propagate context: if first part has a navigation verb, subsequent bare parts inherit it
+        const firstVerb = iParts[0].match(/^(открой|зайди в|зайди на|перейди в|перейди на|покажи|go to|open|show)\s+/i);
+        if (firstVerb) {
+          return iParts.map((part, i) => {
+            if (i === 0) return part;
+            if (verbPattern.test(part)) return part;
+            return `${firstVerb[1]} ${part}`;
+          });
+        }
+        return iParts;
+      }
     }
   }
 
@@ -341,16 +361,31 @@ function tryLocalAction(text: string, isRu: boolean, currentPath: string): strin
     }
   }
 
-  // --- Music patterns ---
-  const musicPatterns = isRu
-    ? ['поставь музыку', 'включи музыку', 'найди музыку', 'поставь трек', 'включи трек', 'найди трек', 'поставь песню', 'включи песню', 'найди песню', 'сыграй', 'проиграй', 'воспроизведи', 'послушать', 'поставь мне']
-    : ['play music', 'find music', 'play song', 'find song', 'play track', 'search music'];
-  for (const pat of musicPatterns) {
-    if (lower.includes(pat)) {
-      // Extract what comes after the pattern
-      const afterIdx = lower.indexOf(pat) + pat.length;
+  // --- Music patterns (MUST check context to avoid conflict with games) ---
+  // Only match music if text explicitly mentions music-related words and NOT game-related words
+  const hasGameContext = /(?:мини.?игр|колес|фортун|рулетк|камень|ножниц|бумаг|wheel|fortune|rps|rock|paper|scissor|game|раунд|round|ставк|bet)/i.test(lower);
+  if (!hasGameContext) {
+    const musicPatterns = isRu
+      ? ['поставь музыку', 'включи музыку', 'найди музыку', 'поставь трек', 'включи трек', 'найди трек', 'поставь песню', 'включи песню', 'найди песню', 'проиграй', 'воспроизведи', 'послушать', 'поставь мне']
+      : ['play music', 'find music', 'play song', 'find song', 'play track', 'search music'];
+    for (const pat of musicPatterns) {
+      if (lower.includes(pat)) {
+        const afterIdx = lower.indexOf(pat) + pat.length;
+        let query = text.substring(afterIdx).trim().replace(/^[,.:!]\s*/, '');
+        if (!query) query = text.replace(new RegExp(pat, 'i'), '').trim();
+        if (query && query.length > 1) {
+          const onMusic = currentPath === '/music';
+          if (onMusic) {
+            return `🎵 ${isRu ? 'Ищу' : 'Searching'} **${query}** [STEP:1][DO:fill|music-search|${query}][DO:wait|_|300][DO:click|music-play]`;
+          }
+          return `🎵 ${isRu ? 'Ищу' : 'Searching'} **${query}** [STEP:1][NAV:/music][DO:fill|music-search|${query}][DO:wait|_|300][DO:click|music-play]`;
+        }
+      }
+    }
+    // "сыграй" only for music if there's a song name and no game context
+    if (isRu && lower.includes('сыграй') && !hasGameContext) {
+      const afterIdx = lower.indexOf('сыграй') + 6;
       let query = text.substring(afterIdx).trim().replace(/^[,.:!]\s*/, '');
-      if (!query) query = text.replace(new RegExp(pat, 'i'), '').trim();
       if (query && query.length > 1) {
         const onMusic = currentPath === '/music';
         if (onMusic) {
@@ -359,6 +394,75 @@ function tryLocalAction(text: string, isRu: boolean, currentPath: string): strin
         return `🎵 ${isRu ? 'Ищу' : 'Searching'} **${query}** [STEP:1][NAV:/music][DO:fill|music-search|${query}][DO:wait|_|300][DO:click|music-play]`;
       }
     }
+  }
+
+  // --- Mini-games: wheel of fortune ---
+  const wheelPatterns = /(?:колес|фортун|wheel|fortune|рулетк|крути|spin|вращ)/i;
+  if (wheelPatterns.test(lower) || (lower.includes('сыграй') && hasGameContext)) {
+    // Extract bet amount if specified
+    const betMatch = lower.match(/(?:ставк|bet|на)\s*(\d+)/);
+    const bet = betMatch ? parseInt(betMatch[1]) : null;
+    // Extract round count
+    const roundMatch = lower.match(/(\d+)\s*(?:раз|раунд|round|time|крутк|спин)/i);
+    const rounds = roundMatch ? Math.min(parseInt(roundMatch[1]), 50) : null;
+    // Also check "несколько раз" pattern
+    const severalMatch = /(?:несколько|пару|couple|few|several)\s*(?:раз|раунд|round)/i.test(lower);
+    const totalRounds = rounds || (severalMatch ? 5 : 1);
+
+    const onGames = currentPath === '/mini-games';
+    const steps: string[] = [];
+    let stepNum = 1;
+
+    if (!onGames) {
+      steps.push(`[STEP:${stepNum}][NAV:/mini-games]`);
+      stepNum++;
+    }
+    // Click wheel tab + set bet
+    steps.push(`[STEP:${stepNum}][DO:click|game-wheel][DO:wait|_|400]`);
+    stepNum++;
+    if (bet && [10, 25, 50, 100].includes(bet)) {
+      steps.push(`[STEP:${stepNum}][DO:click|wheel-bet-${bet}][DO:wait|_|300]`);
+      stepNum++;
+    }
+    // Spin N times with waits between
+    for (let i = 0; i < totalRounds; i++) {
+      steps.push(`[STEP:${stepNum}][DO:click|wheel-spin][DO:wait|_|4500]`);
+      stepNum++;
+    }
+    const betText = bet ? ` (${isRu ? 'ставка' : 'bet'} ${bet} LC)` : '';
+    const roundText = totalRounds > 1 ? ` x${totalRounds}` : '';
+    return `🎰 ${isRu ? 'Кручу колесо' : 'Spinning wheel'}${roundText}${betText}! ${steps.join('')}`;
+  }
+
+  // --- Mini-games: rock paper scissors ---
+  const rpsPatterns = /(?:камень.?ножниц|ножниц.?бумаг|rock.?paper|paper.?scissor|рпс|rps)/i;
+  if (rpsPatterns.test(lower)) {
+    const betMatch = lower.match(/(?:ставк|bet|на)\s*(\d+)/);
+    const bet = betMatch ? parseInt(betMatch[1]) : null;
+    const choices = ['rock', 'paper', 'scissors'];
+    const randomChoice = choices[Math.floor(Math.random() * 3)];
+
+    const onGames = currentPath === '/mini-games';
+    const steps: string[] = [];
+    let stepNum = 1;
+
+    if (!onGames) {
+      steps.push(`[STEP:${stepNum}][NAV:/mini-games]`);
+      stepNum++;
+    }
+    steps.push(`[STEP:${stepNum}][DO:click|game-rps][DO:wait|_|400]`);
+    stepNum++;
+    if (bet && [10, 25, 50, 100].includes(bet)) {
+      steps.push(`[STEP:${stepNum}][DO:click|rps-bet-${bet}][DO:wait|_|300]`);
+      stepNum++;
+    }
+    steps.push(`[STEP:${stepNum}][DO:click|rps-${randomChoice}][DO:wait|_|2000]`);
+    return `✊ ${isRu ? 'Играю в КНБ' : 'Playing RPS'}! ${steps.join('')}`;
+  }
+
+  // --- Pause music ---
+  if ((isRu && (lower.includes('пауз') || lower.includes('останов') || lower.includes('стоп'))) && (lower.includes('музык') || lower.includes('трек') || lower.includes('песн'))) {
+    return `⏸️ ${isRu ? 'Ставлю на паузу' : 'Pausing'}! [STEP:1][DO:click|music-pause]`;
   }
 
   // --- Roblox search ---
@@ -608,29 +712,37 @@ export function AiAssistant() {
         continue;
       }
 
-      // Complex task — send to AI
-      try {
-        const resp = await fetch('/api/ai-chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            messages: [{ role: 'user', content: task }],
-            language,
-            currentPage: currentPagePath,
-          }),
-        });
-        if (!resp.ok) throw new Error('fail');
-        const data = await resp.json();
-        const reply = data.reply || '';
-        const { clean, steps } = parseSteps(reply);
-        responseTexts.push(clean);
-        for (const s of steps) {
-          allSteps.push(s);
-          if (s.nav) currentPagePath = s.nav;
+      // Complex task — send to AI (with auto-retry)
+      let aiSuccess = false;
+      for (let attempt = 0; attempt < 2 && !aiSuccess; attempt++) {
+        try {
+          if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+          const resp = await fetch('/api/ai-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              messages: [{ role: 'user', content: task }],
+              language,
+              currentPage: currentPagePath,
+            }),
+          });
+          if (!resp.ok) throw new Error('fail');
+          const data = await resp.json();
+          const reply = data.reply || '';
+          if (data.provider === 'fallback') throw new Error('fallback');
+          const { clean, steps } = parseSteps(reply);
+          responseTexts.push(clean);
+          for (const s of steps) {
+            allSteps.push(s);
+            if (s.nav) currentPagePath = s.nav;
+          }
+          aiSuccess = true;
+        } catch {
+          if (attempt === 1) {
+            responseTexts.push(isRu ? `⚠️ Не удалось: "${task}"` : `⚠️ Failed: "${task}"`);
+          }
         }
-      } catch {
-        responseTexts.push(isRu ? `⚠️ Не удалось: "${task}"` : `⚠️ Failed: "${task}"`);
       }
 
       // Update placeholder with partial progress
