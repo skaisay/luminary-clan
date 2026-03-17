@@ -572,14 +572,21 @@ export default function ProfilePage() {
     if (!profileCardRef.current) return false;
     try {
       const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(profileCardRef.current, {
+      const srcCanvas = await html2canvas(profileCardRef.current, {
         backgroundColor: '#0f0a1e',
-        scale: 2,
+        scale: 1.5,
         useCORS: true,
         allowTaint: true,
         logging: false,
       });
-      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
+      // Resize to OG standard 1200×630 — much smaller file, faster upload
+      const w = 1200, h = 630;
+      const outCanvas = document.createElement('canvas');
+      outCanvas.width = w;
+      outCanvas.height = h;
+      const ctx = outCanvas.getContext('2d')!;
+      ctx.drawImage(srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, 0, 0, w, h);
+      const blob = await new Promise<Blob | null>(r => outCanvas.toBlob(r, 'image/jpeg', 0.88));
       if (blob) {
         await fetch(`/api/og-screenshot/${discordId}`, {
           method: 'POST',
@@ -600,7 +607,7 @@ export default function ProfilePage() {
     const timer = setTimeout(async () => {
       const ok = await captureAndUploadOG(discordId);
       if (ok) ogReadyRef.current = true;
-    }, 3000); // wait 3s for images/banner to load
+    }, 2000); // wait 2s for images/banner to load
     return () => clearTimeout(timer);
   }, [profile?.discordId, customData]);
 

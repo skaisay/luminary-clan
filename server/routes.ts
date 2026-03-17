@@ -158,6 +158,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const express = await import('express');
   app.use('/uploads', express.default.static(path.join(process.cwd(), 'uploads')));
 
+  // In-memory cache for OG screenshots (avoids DB hit on every Discord bot request)
+  const ogCache = new Map<string, { buf: Buffer; ts: number }>();
+  const OG_CACHE_TTL = 5 * 60 * 1000; // 5 min
+
   // ============================================================
   // OG SCREENSHOT — Upload real profile screenshot to DATABASE
   // ============================================================
@@ -169,16 +173,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const discordId = req.params.discordId;
       if (!/^\d+$/.test(discordId)) return res.status(400).json({ error: "Invalid discordId" });
 
-      // Read raw PNG body
+      // Read raw image body
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(Buffer.from(chunk));
-      const pngBuffer = Buffer.concat(chunks);
+      const imgBuffer = Buffer.concat(chunks);
 
-      if (pngBuffer.length < 100 || pngBuffer.length > 5 * 1024 * 1024) {
+      if (imgBuffer.length < 100 || imgBuffer.length > 5 * 1024 * 1024) {
         return res.status(400).json({ error: "Invalid image size" });
       }
 
-      const imageBase64 = pngBuffer.toString('base64');
+      const imageBase64 = imgBuffer.toString('base64');
 
       // Upsert into database
       const existing = await db.select({ id: ogScreenshots.id }).from(ogScreenshots)
@@ -191,6 +195,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await db.insert(ogScreenshots).values({ discordId, imageBase64 });
       }
 
+      // Update memory cache immediately
+      ogCache.set(discordId, { buf: imgBuffer, ts: Date.now() });
+
       res.json({ ok: true });
     } catch (error: any) {
       console.error("[OG-SCREENSHOT]", error);
@@ -199,27 +206,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ============================================================
-  // OG SCREENSHOT — Serve stored screenshot from DATABASE
+  // OG SCREENSHOT — Serve stored screenshot (memory cache → DB → SVG fallback)
   // ============================================================
   app.get("/api/og-screenshot/:discordId", async (req, res) => {
     try {
+      const discordId = req.params.discordId;
+
+      // 1) Check memory cache first (instant)
+      const cached = ogCache.get(discordId);
+      if (cached && (Date.now() - cached.ts) < OG_CACHE_TTL) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Content-Length', cached.buf.length.toString());
+        res.setHeader('Cache-Control', 'public, max-age=120');
+        return res.send(cached.buf);
+      }
+
+      // 2) Fetch from DB
       const { db } = await import("./db");
       const { ogScreenshots } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const discordId = req.params.discordId;
 
-      const rows = await db.select().from(ogScreenshots)
+      const rows = await db.select({ imageBase64: ogScreenshots.imageBase64 }).from(ogScreenshots)
         .where(eq(ogScreenshots.discordId, discordId)).limit(1);
 
       if (rows.length > 0 && rows[0].imageBase64) {
         const buf = Buffer.from(rows[0].imageBase64, 'base64');
-        res.setHeader('Content-Type', 'image/png');
+        // Warm the memory cache
+        ogCache.set(discordId, { buf, ts: Date.now() });
+        res.setHeader('Content-Type', 'image/jpeg');
         res.setHeader('Content-Length', buf.length.toString());
-        res.setHeader('Cache-Control', 'public, max-age=60');
+        res.setHeader('Cache-Control', 'public, max-age=120');
         return res.send(buf);
       }
 
-      // No screenshot stored — redirect to SVG fallback
+      // 3) No screenshot stored — redirect to SVG fallback
       res.redirect(`/api/og-image/${discordId}`);
     } catch (error: any) {
       console.error("[OG-SCREENSHOT-GET]", error);
