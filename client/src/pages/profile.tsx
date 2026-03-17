@@ -583,32 +583,8 @@ export default function ProfilePage() {
   const handleShareLink = async () => {
     const discordId = profile?.discordId || targetDiscordId;
     const url = `${window.location.origin}/profile/${discordId}`;
-    setCopiedLink(true);
 
-    // Capture real screenshot and upload it as the OG preview image
-    if (profileCardRef.current) {
-      try {
-        const html2canvas = (await import('html2canvas')).default;
-        const canvas = await html2canvas(profileCardRef.current, {
-          backgroundColor: '#0f0a1e',
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          logging: false,
-          width: profileCardRef.current.scrollWidth,
-          height: profileCardRef.current.scrollHeight,
-        });
-        const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
-        if (blob && discordId) {
-          await fetch(`/api/og-screenshot/${discordId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/octet-stream' },
-            body: blob,
-          });
-        }
-      } catch (_) { /* screenshot upload failed — OG will use fallback SVG */ }
-    }
-
+    // 1) Copy URL INSTANTLY — no waiting
     try {
       await navigator.clipboard.writeText(url);
     } catch {
@@ -619,8 +595,34 @@ export default function ProfilePage() {
       document.execCommand('copy');
       document.body.removeChild(input);
     }
-    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Вставьте в Discord — превью будет как настоящий профиль' : 'Paste in Discord — preview matches your real profile' });
+    setCopiedLink(true);
+    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Превью обновляется в фоне…' : 'Preview updating in background…' });
     setTimeout(() => setCopiedLink(false), 2500);
+
+    // 2) Upload screenshot in BACKGROUND (non-blocking)
+    if (profileCardRef.current && discordId) {
+      const cardEl = profileCardRef.current;
+      (async () => {
+        try {
+          const html2canvas = (await import('html2canvas')).default;
+          const canvas = await html2canvas(cardEl, {
+            backgroundColor: '#0f0a1e',
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            logging: false,
+          });
+          const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
+          if (blob) {
+            await fetch(`/api/og-screenshot/${discordId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/octet-stream' },
+              body: blob,
+            });
+          }
+        } catch (_) { /* background upload failed — fallback SVG will be used */ }
+      })();
+    }
   };
 
   const handleScreenshot = async () => {
@@ -824,23 +826,28 @@ export default function ProfilePage() {
               </div>
               <p className="text-xs text-muted-foreground">LumiCoins</p>
               <div className="flex gap-1 justify-end">
-                <Button size="icon" variant="outline" className="h-7 w-7" onClick={handleShareLink} title={isRu ? 'Поделиться' : 'Share'}>
-                  {copiedLink ? <Check className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}
-                </Button>
-                <Button size="icon" variant="outline" className="h-7 w-7" onClick={handleScreenshot} disabled={screenshotting} title={isRu ? 'Скриншот' : 'Screenshot'}>
-                  {screenshotting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
-                </Button>
-                <Button size="icon" variant="outline" className="h-7 w-7" onClick={handleCopyId} title="Discord ID">
-                  {copiedId ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                </Button>
-                <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => setShowDecorations(true)} title={isRu ? 'Декорации' : 'Decorations'}>
-                  <Sparkles className="h-3.5 w-3.5" />
-                </Button>
+                <button onClick={handleShareLink} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary">
+                  {copiedLink ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Share2 className="h-3.5 w-3.5 shrink-0" />}
+                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">{isRu ? 'Поделиться' : 'Share'}</span>
+                </button>
+                <button onClick={handleScreenshot} disabled={screenshotting} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary disabled:opacity-50">
+                  {screenshotting ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5 shrink-0" />}
+                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">{isRu ? 'Скрин' : 'Snap'}</span>
+                </button>
+                <button onClick={handleCopyId} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary">
+                  {copiedId ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
+                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">ID</span>
+                </button>
+                <button onClick={() => setShowDecorations(true)} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary">
+                  <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">{isRu ? 'Декор' : 'Decor'}</span>
+                </button>
                 {!isOwnProfile && user?.discordId && (
                   <Link href={`/trading?target=${encodeURIComponent(profile.username)}`}>
-                    <Button size="icon" variant="outline" className="h-7 w-7" title={t('profile.trade')}>
-                      <ArrowLeftRight className="h-3.5 w-3.5" />
-                    </Button>
+                    <button className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary">
+                      <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
+                      <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">{isRu ? 'Трейд' : 'Trade'}</span>
+                    </button>
                   </Link>
                 )}
               </div>
