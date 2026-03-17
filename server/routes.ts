@@ -77,6 +77,11 @@ declare module 'express-session' {
 
 const execAsync = promisify(exec);
 
+/** Escape XML/SVG special characters */
+function escapeXml(str: string): string {
+  return (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
 // Валидация returnTo параметра для предотвращения open redirect уязвимости
 function validateReturnTo(returnTo: string | undefined): string {
   // Если returnTo не указан или невалиден, возвращаем дефолтный путь
@@ -152,6 +157,148 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve uploaded files (banners, etc.)
   const express = await import('express');
   app.use('/uploads', express.default.static(path.join(process.cwd(), 'uploads')));
+
+  // ============================================================
+  // OG IMAGE — Dynamic profile preview image for Discord/social embeds
+  // ============================================================
+  app.get("/api/og-image/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const id = req.params.discordId;
+
+      const isDiscordId = /^\d+$/.test(id);
+      let member;
+      if (isDiscordId) {
+        member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, id)).limit(1);
+      }
+      if (!member || !member[0]) {
+        member = await db.select().from(clanMembers).where(eq(clanMembers.username, id)).limit(1);
+      }
+      if (!member?.[0]) return res.status(404).send("Not found");
+
+      const m = member[0];
+      const avatarUrl = m.avatar || "";
+      const level = m.level ?? 1;
+      const coins = m.lumiCoins ?? 0;
+      const role = m.role || "Участник";
+      const wins = m.wins ?? 0;
+      const rank = m.rank ?? 0;
+
+      // Get equipped banner decoration if any
+      let bannerGradient = "linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%)";
+      try {
+        const { and } = await import("drizzle-orm");
+        const bannerRows = await db.select({
+          cssEffect: profileDecorations.cssEffect,
+        }).from(memberDecorations)
+          .innerJoin(profileDecorations, eq(memberDecorations.decorationId, profileDecorations.id))
+          .where(and(
+            eq(memberDecorations.discordId, m.discordId || ""),
+            eq(memberDecorations.isEquipped, true),
+            eq(profileDecorations.type, "banner"),
+          ));
+        if (bannerRows[0]?.cssEffect) {
+          // Extract just the gradient part (before any ;)
+          bannerGradient = bannerRows[0].cssEffect.split(";")[0].trim();
+        }
+      } catch (_) { /* ignore banner fetch errors */ }
+
+      // Get custom profile data for custom banner colors
+      try {
+        const customs = await db.select().from(profileCustoms)
+          .where(eq(profileCustoms.discordId, m.discordId || "")).limit(1);
+        if (customs[0]?.bannerColor1) {
+          bannerGradient = `linear-gradient(135deg, ${customs[0].bannerColor1}, ${customs[0].bannerColor2 || customs[0].bannerColor1})`;
+        }
+      } catch (_) { /* ignore */ }
+
+      // We fetch the avatar as base64 to embed into the SVG so Discord can render it
+      let avatarDataUri = "";
+      if (avatarUrl) {
+        try {
+          const resp = await fetch(avatarUrl);
+          if (resp.ok) {
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const ct = resp.headers.get("content-type") || "image/png";
+            avatarDataUri = `data:${ct};base64,${buf.toString("base64")}`;
+          }
+        } catch (_) { /* use fallback */ }
+      }
+
+      const avatarCircle = avatarDataUri
+        ? `<image x="60" y="160" width="140" height="140" href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
+        : `<rect x="60" y="160" width="140" height="140" rx="70" fill="#4c1d95"/>
+           <text x="130" y="245" font-family="Arial,sans-serif" font-size="48" fill="white" text-anchor="middle" font-weight="bold">${(m.username || "?").substring(0, 2).toUpperCase()}</text>`;
+
+      // Generate SVG (1200×630 — standard OG image size)
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <clipPath id="avatar-clip"><circle cx="130" cy="230" r="70"/></clipPath>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f0a1e"/>
+      <stop offset="100%" stop-color="#1a1145"/>
+    </linearGradient>
+    <linearGradient id="banner" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <!-- Banner area -->
+  <rect width="1200" height="240" fill="url(#banner)" opacity="0.7"/>
+  <rect y="200" width="1200" height="60" fill="url(#bg)" opacity="0.5"/>
+  <!-- Avatar border -->
+  <circle cx="130" cy="230" r="76" fill="#1a1145" stroke="#6366f1" stroke-width="3"/>
+  ${avatarCircle}
+  <!-- Username -->
+  <text x="230" y="250" font-family="Arial,Helvetica,sans-serif" font-size="42" fill="white" font-weight="bold">${escapeXml(m.username)}</text>
+  <text x="230" y="285" font-family="Arial,Helvetica,sans-serif" font-size="22" fill="#a5b4fc">${escapeXml(role)}</text>
+  <!-- Stats cards -->
+  <rect x="60" y="340" width="240" height="100" rx="16" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" opacity="0.8"/>
+  <text x="180" y="378" font-family="Arial,sans-serif" font-size="16" fill="#a5b4fc" text-anchor="middle">💰 LumiCoins</text>
+  <text x="180" y="420" font-family="Arial,sans-serif" font-size="36" fill="#fbbf24" text-anchor="middle" font-weight="bold">${coins.toLocaleString()}</text>
+
+  <rect x="330" y="340" width="240" height="100" rx="16" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" opacity="0.8"/>
+  <text x="450" y="378" font-family="Arial,sans-serif" font-size="16" fill="#a5b4fc" text-anchor="middle">⚡ Уровень</text>
+  <text x="450" y="420" font-family="Arial,sans-serif" font-size="36" fill="white" text-anchor="middle" font-weight="bold">${level}</text>
+
+  <rect x="600" y="340" width="240" height="100" rx="16" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" opacity="0.8"/>
+  <text x="720" y="378" font-family="Arial,sans-serif" font-size="16" fill="#a5b4fc" text-anchor="middle">🏆 Побед</text>
+  <text x="720" y="420" font-family="Arial,sans-serif" font-size="36" fill="#34d399" text-anchor="middle" font-weight="bold">${wins}</text>
+
+  <rect x="870" y="340" width="240" height="100" rx="16" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" opacity="0.8"/>
+  <text x="990" y="378" font-family="Arial,sans-serif" font-size="16" fill="#a5b4fc" text-anchor="middle">🎖️ Ранг</text>
+  <text x="990" y="420" font-family="Arial,sans-serif" font-size="36" fill="#f472b6" text-anchor="middle" font-weight="bold">#${rank || '—'}</text>
+
+  <!-- Footer -->
+  <rect x="0" y="490" width="1200" height="140" fill="#0c0820" opacity="0.6"/>
+  <text x="600" y="560" font-family="Arial,sans-serif" font-size="28" fill="#6366f1" text-anchor="middle" font-weight="bold" filter="url(#glow)">✦ LUMINARY CLAN ✦</text>
+  <text x="600" y="600" font-family="Arial,sans-serif" font-size="16" fill="#64748b" text-anchor="middle">luminary-clan.onrender.com/profile/${m.discordId || m.username}</text>
+</svg>`;
+
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "public, max-age=300"); // 5 min cache
+      // Convert SVG to PNG via sharp
+      try {
+        const sharp = (await import("sharp")).default;
+        const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+        res.send(pngBuffer);
+      } catch (sharpErr) {
+        // Fallback: serve SVG if sharp fails
+        console.error("[OG-IMAGE] sharp conversion failed, serving SVG:", sharpErr);
+        res.setHeader("Content-Type", "image/svg+xml");
+        res.send(svg);
+      }
+    } catch (error: any) {
+      console.error("[OG-IMAGE]", error);
+      res.status(500).send("Error generating image");
+    }
+  });
 
   // Health endpoint for keep-alive pings and monitoring
   app.get("/api/health", (_req, res) => {

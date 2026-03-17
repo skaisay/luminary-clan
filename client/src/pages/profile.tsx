@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   User, Trophy, Coins, Zap, Shield, Star, Clock, BarChart3,
   Loader2, Flame, Medal, Crown, Package, Award, TrendingUp,
-  Search, ArrowLeftRight, ArrowLeft, ExternalLink, Copy, Check, Pencil, Save, X as XIcon, Upload, Sparkles
+  Search, ArrowLeftRight, ArrowLeft, ExternalLink, Copy, Check, Pencil, Save, X as XIcon, Upload, Sparkles, Share2, Download, Image as ImageIcon
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -426,12 +426,16 @@ function DecorationsModal({ open, onOpenChange, discordId, isOwnProfile }: {
 export default function ProfilePage() {
   const { user } = useAuth();
   const { t, language } = useLanguage();
+  const isRu = (language || 'ru') === 'ru';
   const params = useParams<{ discordId?: string }>();
   const [, navigate] = useLocation();
   const [searchInput, setSearchInput] = useState("");
   const [copiedId, setCopiedId] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [screenshotting, setScreenshotting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showDecorations, setShowDecorations] = useState(false);
+  const profileCardRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const bannerFileRef = useRef<HTMLInputElement>(null);
 
@@ -576,6 +580,61 @@ export default function ProfilePage() {
     }
   };
 
+  const handleShareLink = async () => {
+    const url = `${window.location.origin}/profile/${profile?.discordId || targetDiscordId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+      toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Вставьте в Discord — появится превью с карточкой игрока' : 'Paste in Discord — a profile preview will appear' });
+    } catch {
+      // Fallback for older browsers
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    }
+  };
+
+  const handleScreenshot = async () => {
+    if (!profileCardRef.current || screenshotting) return;
+    setScreenshotting(true);
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(profileCardRef.current, {
+        backgroundColor: '#0f0a1e',
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+      });
+      // Try to copy to clipboard first, then fallback to download
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+          toast({ title: isRu ? '📸 Скриншот скопирован!' : '📸 Screenshot copied!', description: isRu ? 'Вставьте в любой чат' : 'Paste anywhere' });
+        } catch {
+          // Fallback: download as file
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `luminary-${profile?.username || 'profile'}.png`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+          toast({ title: isRu ? '📸 Сохранено!' : '📸 Saved!', description: isRu ? 'Скриншот профиля скачан' : 'Profile screenshot downloaded' });
+        }
+      }, 'image/png');
+    } catch (err: any) {
+      toast({ title: isRu ? 'Ошибка' : 'Error', description: err?.message, variant: 'destructive' });
+    } finally {
+      setScreenshotting(false);
+    }
+  };
+
   if (!targetDiscordId) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-4xl pt-24 text-center">
@@ -646,7 +705,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Profile Header */}
-      <Card className="glass glass-border overflow-hidden mb-6 relative" style={cd.cardColor ? { borderColor: cd.cardColor + '40' } : undefined}>
+      <Card ref={profileCardRef} className="glass glass-border overflow-hidden mb-6 relative" style={cd.cardColor ? { borderColor: cd.cardColor + '40' } : undefined}>
         {/* Banner — covers the ENTIRE card as absolute background */}
         {(() => {
           const hasBannerImage = !!cd.bannerImage;
@@ -742,6 +801,14 @@ export default function ProfilePage() {
               </div>
               <p className="text-xs text-muted-foreground">LumiCoins</p>
               <div className="flex gap-1.5 justify-end flex-wrap">
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleShareLink}>
+                  {copiedLink ? <Check className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
+                  {copiedLink ? (isRu ? 'Скопировано' : 'Copied') : (isRu ? 'Поделиться' : 'Share')}
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleScreenshot} disabled={screenshotting}>
+                  {screenshotting ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}
+                  {isRu ? 'Скрин' : 'Snap'}
+                </Button>
                 <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleCopyId}>
                   {copiedId ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   ID
