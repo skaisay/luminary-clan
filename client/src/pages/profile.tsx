@@ -572,30 +572,28 @@ export default function ProfilePage() {
     if (!profileCardRef.current) return false;
     try {
       const html2canvas = (await import('html2canvas')).default;
-      const srcCanvas = await html2canvas(profileCardRef.current, {
+      const el = profileCardRef.current;
+      const elW = el.offsetWidth;
+      // Scale so that rendered width = 1200px
+      const captureScale = 1200 / elW;
+      const srcCanvas = await html2canvas(el, {
         backgroundColor: '#0f0a1e',
-        scale: 1.5,
+        scale: captureScale,
         useCORS: true,
         allowTaint: true,
         logging: false,
       });
-      // Fit into OG standard 1200×630 preserving aspect ratio (no distortion)
+      // Crop top 630px from the 1200-wide capture (banner + avatar + name + stats)
       const w = 1200, h = 630;
       const outCanvas = document.createElement('canvas');
       outCanvas.width = w;
       outCanvas.height = h;
       const ctx = outCanvas.getContext('2d')!;
-      // Dark background fill
       ctx.fillStyle = '#0f0a1e';
       ctx.fillRect(0, 0, w, h);
-      // Calculate fit (contain) — scale to fit inside 1200×630
-      const srcW = srcCanvas.width, srcH = srcCanvas.height;
-      const ratio = Math.min(w / srcW, h / srcH);
-      const dw = Math.round(srcW * ratio);
-      const dh = Math.round(srcH * ratio);
-      const dx = Math.round((w - dw) / 2);
-      const dy = Math.round((h - dh) / 2);
-      ctx.drawImage(srcCanvas, 0, 0, srcW, srcH, dx, dy, dw, dh);
+      // Draw top portion — no scaling, just crop
+      const cropH = Math.min(srcCanvas.height, h);
+      ctx.drawImage(srcCanvas, 0, 0, w, cropH, 0, 0, w, cropH);
       const blob = await new Promise<Blob | null>(r => outCanvas.toBlob(r, 'image/jpeg', 0.88));
       if (blob) {
         await fetch(`/api/og-screenshot/${discordId}`, {
