@@ -574,7 +574,7 @@ export default function ProfilePage() {
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(profileCardRef.current, {
         backgroundColor: '#0f0a1e',
-        scale: 2,
+        scale: 1,
         useCORS: true,
         allowTaint: true,
         logging: false,
