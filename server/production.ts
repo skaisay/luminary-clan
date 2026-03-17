@@ -67,7 +67,12 @@ export function serveStatic(app: Express) {
       const siteUrl = `${req.protocol}://${req.get("host")}`;
       const profileUrl = `${siteUrl}/profile/${m.discordId}`;
       const avatar = m.avatar || "https://i.postimg.cc/1tPnXtX8/IMG-9561.jpg";
-      const ogImage = `${siteUrl}/api/og-image/${m.discordId}`;
+      // Prefer uploaded screenshot, fallback to generated image
+      const ogScreenshot = path.join(process.cwd(), 'uploads', 'og', `${m.discordId}.png`);
+      const hasScreenshot = fs.existsSync(ogScreenshot);
+      const ogImage = hasScreenshot
+        ? `${siteUrl}/uploads/og/${m.discordId}.png?t=${Math.floor(Date.now() / 60000)}`
+        : `${siteUrl}/api/og-image/${m.discordId}`;
       const title = `${m.username} — LUMINARY`;
       const desc = `🏆 Ранг: ${m.rank || '—'} • 💰 ${m.lumiCoins ?? 0} LC • ${m.role || 'Участник'} • Уровень ${m.level ?? 1}`;
 

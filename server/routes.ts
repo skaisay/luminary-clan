@@ -159,7 +159,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/uploads', express.default.static(path.join(process.cwd(), 'uploads')));
 
   // ============================================================
-  // OG IMAGE — Dynamic profile preview image for Discord/social embeds
+  // OG SCREENSHOT — Upload real profile screenshot as OG image
+  // ============================================================
+  app.post("/api/og-screenshot/:discordId", async (req, res) => {
+    try {
+      const discordId = req.params.discordId;
+      if (!/^\d+$/.test(discordId)) return res.status(400).json({ error: "Invalid discordId" });
+
+      // Read raw PNG body
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const pngBuffer = Buffer.concat(chunks);
+
+      if (pngBuffer.length < 100 || pngBuffer.length > 5 * 1024 * 1024) {
+        return res.status(400).json({ error: "Invalid image size" });
+      }
+
+      // Ensure dir
+      const ogDir = path.join(process.cwd(), 'uploads', 'og');
+      if (!fs.existsSync(ogDir)) fs.mkdirSync(ogDir, { recursive: true });
+
+      const filePath = path.join(ogDir, `${discordId}.png`);
+      fs.writeFileSync(filePath, pngBuffer);
+      res.json({ ok: true, url: `/uploads/og/${discordId}.png` });
+    } catch (error: any) {
+      console.error("[OG-SCREENSHOT]", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // OG IMAGE — Fallback SVG-generated profile preview
   // ============================================================
   app.get("/api/og-image/:discordId", async (req, res) => {
     try {

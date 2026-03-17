@@ -581,23 +581,46 @@ export default function ProfilePage() {
   };
 
   const handleShareLink = async () => {
-    const url = `${window.location.origin}/profile/${profile?.discordId || targetDiscordId}`;
+    const discordId = profile?.discordId || targetDiscordId;
+    const url = `${window.location.origin}/profile/${discordId}`;
+    setCopiedLink(true);
+
+    // Capture real screenshot and upload it as the OG preview image
+    if (profileCardRef.current) {
+      try {
+        const html2canvas = (await import('html2canvas')).default;
+        const canvas = await html2canvas(profileCardRef.current, {
+          backgroundColor: '#0f0a1e',
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          width: profileCardRef.current.scrollWidth,
+          height: profileCardRef.current.scrollHeight,
+        });
+        const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
+        if (blob && discordId) {
+          await fetch(`/api/og-screenshot/${discordId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: blob,
+          });
+        }
+      } catch (_) { /* screenshot upload failed — OG will use fallback SVG */ }
+    }
+
     try {
       await navigator.clipboard.writeText(url);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
-      toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Вставьте в Discord — появится превью с карточкой игрока' : 'Paste in Discord — a profile preview will appear' });
     } catch {
-      // Fallback for older browsers
       const input = document.createElement('input');
       input.value = url;
       document.body.appendChild(input);
       input.select();
       document.execCommand('copy');
       document.body.removeChild(input);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
     }
+    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Вставьте в Discord — превью будет как настоящий профиль' : 'Paste in Discord — preview matches your real profile' });
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   const handleScreenshot = async () => {
