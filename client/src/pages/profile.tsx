@@ -433,9 +433,11 @@ export default function ProfilePage() {
   const [copiedId, setCopiedId] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [screenshotting, setScreenshotting] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showDecorations, setShowDecorations] = useState(false);
   const profileCardRef = useRef<HTMLDivElement>(null);
+  const ogReadyRef = useRef(false);
   const { toast } = useToast();
   const bannerFileRef = useRef<HTMLInputElement>(null);
 
@@ -565,6 +567,43 @@ export default function ProfilePage() {
   const { data: allEquippedData } = useAllDecorations(); // keep query warm + pass to MemberDecorations
   const equippedBanner = useEquippedBanner(targetDiscordId || undefined);
 
+  // Helper: capture profile card screenshot and upload as OG image
+  const captureAndUploadOG = async (discordId: string): Promise<boolean> => {
+    if (!profileCardRef.current) return false;
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(profileCardRef.current, {
+        backgroundColor: '#0f0a1e',
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+      });
+      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
+      if (blob) {
+        await fetch(`/api/og-screenshot/${discordId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: blob,
+        });
+        return true;
+      }
+    } catch (_) { /* silent */ }
+    return false;
+  };
+
+  // Auto-capture OG screenshot when profile card is rendered (ensures fresh preview)
+  useEffect(() => {
+    const discordId = profile?.discordId;
+    if (!discordId || !profileCardRef.current) return;
+    ogReadyRef.current = false;
+    const timer = setTimeout(async () => {
+      const ok = await captureAndUploadOG(discordId);
+      if (ok) ogReadyRef.current = true;
+    }, 3000); // wait 3s for images/banner to load
+    return () => clearTimeout(timer);
+  }, [profile?.discordId, customData]);
+
   const handleSearch = () => {
     const q = searchInput.trim();
     if (!q) return;
@@ -582,9 +621,18 @@ export default function ProfilePage() {
 
   const handleShareLink = async () => {
     const discordId = profile?.discordId || targetDiscordId;
+    if (!discordId) return;
     const url = `${window.location.origin}/profile/${discordId}`;
 
-    // 1) Copy URL INSTANTLY — no waiting
+    // If auto-capture hasn't finished yet — capture + upload BEFORE copying link
+    if (!ogReadyRef.current && profileCardRef.current) {
+      setSharing(true);
+      const ok = await captureAndUploadOG(discordId);
+      if (ok) ogReadyRef.current = true;
+      setSharing(false);
+    }
+
+    // Copy URL
     try {
       await navigator.clipboard.writeText(url);
     } catch {
@@ -596,32 +644,12 @@ export default function ProfilePage() {
       document.body.removeChild(input);
     }
     setCopiedLink(true);
-    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Вставьте в Discord — будет превью профиля' : 'Paste in Discord for profile preview' });
+    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Превью профиля актуально ✓' : 'Profile preview is up to date ✓' });
     setTimeout(() => setCopiedLink(false), 2500);
 
-    // 2) Upload screenshot in BACKGROUND (non-blocking)
-    if (profileCardRef.current && discordId) {
-      const cardEl = profileCardRef.current;
-      (async () => {
-        try {
-          const html2canvas = (await import('html2canvas')).default;
-          const canvas = await html2canvas(cardEl, {
-            backgroundColor: '#0f0a1e',
-            scale: 2,
-            useCORS: true,
-            allowTaint: true,
-            logging: false,
-          });
-          const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
-          if (blob) {
-            await fetch(`/api/og-screenshot/${discordId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/octet-stream' },
-              body: blob,
-            });
-          }
-        } catch (_) { /* background upload failed — fallback SVG will be used */ }
-      })();
+    // Re-capture in background for next time
+    if (profileCardRef.current) {
+      captureAndUploadOG(discordId).then(ok => { if (ok) ogReadyRef.current = true; });
     }
   };
 
@@ -826,8 +854,8 @@ export default function ProfilePage() {
               </div>
               <p className="text-xs text-muted-foreground">LumiCoins</p>
               <div className="flex gap-1 justify-end">
-                <button onClick={handleShareLink} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-all duration-300 ease-in-out hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-white">
-                  {copiedLink ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Share2 className="h-3.5 w-3.5 shrink-0" />}
+                <button onClick={handleShareLink} disabled={sharing} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-all duration-300 ease-in-out hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-white disabled:opacity-50">
+                  {sharing ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : copiedLink ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Share2 className="h-3.5 w-3.5 shrink-0" />}
                   <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[80px]">{isRu ? 'Поделиться' : 'Share'}</span>
                 </button>
                 <button onClick={handleScreenshot} disabled={screenshotting} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-all duration-300 ease-in-out hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-white disabled:opacity-50">
