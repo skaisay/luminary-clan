@@ -567,35 +567,19 @@ export default function ProfilePage() {
   const { data: allEquippedData } = useAllDecorations(); // keep query warm + pass to MemberDecorations
   const equippedBanner = useEquippedBanner(targetDiscordId || undefined);
 
-  // Helper: capture profile card screenshot and upload as OG image
+  // Helper: capture profile card screenshot and upload as OG image (same as screenshot button — no resize)
   const captureAndUploadOG = async (discordId: string): Promise<boolean> => {
     if (!profileCardRef.current) return false;
     try {
       const html2canvas = (await import('html2canvas')).default;
-      const el = profileCardRef.current;
-      // Use fixed scale 2 for crisp quality regardless of screen size
-      const srcCanvas = await html2canvas(el, {
+      const canvas = await html2canvas(profileCardRef.current, {
         backgroundColor: '#0f0a1e',
         scale: 2,
         useCORS: true,
         allowTaint: true,
         logging: false,
       });
-      // Scale to 1200px wide, crop top 630px for OG format
-      const w = 1200, h = 630;
-      const outCanvas = document.createElement('canvas');
-      outCanvas.width = w;
-      outCanvas.height = h;
-      const ctx = outCanvas.getContext('2d')!;
-      ctx.fillStyle = '#0f0a1e';
-      ctx.fillRect(0, 0, w, h);
-      // Scale width to 1200, proportional height
-      const scaleX = w / srcCanvas.width;
-      const scaledH = Math.round(srcCanvas.height * scaleX);
-      // Draw scaled — crop to 630px height
-      ctx.drawImage(srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height,
-                     0, 0, w, scaledH);
-      const blob = await new Promise<Blob | null>(r => outCanvas.toBlob(r, 'image/png'));
+      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
       if (blob) {
         await fetch(`/api/og-screenshot/${discordId}`, {
           method: 'POST',
