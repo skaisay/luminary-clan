@@ -579,13 +579,23 @@ export default function ProfilePage() {
         allowTaint: true,
         logging: false,
       });
-      // Resize to OG standard 1200×630 — much smaller file, faster upload
+      // Fit into OG standard 1200×630 preserving aspect ratio (no distortion)
       const w = 1200, h = 630;
       const outCanvas = document.createElement('canvas');
       outCanvas.width = w;
       outCanvas.height = h;
       const ctx = outCanvas.getContext('2d')!;
-      ctx.drawImage(srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, 0, 0, w, h);
+      // Dark background fill
+      ctx.fillStyle = '#0f0a1e';
+      ctx.fillRect(0, 0, w, h);
+      // Calculate fit (contain) — scale to fit inside 1200×630
+      const srcW = srcCanvas.width, srcH = srcCanvas.height;
+      const ratio = Math.min(w / srcW, h / srcH);
+      const dw = Math.round(srcW * ratio);
+      const dh = Math.round(srcH * ratio);
+      const dx = Math.round((w - dw) / 2);
+      const dy = Math.round((h - dh) / 2);
+      ctx.drawImage(srcCanvas, 0, 0, srcW, srcH, dx, dy, dw, dh);
       const blob = await new Promise<Blob | null>(r => outCanvas.toBlob(r, 'image/jpeg', 0.88));
       if (blob) {
         await fetch(`/api/og-screenshot/${discordId}`, {
