@@ -568,34 +568,19 @@ export default function ProfilePage() {
   const equippedBanner = useEquippedBanner(targetDiscordId || undefined);
 
   // Helper: capture profile card screenshot and upload as OG image
+  // IDENTICAL to screenshot button — scale:2, no resize, no crop
   const captureAndUploadOG = async (discordId: string): Promise<boolean> => {
     if (!profileCardRef.current) return false;
     try {
       const html2canvas = (await import('html2canvas')).default;
-      const srcCanvas = await html2canvas(profileCardRef.current, {
+      const canvas = await html2canvas(profileCardRef.current, {
         backgroundColor: '#0f0a1e',
-        scale: 1,
+        scale: 2,
         useCORS: true,
         allowTaint: true,
         logging: false,
       });
-      // Always output fixed 1200×630 (OG standard) using cover-fit
-      const W = 1200, H = 630;
-      const out = document.createElement('canvas');
-      out.width = W;
-      out.height = H;
-      const ctx = out.getContext('2d')!;
-      ctx.fillStyle = '#0f0a1e';
-      ctx.fillRect(0, 0, W, H);
-      // Cover: scale so smallest side fills, then center-crop
-      const sW = srcCanvas.width, sH = srcCanvas.height;
-      const scale = Math.max(W / sW, H / sH);
-      const dw = Math.round(sW * scale);
-      const dh = Math.round(sH * scale);
-      const dx = Math.round((W - dw) / 2);
-      const dy = Math.round((H - dh) / 2);
-      ctx.drawImage(srcCanvas, 0, 0, sW, sH, dx, dy, dw, dh);
-      const blob = await new Promise<Blob | null>(r => out.toBlob(r, 'image/png'));
+      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
       if (blob) {
         await fetch(`/api/og-screenshot/${discordId}`, {
           method: 'POST',
