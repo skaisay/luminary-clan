@@ -227,58 +227,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (_) { /* use fallback */ }
       }
 
-      const avatarCircle = avatarDataUri
-        ? `<image x="60" y="160" width="140" height="140" href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
-        : `<rect x="60" y="160" width="140" height="140" rx="70" fill="#4c1d95"/>
-           <text x="130" y="245" font-family="Arial,sans-serif" font-size="48" fill="white" text-anchor="middle" font-weight="bold">${(m.username || "?").substring(0, 2).toUpperCase()}</text>`;
+      // Get equipped name_color + badges
+      let nameColor = "#ffffff";
+      let badges: Array<{emoji: string | null; name: string; rarity: string; color: string | null}> = [];
+      try {
+        const { and: andOp } = await import("drizzle-orm");
+        const equipped = await db.select({
+          type: profileDecorations.type,
+          emoji: profileDecorations.emoji,
+          color: profileDecorations.color,
+          name: profileDecorations.name,
+          rarity: profileDecorations.rarity,
+          cssEffect: profileDecorations.cssEffect,
+        }).from(memberDecorations)
+          .innerJoin(profileDecorations, eq(memberDecorations.decorationId, profileDecorations.id))
+          .where(andOp(
+            eq(memberDecorations.discordId, m.discordId || ""),
+            eq(memberDecorations.isEquipped, true),
+          ));
+        for (const e of equipped) {
+          if (e.type === "name_color" && e.color) nameColor = e.color;
+          if (e.type === "badge") badges.push(e);
+        }
+      } catch (_) {}
 
-      // Generate SVG (1200×630 — standard OG image size)
+      const avatarCircle = avatarDataUri
+        ? `<image x="50" y="285" width="120" height="120" href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
+        : `<rect x="50" y="285" width="120" height="120" rx="60" fill="#4c1d95"/>
+           <text x="110" y="358" font-family="Arial,sans-serif" font-size="40" fill="white" text-anchor="middle" font-weight="bold">${(m.username || "?").substring(0, 2).toUpperCase()}</text>`;
+
+      const badgeSvg = badges.slice(0, 5).map((b, i) =>
+        `<text x="${195 + 28 * i}" y="374" font-family="Arial,sans-serif" font-size="22">${b.emoji || '✦'}</text>`
+      ).join("");
+
+      const xp = m.experience ?? 0;
+      const xpForNext = Math.max(100, level * 150);
+      const xpPct = Math.min(100, ((xp % xpForNext) / xpForNext) * 100);
+      const joinDate = m.joinedAt ? new Date(m.joinedAt).toLocaleDateString('ru-RU') : '—';
+
+      // Generate SVG that mirrors the actual profile card layout (1200×630)
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>
-    <clipPath id="avatar-clip"><circle cx="130" cy="230" r="70"/></clipPath>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0f0a1e"/>
-      <stop offset="100%" stop-color="#1a1145"/>
+    <clipPath id="avatar-clip"><circle cx="110" cy="345" r="58"/></clipPath>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#0c0a1d"/>
+      <stop offset="100%" stop-color="#161233"/>
     </linearGradient>
-    <linearGradient id="banner" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="banner-g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#6366f1"/>
       <stop offset="50%" stop-color="#8b5cf6"/>
       <stop offset="100%" stop-color="#a855f7"/>
     </linearGradient>
-    <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="60%" stop-color="#000" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.85"/>
+    </linearGradient>
+    <linearGradient id="xp-bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="card-shadow"><feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#000" flood-opacity="0.4"/></filter>
   </defs>
-  <!-- Background -->
+
+  <!-- Full background -->
   <rect width="1200" height="630" fill="url(#bg)"/>
-  <!-- Banner area -->
-  <rect width="1200" height="240" fill="url(#banner)" opacity="0.7"/>
-  <rect y="200" width="1200" height="60" fill="url(#bg)" opacity="0.5"/>
-  <!-- Avatar border -->
-  <circle cx="130" cy="230" r="76" fill="#1a1145" stroke="#6366f1" stroke-width="3"/>
+
+  <!-- Card container -->
+  <rect x="40" y="20" width="1120" height="590" rx="24" fill="#0f0d23" stroke="#6366f140" stroke-width="1.5" filter="url(#card-shadow)"/>
+
+  <!-- Banner — fills top of card -->
+  <rect x="40" y="20" width="1120" height="280" rx="24" fill="url(#banner-g)"/>
+  <rect x="40" y="200" width="1120" height="100" fill="url(#fade)"/>
+
+  <!-- Avatar ring -->
+  <circle cx="110" cy="345" r="65" fill="#0f0d23" stroke="#6366f1" stroke-width="3"/>
   ${avatarCircle}
-  <!-- Username -->
-  <text x="230" y="250" font-family="Arial,Helvetica,sans-serif" font-size="42" fill="white" font-weight="bold">${escapeXml(m.username)}</text>
-  <text x="230" y="285" font-family="Arial,Helvetica,sans-serif" font-size="22" fill="#a5b4fc">${escapeXml(role)}</text>
-  <!-- Stats cards -->
-  <rect x="60" y="340" width="240" height="100" rx="16" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" opacity="0.8"/>
-  <text x="180" y="378" font-family="Arial,sans-serif" font-size="16" fill="#a5b4fc" text-anchor="middle">💰 LumiCoins</text>
-  <text x="180" y="420" font-family="Arial,sans-serif" font-size="36" fill="#fbbf24" text-anchor="middle" font-weight="bold">${coins.toLocaleString()}</text>
 
-  <rect x="330" y="340" width="240" height="100" rx="16" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" opacity="0.8"/>
-  <text x="450" y="378" font-family="Arial,sans-serif" font-size="16" fill="#a5b4fc" text-anchor="middle">⚡ Уровень</text>
-  <text x="450" y="420" font-family="Arial,sans-serif" font-size="36" fill="white" text-anchor="middle" font-weight="bold">${level}</text>
+  <!-- Username + badges -->
+  <text x="190" y="350" font-family="Arial,Helvetica,sans-serif" font-size="36" fill="${nameColor}" font-weight="bold">${escapeXml(m.username)}</text>
+  ${badgeSvg}
+  <!-- Role badge -->
+  <rect x="190" y="362" width="${role.length * 10 + 24}" height="26" rx="6" fill="#ffffff12" stroke="#ffffff20" stroke-width="1"/>
+  <text x="202" y="381" font-family="Arial,sans-serif" font-size="14" fill="#a5b4fc">${escapeXml(role)}</text>
 
-  <rect x="600" y="340" width="240" height="100" rx="16" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" opacity="0.8"/>
-  <text x="720" y="378" font-family="Arial,sans-serif" font-size="16" fill="#a5b4fc" text-anchor="middle">🏆 Побед</text>
-  <text x="720" y="420" font-family="Arial,sans-serif" font-size="36" fill="#34d399" text-anchor="middle" font-weight="bold">${wins}</text>
+  <!-- XP bar -->
+  <text x="190" y="415" font-family="Arial,sans-serif" font-size="13" fill="#94a3b8">Уровень ${level} · ${xp % xpForNext}/${xpForNext} XP</text>
+  <rect x="190" y="422" width="400" height="8" rx="4" fill="#1e1b4b"/>
+  <rect x="190" y="422" width="${Math.max(8, (xpPct / 100) * 400)}" height="8" rx="4" fill="url(#xp-bar)"/>
 
-  <rect x="870" y="340" width="240" height="100" rx="16" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" opacity="0.8"/>
-  <text x="990" y="378" font-family="Arial,sans-serif" font-size="16" fill="#a5b4fc" text-anchor="middle">🎖️ Ранг</text>
-  <text x="990" y="420" font-family="Arial,sans-serif" font-size="36" fill="#f472b6" text-anchor="middle" font-weight="bold">#${rank || '—'}</text>
+  <!-- Stats row -->
+  <rect x="60" y="460" width="240" height="110" rx="16" fill="#1a1740" stroke="#6366f130" stroke-width="1"/>
+  <text x="180" y="500" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">LumiCoins</text>
+  <text x="180" y="540" font-family="Arial,sans-serif" font-size="34" fill="#fbbf24" text-anchor="middle" font-weight="bold">${coins.toLocaleString()}</text>
 
-  <!-- Footer -->
-  <rect x="0" y="490" width="1200" height="140" fill="#0c0820" opacity="0.6"/>
-  <text x="600" y="560" font-family="Arial,sans-serif" font-size="28" fill="#6366f1" text-anchor="middle" font-weight="bold" filter="url(#glow)">✦ LUMINARY CLAN ✦</text>
-  <text x="600" y="600" font-family="Arial,sans-serif" font-size="16" fill="#64748b" text-anchor="middle">luminary-clan.onrender.com/profile/${m.discordId || m.username}</text>
+  <rect x="320" y="460" width="200" height="110" rx="16" fill="#1a1740" stroke="#6366f130" stroke-width="1"/>
+  <text x="420" y="500" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">Побед</text>
+  <text x="420" y="540" font-family="Arial,sans-serif" font-size="34" fill="#34d399" text-anchor="middle" font-weight="bold">${wins}</text>
+
+  <rect x="540" y="460" width="200" height="110" rx="16" fill="#1a1740" stroke="#6366f130" stroke-width="1"/>
+  <text x="640" y="500" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">Ранг</text>
+  <text x="640" y="540" font-family="Arial,sans-serif" font-size="34" fill="#f472b6" text-anchor="middle" font-weight="bold">#${rank || '—'}</text>
+
+  <!-- Right side: LumiCoins + join date -->
+  <rect x="780" y="300" width="360" height="130" rx="16" fill="#1a1740" stroke="#6366f130" stroke-width="1"/>
+  <text x="960" y="345" font-family="Arial,sans-serif" font-size="48" fill="#fbbf24" text-anchor="middle" font-weight="bold" filter="url(#glow)">${coins.toLocaleString()}</text>
+  <text x="960" y="375" font-family="Arial,sans-serif" font-size="16" fill="#94a3b8" text-anchor="middle">LumiCoins</text>
+  <text x="960" y="415" font-family="Arial,sans-serif" font-size="13" fill="#64748b" text-anchor="middle">Присоединился: ${joinDate}</text>
+
+  <!-- Footer branding -->
+  <text x="960" y="540" font-family="Arial,sans-serif" font-size="20" fill="#6366f180" text-anchor="middle" font-weight="bold">✦ LUMINARY CLAN ✦</text>
+  <text x="960" y="565" font-family="Arial,sans-serif" font-size="12" fill="#475569" text-anchor="middle">luminary-clan.onrender.com</text>
 </svg>`;
 
       res.setHeader("Content-Type", "image/png");

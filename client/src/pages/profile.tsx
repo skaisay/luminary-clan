@@ -800,27 +800,23 @@ export default function ProfilePage() {
                 <span className="text-xl font-bold">{profile.lumiCoins?.toLocaleString()}</span>
               </div>
               <p className="text-xs text-muted-foreground">LumiCoins</p>
-              <div className="flex gap-1.5 justify-end flex-wrap">
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleShareLink}>
-                  {copiedLink ? <Check className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
-                  {copiedLink ? (isRu ? 'Скопировано' : 'Copied') : (isRu ? 'Поделиться' : 'Share')}
+              <div className="flex gap-1 justify-end">
+                <Button size="icon" variant="outline" className="h-7 w-7" onClick={handleShareLink} title={isRu ? 'Поделиться' : 'Share'}>
+                  {copiedLink ? <Check className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}
                 </Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleScreenshot} disabled={screenshotting}>
-                  {screenshotting ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}
-                  {isRu ? 'Скрин' : 'Snap'}
+                <Button size="icon" variant="outline" className="h-7 w-7" onClick={handleScreenshot} disabled={screenshotting} title={isRu ? 'Скриншот' : 'Screenshot'}>
+                  {screenshotting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
                 </Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleCopyId}>
-                  {copiedId ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  ID
+                <Button size="icon" variant="outline" className="h-7 w-7" onClick={handleCopyId} title="Discord ID">
+                  {copiedId ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 </Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowDecorations(true)}>
-                  <Sparkles className="h-3 w-3" />
-                  {(language || 'ru') === 'ru' ? 'Декор' : 'Decor'}
+                <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => setShowDecorations(true)} title={isRu ? 'Декорации' : 'Decorations'}>
+                  <Sparkles className="h-3.5 w-3.5" />
                 </Button>
                 {!isOwnProfile && user?.discordId && (
                   <Link href={`/trading?target=${encodeURIComponent(profile.username)}`}>
-                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
-                      <ArrowLeftRight className="h-3 w-3" /> {t('profile.trade')}
+                    <Button size="icon" variant="outline" className="h-7 w-7" title={t('profile.trade')}>
+                      <ArrowLeftRight className="h-3.5 w-3.5" />
                     </Button>
                   </Link>
                 )}
