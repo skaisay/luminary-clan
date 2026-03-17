@@ -573,17 +573,15 @@ export default function ProfilePage() {
     try {
       const html2canvas = (await import('html2canvas')).default;
       const el = profileCardRef.current;
-      const elW = el.offsetWidth;
-      // Scale so that rendered width = 1200px
-      const captureScale = 1200 / elW;
+      // Use fixed scale 2 for crisp quality regardless of screen size
       const srcCanvas = await html2canvas(el, {
         backgroundColor: '#0f0a1e',
-        scale: captureScale,
+        scale: 2,
         useCORS: true,
         allowTaint: true,
         logging: false,
       });
-      // Crop top 630px from the 1200-wide capture (banner + avatar + name + stats)
+      // Scale to 1200px wide, crop top 630px for OG format
       const w = 1200, h = 630;
       const outCanvas = document.createElement('canvas');
       outCanvas.width = w;
@@ -591,10 +589,13 @@ export default function ProfilePage() {
       const ctx = outCanvas.getContext('2d')!;
       ctx.fillStyle = '#0f0a1e';
       ctx.fillRect(0, 0, w, h);
-      // Draw top portion — no scaling, just crop
-      const cropH = Math.min(srcCanvas.height, h);
-      ctx.drawImage(srcCanvas, 0, 0, w, cropH, 0, 0, w, cropH);
-      const blob = await new Promise<Blob | null>(r => outCanvas.toBlob(r, 'image/jpeg', 0.88));
+      // Scale width to 1200, proportional height
+      const scaleX = w / srcCanvas.width;
+      const scaledH = Math.round(srcCanvas.height * scaleX);
+      // Draw scaled — crop to 630px height
+      ctx.drawImage(srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height,
+                     0, 0, w, scaledH);
+      const blob = await new Promise<Blob | null>(r => outCanvas.toBlob(r, 'image/png'));
       if (blob) {
         await fetch(`/api/og-screenshot/${discordId}`, {
           method: 'POST',
@@ -607,14 +608,22 @@ export default function ProfilePage() {
     return false;
   };
 
+  // Track which discordId the OG is ready for (prevents stale cross-profile cache)
+  const ogReadyForRef = useRef<string | null>(null);
+
   // Auto-capture OG screenshot when profile card is rendered (ensures fresh preview)
   useEffect(() => {
     const discordId = profile?.discordId;
     if (!discordId || !profileCardRef.current) return;
+    // Reset readiness when profile changes
     ogReadyRef.current = false;
+    ogReadyForRef.current = null;
     const timer = setTimeout(async () => {
       const ok = await captureAndUploadOG(discordId);
-      if (ok) ogReadyRef.current = true;
+      if (ok) {
+        ogReadyRef.current = true;
+        ogReadyForRef.current = discordId;
+      }
     }, 2000); // wait 2s for images/banner to load
     return () => clearTimeout(timer);
   }, [profile?.discordId, customData]);
@@ -639,11 +648,15 @@ export default function ProfilePage() {
     if (!discordId) return;
     const url = `${window.location.origin}/profile/${discordId}`;
 
-    // If auto-capture hasn't finished yet — capture + upload BEFORE copying link
-    if (!ogReadyRef.current && profileCardRef.current) {
+    // Always capture if OG isn't ready for THIS profile
+    const needsCapture = !ogReadyRef.current || ogReadyForRef.current !== discordId;
+    if (needsCapture && profileCardRef.current) {
       setSharing(true);
       const ok = await captureAndUploadOG(discordId);
-      if (ok) ogReadyRef.current = true;
+      if (ok) {
+        ogReadyRef.current = true;
+        ogReadyForRef.current = discordId;
+      }
       setSharing(false);
     }
 
@@ -664,7 +677,7 @@ export default function ProfilePage() {
 
     // Re-capture in background for next time
     if (profileCardRef.current) {
-      captureAndUploadOG(discordId).then(ok => { if (ok) ogReadyRef.current = true; });
+      captureAndUploadOG(discordId).then(ok => { if (ok) { ogReadyRef.current = true; ogReadyForRef.current = discordId; } });
     }
   };
 

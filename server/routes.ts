@@ -215,7 +215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // 1) Check memory cache first (instant)
       const cached = ogCache.get(discordId);
       if (cached && (Date.now() - cached.ts) < OG_CACHE_TTL) {
-        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Content-Type', 'image/png');
         res.setHeader('Content-Length', cached.buf.length.toString());
         res.setHeader('Cache-Control', 'public, max-age=120');
         return res.send(cached.buf);
@@ -233,7 +233,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const buf = Buffer.from(rows[0].imageBase64, 'base64');
         // Warm the memory cache
         ogCache.set(discordId, { buf, ts: Date.now() });
-        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Content-Type', 'image/png');
         res.setHeader('Content-Length', buf.length.toString());
         res.setHeader('Cache-Control', 'public, max-age=120');
         return res.send(buf);
