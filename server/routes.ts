@@ -178,7 +178,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for await (const chunk of req) chunks.push(Buffer.from(chunk));
       const imgBuffer = Buffer.concat(chunks);
 
-      if (imgBuffer.length < 100 || imgBuffer.length > 5 * 1024 * 1024) {
+      if (imgBuffer.length < 100 || imgBuffer.length > 10 * 1024 * 1024) {
         return res.status(400).json({ error: "Invalid image size" });
       }
 

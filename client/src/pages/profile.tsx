@@ -437,7 +437,6 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [showDecorations, setShowDecorations] = useState(false);
   const profileCardRef = useRef<HTMLDivElement>(null);
-  const ogReadyRef = useRef(false);
   const { toast } = useToast();
   const bannerFileRef = useRef<HTMLInputElement>(null);
 
@@ -567,52 +566,6 @@ export default function ProfilePage() {
   const { data: allEquippedData } = useAllDecorations(); // keep query warm + pass to MemberDecorations
   const equippedBanner = useEquippedBanner(targetDiscordId || undefined);
 
-  // Helper: capture profile card screenshot and upload as OG image
-  // IDENTICAL to screenshot button — scale:2, no resize, no crop
-  const captureAndUploadOG = async (discordId: string): Promise<boolean> => {
-    if (!profileCardRef.current) return false;
-    try {
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(profileCardRef.current, {
-        backgroundColor: '#0f0a1e',
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-      });
-      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
-      if (blob) {
-        await fetch(`/api/og-screenshot/${discordId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: blob,
-        });
-        return true;
-      }
-    } catch (_) { /* silent */ }
-    return false;
-  };
-
-  // Track which discordId the OG is ready for (prevents stale cross-profile cache)
-  const ogReadyForRef = useRef<string | null>(null);
-
-  // Auto-capture OG screenshot when profile card is rendered (ensures fresh preview)
-  useEffect(() => {
-    const discordId = profile?.discordId;
-    if (!discordId || !profileCardRef.current) return;
-    // Reset readiness when profile changes
-    ogReadyRef.current = false;
-    ogReadyForRef.current = null;
-    const timer = setTimeout(async () => {
-      const ok = await captureAndUploadOG(discordId);
-      if (ok) {
-        ogReadyRef.current = true;
-        ogReadyForRef.current = discordId;
-      }
-    }, 2000); // wait 2s for images/banner to load
-    return () => clearTimeout(timer);
-  }, [profile?.discordId, customData]);
-
   const handleSearch = () => {
     const q = searchInput.trim();
     if (!q) return;
@@ -630,22 +583,32 @@ export default function ProfilePage() {
 
   const handleShareLink = async () => {
     const discordId = profile?.discordId || targetDiscordId;
-    if (!discordId) return;
-    const url = `${window.location.origin}/profile/${discordId}`;
+    if (!discordId || !profileCardRef.current) return;
 
-    // Always capture if OG isn't ready for THIS profile
-    const needsCapture = !ogReadyRef.current || ogReadyForRef.current !== discordId;
-    if (needsCapture && profileCardRef.current) {
-      setSharing(true);
-      const ok = await captureAndUploadOG(discordId);
-      if (ok) {
-        ogReadyRef.current = true;
-        ogReadyForRef.current = discordId;
+    setSharing(true);
+    try {
+      // Capture screenshot — IDENTICAL to screenshot button
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(profileCardRef.current, {
+        backgroundColor: '#0f0a1e',
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+      });
+      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
+      if (blob) {
+        await fetch(`/api/og-screenshot/${discordId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: blob,
+        });
       }
-      setSharing(false);
-    }
+    } catch (_) { /* silent */ }
+    setSharing(false);
 
     // Copy URL
+    const url = `${window.location.origin}/profile/${discordId}`;
     try {
       await navigator.clipboard.writeText(url);
     } catch {
@@ -657,13 +620,8 @@ export default function ProfilePage() {
       document.body.removeChild(input);
     }
     setCopiedLink(true);
-    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Превью профиля актуально ✓' : 'Profile preview is up to date ✓' });
+    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!' });
     setTimeout(() => setCopiedLink(false), 2500);
-
-    // Re-capture in background for next time
-    if (profileCardRef.current) {
-      captureAndUploadOG(discordId).then(ok => { if (ok) { ogReadyRef.current = true; ogReadyForRef.current = discordId; } });
-    }
   };
 
   const handleScreenshot = async () => {
