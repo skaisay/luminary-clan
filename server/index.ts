@@ -141,6 +141,12 @@ app.use((req, res, next) => {
         roblox_username TEXT DEFAULT '',
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS og_screenshots (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        discord_id TEXT NOT NULL UNIQUE,
+        image_base64 TEXT NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
       CREATE TABLE IF NOT EXISTS ad_spots (
         id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
         discord_id TEXT NOT NULL,

@@ -159,10 +159,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/uploads', express.default.static(path.join(process.cwd(), 'uploads')));
 
   // ============================================================
-  // OG SCREENSHOT — Upload real profile screenshot as OG image
+  // OG SCREENSHOT — Upload real profile screenshot to DATABASE
   // ============================================================
   app.post("/api/og-screenshot/:discordId", async (req, res) => {
     try {
+      const { db } = await import("./db");
+      const { ogScreenshots } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
       const discordId = req.params.discordId;
       if (!/^\d+$/.test(discordId)) return res.status(400).json({ error: "Invalid discordId" });
 
@@ -175,16 +178,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Invalid image size" });
       }
 
-      // Ensure dir
-      const ogDir = path.join(process.cwd(), 'uploads', 'og');
-      if (!fs.existsSync(ogDir)) fs.mkdirSync(ogDir, { recursive: true });
+      const imageBase64 = pngBuffer.toString('base64');
 
-      const filePath = path.join(ogDir, `${discordId}.png`);
-      fs.writeFileSync(filePath, pngBuffer);
-      res.json({ ok: true, url: `/uploads/og/${discordId}.png` });
+      // Upsert into database
+      const existing = await db.select({ id: ogScreenshots.id }).from(ogScreenshots)
+        .where(eq(ogScreenshots.discordId, discordId)).limit(1);
+      if (existing.length > 0) {
+        await db.update(ogScreenshots)
+          .set({ imageBase64, updatedAt: new Date() })
+          .where(eq(ogScreenshots.discordId, discordId));
+      } else {
+        await db.insert(ogScreenshots).values({ discordId, imageBase64 });
+      }
+
+      res.json({ ok: true });
     } catch (error: any) {
       console.error("[OG-SCREENSHOT]", error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // OG SCREENSHOT — Serve stored screenshot from DATABASE
+  // ============================================================
+  app.get("/api/og-screenshot/:discordId", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { ogScreenshots } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const discordId = req.params.discordId;
+
+      const rows = await db.select().from(ogScreenshots)
+        .where(eq(ogScreenshots.discordId, discordId)).limit(1);
+
+      if (rows.length > 0 && rows[0].imageBase64) {
+        const buf = Buffer.from(rows[0].imageBase64, 'base64');
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Length', buf.length.toString());
+        res.setHeader('Cache-Control', 'public, max-age=60');
+        return res.send(buf);
+      }
+
+      // No screenshot stored — redirect to SVG fallback
+      res.redirect(`/api/og-image/${discordId}`);
+    } catch (error: any) {
+      console.error("[OG-SCREENSHOT-GET]", error);
+      res.redirect(`/api/og-image/${req.params.discordId}`);
     }
   });
 

@@ -794,6 +794,14 @@ export const profileCustoms = pgTable("profile_customs", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// ==================== OG SCREENSHOTS (Profile preview images stored in DB) ====================
+export const ogScreenshots = pgTable("og_screenshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  discordId: text("discord_id").notNull().unique(),
+  imageBase64: text("image_base64").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ==================== AD SPOTS (Dashboard Roblox avatar ads) ====================
 export const adSpots = pgTable("ad_spots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
