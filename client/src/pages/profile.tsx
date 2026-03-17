@@ -596,7 +596,7 @@ export default function ProfilePage() {
       document.body.removeChild(input);
     }
     setCopiedLink(true);
-    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Превью обновляется в фоне…' : 'Preview updating in background…' });
+    toast({ title: isRu ? '✅ Ссылка скопирована!' : '✅ Link copied!', description: isRu ? 'Вставьте в Discord — будет превью профиля' : 'Paste in Discord for profile preview' });
     setTimeout(() => setCopiedLink(false), 2500);
 
     // 2) Upload screenshot in BACKGROUND (non-blocking)
@@ -826,27 +826,27 @@ export default function ProfilePage() {
               </div>
               <p className="text-xs text-muted-foreground">LumiCoins</p>
               <div className="flex gap-1 justify-end">
-                <button onClick={handleShareLink} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary">
+                <button onClick={handleShareLink} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-all duration-300 ease-in-out hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-white">
                   {copiedLink ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Share2 className="h-3.5 w-3.5 shrink-0" />}
-                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">{isRu ? 'Поделиться' : 'Share'}</span>
+                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[80px]">{isRu ? 'Поделиться' : 'Share'}</span>
                 </button>
-                <button onClick={handleScreenshot} disabled={screenshotting} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary disabled:opacity-50">
+                <button onClick={handleScreenshot} disabled={screenshotting} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-all duration-300 ease-in-out hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-white disabled:opacity-50">
                   {screenshotting ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5 shrink-0" />}
-                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">{isRu ? 'Скрин' : 'Snap'}</span>
+                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[80px]">{isRu ? 'Скрин' : 'Snap'}</span>
                 </button>
-                <button onClick={handleCopyId} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary">
+                <button onClick={handleCopyId} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-all duration-300 ease-in-out hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-white">
                   {copiedId ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
-                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">ID</span>
+                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[80px]">ID</span>
                 </button>
-                <button onClick={() => setShowDecorations(true)} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary">
+                <button onClick={() => setShowDecorations(true)} className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-all duration-300 ease-in-out hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-white">
                   <Sparkles className="h-3.5 w-3.5 shrink-0" />
-                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">{isRu ? 'Декор' : 'Decor'}</span>
+                  <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[80px]">{isRu ? 'Декор' : 'Decor'}</span>
                 </button>
                 {!isOwnProfile && user?.discordId && (
                   <Link href={`/trading?target=${encodeURIComponent(profile.username)}`}>
-                    <button className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-primary/10 transition-all duration-200 hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-primary">
+                    <button className="group inline-flex items-center gap-0 h-7 px-1.5 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-all duration-300 ease-in-out hover:gap-1.5 hover:px-2.5 text-muted-foreground hover:text-white">
                       <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
-                      <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[80px]">{isRu ? 'Трейд' : 'Trade'}</span>
+                      <span className="text-xs font-medium max-w-0 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out group-hover:max-w-[80px]">{isRu ? 'Трейд' : 'Trade'}</span>
                     </button>
                   </Link>
                 )}
