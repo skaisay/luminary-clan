@@ -68,7 +68,8 @@ export function serveStatic(app: Express) {
       const profileUrl = `${siteUrl}/profile/${m.discordId}`;
       const avatar = m.avatar || "https://i.postimg.cc/1tPnXtX8/IMG-9561.jpg";
       // Always point to the DB-backed screenshot route (falls back to SVG if none stored)
-      const ogImage = `${siteUrl}/api/og-screenshot/${m.discordId}?t=${Math.floor(Date.now() / 60000)}`;
+      // Use seconds-based cache buster so Discord always fetches fresh image
+      const ogImage = `${siteUrl}/api/og-screenshot/${m.discordId}?t=${Date.now()}`;
       const title = `${m.username} — LUMINARY`;
       const desc = `🏆 Ранг: ${m.rank || '—'} • 💰 ${m.lumiCoins ?? 0} LC • ${m.role || 'Участник'} • Уровень ${m.level ?? 1}`;
 
@@ -81,8 +82,6 @@ export function serveStatic(app: Express) {
         <meta property="og:title" content="${title}"/>
         <meta property="og:description" content="${desc}"/>
         <meta property="og:image" content="${ogImage}"/>
-        <meta property="og:image:width" content="1200"/>
-        <meta property="og:image:height" content="630"/>
         <meta property="og:url" content="${profileUrl}"/>
         <meta name="twitter:card" content="summary_large_image"/>
         <meta name="twitter:title" content="${title}"/>
