@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Home, Trophy, Newspaper, Users, Info, Music, BarChart3, MessageSquarePlus, MessagesSquare, ShoppingBag, Package, Coins, Gamepad2 } from "lucide-react";
+import { Home, Trophy, Newspaper, Users, Info, Music, BarChart3, ShoppingBag, Package, Coins, Gamepad2 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import type { ClanSettings } from "@shared/schema";
@@ -59,16 +59,7 @@ const menuItemsConfig = [
     url: "/convert",
     icon: Coins,
   },
-  {
-    key: "nav.requests",
-    url: "/requests",
-    icon: MessageSquarePlus,
-  },
-  {
-    key: "nav.forum",
-    url: "/forum",
-    icon: MessagesSquare,
-  },
+
   {
     key: "nav.roblox",
     url: "/roblox-tracker",

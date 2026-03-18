@@ -18,8 +18,7 @@ import Dashboard from "@/pages/dashboard";
 import Leaderboard from "@/pages/leaderboard";
 import Members from "@/pages/members";
 import NewsPage from "@/pages/news";
-import RequestsPage from "@/pages/requests";
-import ForumPage from "@/pages/forum";
+
 import Statistics from "@/pages/statistics";
 import About from "@/pages/about";
 import Shop from "@/pages/shop";
@@ -70,8 +69,7 @@ function MainRouter() {
       <Route path="/decorations"><DecorationShop /></Route>
       <Route path="/inventory"><MaintenanceGate pageId="inventory"><Inventory /></MaintenanceGate></Route>
       <Route path="/convert"><MaintenanceGate pageId="convert"><ConvertPage /></MaintenanceGate></Route>
-      <Route path="/requests"><MaintenanceGate pageId="requests"><RequestsPage /></MaintenanceGate></Route>
-      <Route path="/forum"><MaintenanceGate pageId="forum"><ForumPage /></MaintenanceGate></Route>
+
       <Route path="/about"><MaintenanceGate pageId="about"><About /></MaintenanceGate></Route>
       <Route path="/roblox-tracker"><RobloxTracker /></Route>
       <Route path="/music"><MusicPage /></Route>
@@ -124,11 +122,29 @@ function VideoPlatformRouter() {
   );
 }
 
+import { ArrowLeft } from "lucide-react";
+
+function BackButton() {
+  const [location] = useLocation();
+  // Don't show on home page
+  if (location === "/" || location === "") return null;
+  return (
+    <button
+      onClick={() => window.history.back()}
+      className="fixed left-4 top-20 z-40 flex items-center justify-center w-9 h-9 rounded-full bg-background/80 backdrop-blur-sm border border-border/50 text-muted-foreground hover:text-white hover:bg-white/10 transition-colors duration-150 shadow-lg"
+      title="Назад"
+    >
+      <ArrowLeft className="h-4 w-4" />
+    </button>
+  );
+}
+
 function MainLayout() {
   useSSE(); // Real-time balance & decoration updates via SSE
   return (
     <>
       <TopNav />
+      <BackButton />
       <main className="w-full min-h-screen">
         <MainRouter />
       </main>

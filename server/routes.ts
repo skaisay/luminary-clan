@@ -106,7 +106,7 @@ function validateReturnTo(returnTo: string | undefined): string {
   }
 
   // Дополнительная проверка: разрешаем только пути видео платформы или основного сайта
-  const allowedPrefixes = ['/', '/shop', '/dashboard', '/news', '/forum', '/members', '/requests', '/leaderboard', '/statistics', '/about', '/inventory', '/convert'];
+  const allowedPrefixes = ['/', '/shop', '/dashboard', '/news', '/members', '/leaderboard', '/statistics', '/about', '/inventory', '/convert'];
   const isAllowed = allowedPrefixes.some(prefix => decoded === prefix || decoded.startsWith(prefix + '/'));
   
   if (!isAllowed) {

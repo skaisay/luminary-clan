@@ -156,8 +156,54 @@ app.use((req, res, next) => {
         expires_at TIMESTAMP NOT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS page_availability (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        page_id TEXT NOT NULL UNIQUE,
+        page_name TEXT NOT NULL,
+        is_enabled BOOLEAN NOT NULL DEFAULT true,
+        maintenance_title_ru TEXT,
+        maintenance_title_en TEXT,
+        maintenance_message_ru TEXT,
+        maintenance_message_en TEXT,
+        updated_by TEXT,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
     `);
     console.log('[DB] Ensured all custom tables exist');
+
+    // Seed page_availability if empty
+    const { rows: pageRows } = await dbPool.query('SELECT COUNT(*) FROM page_availability');
+    if (parseInt(pageRows[0].count) === 0) {
+      const pages = [
+        { id: 'dashboard', name: 'Главная' },
+        { id: 'statistics', name: 'Статистика' },
+        { id: 'leaderboard', name: 'Рейтинг' },
+        { id: 'members', name: 'Участники' },
+        { id: 'news', name: 'Новости' },
+        { id: 'shop', name: 'Магазин' },
+        { id: 'decorations', name: 'Декорации' },
+        { id: 'inventory', name: 'Инвентарь' },
+        { id: 'convert', name: 'Конвертация' },
+        { id: 'about', name: 'О Клане' },
+        { id: 'achievements', name: 'Достижения' },
+        { id: 'quests', name: 'Квесты' },
+        { id: 'trading', name: 'Торговля' },
+        { id: 'boosters', name: 'Бустеры' },
+        { id: 'daily-rewards', name: 'Ежедневные награды' },
+        { id: 'profile', name: 'Профиль' },
+        { id: 'mini-games', name: 'Мини-Игры' },
+        { id: 'clan-wars', name: 'Клановые войны' },
+      ];
+      for (const p of pages) {
+        await dbPool.query(
+          `INSERT INTO page_availability (page_id, page_name, is_enabled, maintenance_title_ru, maintenance_title_en, maintenance_message_ru, maintenance_message_en)
+           VALUES ($1, $2, true, 'Страница на обслуживании', 'Page Under Maintenance', 'Эта страница временно недоступна. Пожалуйста, зайдите позже.', 'This page is temporarily unavailable. Please come back later.')
+           ON CONFLICT (page_id) DO NOTHING`,
+          [p.id, p.name]
+        );
+      }
+      console.log('[DB] Seeded page_availability with', pages.length, 'pages');
+    }
   } catch (e: any) {
     console.error('[DB] Failed to ensure tables:', e.message);
   }

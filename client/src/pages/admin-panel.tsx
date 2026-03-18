@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Shield, Settings, Users, Newspaper, BarChart3, Activity, LogOut, Loader2, Hash, MessageSquarePlus, Store, Coins, FileText, MessagesSquare, Ban, Sparkles } from "lucide-react";
+import { Shield, Settings, Users, Newspaper, BarChart3, Activity, LogOut, Loader2, Hash, Store, Coins, FileText, Ban, Sparkles } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,7 @@ import AdminNewsTab from "@/components/admin/admin-news-tab";
 import AdminStatsTab from "@/components/admin/admin-stats-tab";
 import AdminMonitoringTab from "@/pages/admin-monitoring";
 import AdminDiscordTab from "@/components/admin/admin-discord-tab";
-import AdminRequestsTab from "@/components/admin/admin-requests-tab";
-import AdminForumTab from "@/components/admin/admin-forum-tab";
+
 import { AdminShopTab } from "@/components/admin/admin-shop-tab";
 import AdminConvertTab from "@/components/admin/admin-convert-tab";
 import AdminPagesTab from "@/components/admin/admin-pages-tab";
@@ -124,14 +123,7 @@ export default function AdminPanel() {
               <FileText className="w-4 h-4" />
               <span className="hidden sm:inline">Страницы</span>
             </TabsTrigger>
-            <TabsTrigger value="requests" className="gap-2" data-testid="tab-requests">
-              <MessageSquarePlus className="w-4 h-4" />
-              <span className="hidden sm:inline">Запросы</span>
-            </TabsTrigger>
-            <TabsTrigger value="forum" className="gap-2" data-testid="tab-forum">
-              <MessagesSquare className="w-4 h-4" />
-              <span className="hidden sm:inline">Форум</span>
-            </TabsTrigger>
+
             <TabsTrigger value="stats" className="gap-2" data-testid="tab-stats">
               <BarChart3 className="w-4 h-4" />
               <span className="hidden sm:inline">Статистика</span>
@@ -182,13 +174,7 @@ export default function AdminPanel() {
             <AdminPagesTab />
           </TabsContent>
 
-          <TabsContent value="requests">
-            <AdminRequestsTab />
-          </TabsContent>
 
-          <TabsContent value="forum">
-            <AdminForumTab />
-          </TabsContent>
 
           <TabsContent value="stats">
             <AdminStatsTab />
