@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   Gamepad2, Coins, Loader2, RotateCw, Hand, Scissors,
   Circle, Square, ChevronRight, History, Dices, CircleDot,
-  ArrowUp, ArrowDown, Hash, Cherry
+  ArrowUp, ArrowDown, Hash, Cherry, Maximize, Minimize,
+  Crown, Timer, Zap, Target, TrendingUp, HelpCircle, Award
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,113 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiRequest } from "@/lib/queryClient";
+
+// ============= GOLD CARD SYSTEM =============
+
+const GOLD_CARD_KEY = 'luminary_gold_card';
+const GOLD_CARD_COST = 500;
+const GOLD_CARD_DURATION_MS = 30 * 60 * 1000; // 30 минут
+const GOLD_CARD_BONUS = 0.2; // +20% к выигрышу
+
+interface GoldCardData {
+  activatedAt: number;
+  expiresAt: number;
+}
+
+function getGoldCard(): GoldCardData | null {
+  try {
+    const raw = localStorage.getItem(GOLD_CARD_KEY);
+    if (!raw) return null;
+    const data: GoldCardData = JSON.parse(raw);
+    if (Date.now() > data.expiresAt) {
+      localStorage.removeItem(GOLD_CARD_KEY);
+      return null;
+    }
+    return data;
+  } catch { return null; }
+}
+
+function activateGoldCard() {
+  const now = Date.now();
+  const data: GoldCardData = { activatedAt: now, expiresAt: now + GOLD_CARD_DURATION_MS };
+  localStorage.setItem(GOLD_CARD_KEY, JSON.stringify(data));
+  return data;
+}
+
+function GoldCardBanner() {
+  const { user, updateBalance } = useAuth();
+  const { language } = useLanguage();
+  const isRu = (language || 'ru') === 'ru';
+  const [card, setCard] = useState<GoldCardData | null>(getGoldCard);
+  const [timeLeft, setTimeLeft] = useState('');
+  const [buying, setBuying] = useState(false);
+  const [error, setError] = useState('');
+  const balance = user?.lumiCoins ?? 0;
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const c = getGoldCard();
+      setCard(c);
+      if (c) {
+        const left = c.expiresAt - Date.now();
+        if (left <= 0) { setCard(null); return; }
+        const mins = Math.floor(left / 60000);
+        const secs = Math.floor((left % 60000) / 1000);
+        setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleBuy = async () => {
+    if (!user?.discordId || balance < GOLD_CARD_COST) return;
+    setBuying(true);
+    setError('');
+    try {
+      const res = await apiRequest("POST", "/api/mini-games/buy-gold-card", {
+        discordId: user.discordId,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Error");
+      }
+      const data = await res.json();
+      activateGoldCard();
+      setCard(getGoldCard());
+      updateBalance(data.newBalance);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBuying(false);
+    }
+  };
+
+  if (card) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gradient-to-r from-yellow-500/15 to-amber-500/15 border border-yellow-500/30 mb-3 mx-auto">
+        <Crown className="h-4 w-4 text-yellow-400" />
+        <span className="text-sm font-semibold text-yellow-400">{isRu ? 'Золотая карта' : 'Gold Card'}</span>
+        <Badge className="bg-yellow-500/20 text-yellow-300 text-xs gap-1">
+          <Timer className="h-3 w-3" /> {timeLeft}
+        </Badge>
+        <span className="text-xs text-yellow-400/70">+20% {isRu ? 'к выигрышу' : 'bonus'}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gradient-to-r from-yellow-900/20 to-amber-900/20 border border-yellow-500/15 mb-3 mx-auto flex-wrap">
+      <Crown className="h-4 w-4 text-yellow-500/60" />
+      <span className="text-xs text-muted-foreground">{isRu ? 'Золотая карта: +20% к выигрышу на 30 мин' : 'Gold Card: +20% winnings for 30 min'}</span>
+      <Button size="sm" variant="outline" className="h-6 text-xs gap-1 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
+        onClick={handleBuy} disabled={buying || balance < GOLD_CARD_COST || !user?.discordId}>
+        {buying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Coins className="h-3 w-3" />}
+        {GOLD_CARD_COST} LC
+      </Button>
+      {error && <span className="text-xs text-red-400">{error}</span>}
+    </div>
+  );
+}
 
 // ============= SHARED: Balance bar =============
 
@@ -92,9 +200,11 @@ function WheelOfFortune() {
 
   const spinMutation = useMutation({
     mutationFn: async () => {
+      const gc = getGoldCard();
       const res = await apiRequest("POST", "/api/mini-games/wheel", {
         discordId: user?.discordId,
         bet: betAmount,
+        hasGoldCard: !!gc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -275,8 +385,9 @@ function RockPaperScissors() {
 
   const playMutation = useMutation({
     mutationFn: async (choice: RPSChoice) => {
+      const gc = getGoldCard();
       const res = await apiRequest("POST", "/api/mini-games/rps", {
-        discordId: user?.discordId, choice, bet: betAmount,
+        discordId: user?.discordId, choice, bet: betAmount, hasGoldCard: !!gc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -412,8 +523,9 @@ function CoinFlip() {
 
   const flipMutation = useMutation({
     mutationFn: async (guess: "heads" | "tails") => {
+      const gc = getGoldCard();
       const res = await apiRequest("POST", "/api/mini-games/coinflip", {
-        discordId: user?.discordId, bet: betAmount, guess,
+        discordId: user?.discordId, bet: betAmount, guess, hasGoldCard: !!gc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -536,8 +648,9 @@ function DiceGame() {
 
   const rollMutation = useMutation({
     mutationFn: async (guess: string) => {
+      const gc = getGoldCard();
       const res = await apiRequest("POST", "/api/mini-games/dice", {
-        discordId: user?.discordId, bet: betAmount, guess,
+        discordId: user?.discordId, bet: betAmount, guess, hasGoldCard: !!gc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -698,8 +811,9 @@ function SlotMachine() {
 
   const spinMutation = useMutation({
     mutationFn: async () => {
+      const gc = getGoldCard();
       const res = await apiRequest("POST", "/api/mini-games/slots", {
-        discordId: user?.discordId, bet: betAmount,
+        discordId: user?.discordId, bet: betAmount, hasGoldCard: !!gc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -851,6 +965,421 @@ function SlotMachine() {
   );
 }
 
+// ============= BLACKJACK (21) =============
+
+function BlackjackGame() {
+  const { user, updateBalance } = useAuth();
+  const { language } = useLanguage();
+  const isRu = (language || 'ru') === 'ru';
+  const [dealing, setDealing] = useState(false);
+  const [result, setResult] = useState<{
+    playerCards: string[]; dealerCards: string[];
+    playerValue: number; dealerValue: number;
+    result: string; reward: number; multiplier: number;
+  } | null>(null);
+  const [betAmount, setBetAmount] = useState(10);
+  const [error, setError] = useState("");
+  const balance = user?.lumiCoins ?? 0;
+
+  const dealMutation = useMutation({
+    mutationFn: async () => {
+      const gc = getGoldCard();
+      const res = await apiRequest("POST", "/api/mini-games/blackjack", {
+        discordId: user?.discordId, bet: betAmount, hasGoldCard: !!gc,
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setError("");
+      setDealing(true);
+      setTimeout(() => {
+        setDealing(false);
+        setResult(data);
+        updateBalance(data.newBalance);
+        saveGameHistory({ game: 'blackjack', bet: betAmount, reward: data.reward, result: data.result });
+      }, 1200);
+    },
+    onError: (err: Error) => {
+      setError(err.message.includes("Not enough") ? (isRu ? "Недостаточно LC!" : "Not enough LC!") : err.message);
+    }
+  });
+
+  const canPlay = balance >= betAmount && !dealing && !dealMutation.isPending && !!user?.discordId;
+
+  const resultColor = result?.result === 'blackjack' ? 'text-yellow-400' :
+    result?.result === 'win' ? 'text-green-400' :
+    result?.result === 'push' ? 'text-muted-foreground' : 'text-red-400';
+
+  const resultLabel = result?.result === 'blackjack' ? '🃏 BLACKJACK!' :
+    result?.result === 'win' ? (isRu ? '🏆 Победа!' : '🏆 Win!') :
+    result?.result === 'push' ? (isRu ? '🤝 Ничья' : '🤝 Push') :
+    (isRu ? '💀 Проигрыш' : '💀 Lose');
+
+  return (
+    <div className="space-y-6">
+      {/* Cards display */}
+      <div className="flex justify-center gap-8">
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground mb-2">{isRu ? 'Ты' : 'You'}</p>
+          <div className="flex gap-1 justify-center min-h-[4rem]">
+            {dealing ? (
+              <div className="flex gap-1">
+                {[1,2].map(i => <div key={i} className="w-10 h-14 rounded-md bg-primary/20 border border-primary/30 animate-pulse flex items-center justify-center text-sm">🂠</div>)}
+              </div>
+            ) : result ? (
+              result.playerCards.map((c, i) => (
+                <div key={i} className="w-10 h-14 rounded-md bg-background border border-border flex items-center justify-center text-sm font-bold">
+                  <span className={c.includes('♥') || c.includes('♦') ? 'text-red-400' : ''}>{c}</span>
+                </div>
+              ))
+            ) : <div className="w-10 h-14 rounded-md bg-muted/20 border border-muted flex items-center justify-center text-lg opacity-30">🂠</div>}
+          </div>
+          {result && <p className="text-xs mt-1 font-semibold">{result.playerValue}</p>}
+        </div>
+        <div className="flex items-center text-lg font-bold text-muted-foreground">VS</div>
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground mb-2">{isRu ? 'Дилер' : 'Dealer'}</p>
+          <div className="flex gap-1 justify-center min-h-[4rem]">
+            {dealing ? (
+              <div className="flex gap-1">
+                {[1,2].map(i => <div key={i} className="w-10 h-14 rounded-md bg-red-500/20 border border-red-500/30 animate-pulse flex items-center justify-center text-sm">🂠</div>)}
+              </div>
+            ) : result ? (
+              result.dealerCards.map((c, i) => (
+                <div key={i} className="w-10 h-14 rounded-md bg-background border border-border flex items-center justify-center text-sm font-bold">
+                  <span className={c.includes('♥') || c.includes('♦') ? 'text-red-400' : ''}>{c}</span>
+                </div>
+              ))
+            ) : <div className="w-10 h-14 rounded-md bg-muted/20 border border-muted flex items-center justify-center text-lg opacity-30">🂠</div>}
+          </div>
+          {result && <p className="text-xs mt-1 font-semibold">{result.dealerValue}</p>}
+        </div>
+      </div>
+
+      {result && !dealing && (
+        <div className="text-center space-y-1">
+          <p className={`text-xl font-bold ${resultColor}`}>{resultLabel}</p>
+          <Badge className={`gap-1 ${result.reward > 0 ? 'bg-green-500/20 text-green-400' : result.reward < 0 ? 'bg-red-500/20 text-red-400' : ''}`}>
+            <Coins className="h-3 w-3" /> {result.reward > 0 ? `+${result.reward}` : result.reward} LC
+          </Badge>
+        </div>
+      )}
+
+      {error && <p className="text-center text-sm text-red-400">{error}</p>}
+
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        <span className="text-sm text-muted-foreground">{isRu ? 'Ставка' : 'Bet'}:</span>
+        <div className="flex gap-1">
+          {[100, 1000, 10000].map(val => (
+            <Button key={val} size="sm" variant={betAmount === val ? "default" : "outline"}
+              onClick={() => { setBetAmount(val); setError(""); }} disabled={dealing} className="text-xs">{val >= 1000 ? `${val/1000}K` : val}</Button>
+          ))}
+          <Button size="sm" variant="outline" onClick={() => { setBetAmount(balance); setError(""); }} disabled={dealing} className="text-xs font-bold">MAX</Button>
+        </div>
+        <Input type="number" min={1} value={betAmount}
+          onChange={(e) => { setBetAmount(Math.max(1, parseInt(e.target.value) || 1)); setError(""); }}
+          disabled={dealing} className="w-28 h-8 text-xs text-center" />
+      </div>
+
+      <div className="flex justify-center">
+        <Button size="lg" onClick={() => { setResult(null); setError(""); dealMutation.mutate(); }}
+          disabled={!canPlay} className="gap-2">
+          {dealing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Award className="h-4 w-4" />}
+          {dealing ? (isRu ? 'Раздача...' : 'Dealing...') :
+           balance < betAmount ? (isRu ? 'Мало монет' : 'Not enough') :
+           `${isRu ? 'Играть' : 'Deal'} (${betAmount} LC)`}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ============= NUMBER GUESS =============
+
+function NumberGuessGame() {
+  const { user, updateBalance } = useAuth();
+  const { language } = useLanguage();
+  const isRu = (language || 'ru') === 'ru';
+  const [guessing, setGuessing] = useState(false);
+  const [guessValue, setGuessValue] = useState(50);
+  const [result, setResult] = useState<{
+    secret: number; guess: number; diff: number;
+    multiplier: number; resultLabel: string; reward: number;
+  } | null>(null);
+  const [betAmount, setBetAmount] = useState(10);
+  const [error, setError] = useState("");
+  const balance = user?.lumiCoins ?? 0;
+
+  const guessMutation = useMutation({
+    mutationFn: async () => {
+      const gc = getGoldCard();
+      const res = await apiRequest("POST", "/api/mini-games/number-guess", {
+        discordId: user?.discordId, bet: betAmount, guess: guessValue, hasGoldCard: !!gc,
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setError("");
+      setGuessing(true);
+      setTimeout(() => {
+        setGuessing(false);
+        setResult(data);
+        updateBalance(data.newBalance);
+        saveGameHistory({ game: 'number-guess', bet: betAmount, reward: data.reward, result: `${data.guess}→${data.secret}` });
+      }, 1000);
+    },
+    onError: (err: Error) => {
+      setError(err.message.includes("Not enough") ? (isRu ? "Недостаточно LC!" : "Not enough LC!") : err.message);
+    }
+  });
+
+  const canPlay = balance >= betAmount && !guessing && !guessMutation.isPending && !!user?.discordId;
+
+  return (
+    <div className="space-y-6">
+      {/* Number display */}
+      <div className="flex justify-center gap-6 items-end">
+        <div className="text-center">
+          <p className="text-xs text-muted-foreground mb-1">{isRu ? 'Твоя число' : 'Your guess'}</p>
+          <div className={`w-20 h-20 rounded-xl border-2 flex items-center justify-center text-3xl font-bold transition-all ${
+            guessing ? 'border-purple-400 bg-purple-400/10 animate-pulse' : 'border-primary bg-primary/10'
+          }`}>
+            {guessing ? '?' : guessValue}
+          </div>
+        </div>
+        {result && !guessing && (
+          <>
+            <div className="text-lg font-bold text-muted-foreground pb-6">→</div>
+            <div className="text-center">
+              <p className="text-xs text-muted-foreground mb-1">{isRu ? 'Загадано' : 'Secret'}</p>
+              <div className={`w-20 h-20 rounded-xl border-2 flex items-center justify-center text-3xl font-bold ${
+                result.diff === 0 ? 'border-yellow-400 bg-yellow-400/20' :
+                result.diff <= 7 ? 'border-green-400 bg-green-400/10' :
+                result.diff <= 25 ? 'border-orange-400 bg-orange-400/10' :
+                'border-red-400 bg-red-400/10'
+              }`}>
+                {result.secret}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Slider */}
+      <div className="max-w-xs mx-auto space-y-2">
+        <input type="range" min={1} max={100} value={guessValue}
+          onChange={e => setGuessValue(Number(e.target.value))}
+          disabled={guessing}
+          className="w-full accent-primary" />
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>1</span><span>{guessValue}</span><span>100</span>
+        </div>
+      </div>
+
+      {result && !guessing && (
+        <div className="text-center space-y-1">
+          <p className={`text-lg font-bold ${result.reward > 0 ? 'text-green-400' : result.reward < 0 ? 'text-red-400' : 'text-muted-foreground'}`}>
+            {result.resultLabel} ({isRu ? 'разница' : 'diff'}: {result.diff})
+          </p>
+          {result.multiplier > 0 && <p className="text-xs text-muted-foreground">x{result.multiplier}</p>}
+          <Badge className={`gap-1 ${result.reward > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+            <Coins className="h-3 w-3" /> {result.reward > 0 ? `+${result.reward}` : result.reward} LC
+          </Badge>
+        </div>
+      )}
+
+      {error && <p className="text-center text-sm text-red-400">{error}</p>}
+
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        <span className="text-sm text-muted-foreground">{isRu ? 'Ставка' : 'Bet'}:</span>
+        <div className="flex gap-1">
+          {[100, 1000, 10000].map(val => (
+            <Button key={val} size="sm" variant={betAmount === val ? "default" : "outline"}
+              onClick={() => { setBetAmount(val); setError(""); }} disabled={guessing} className="text-xs">{val >= 1000 ? `${val/1000}K` : val}</Button>
+          ))}
+          <Button size="sm" variant="outline" onClick={() => { setBetAmount(balance); setError(""); }} disabled={guessing} className="text-xs font-bold">MAX</Button>
+        </div>
+        <Input type="number" min={1} value={betAmount}
+          onChange={(e) => { setBetAmount(Math.max(1, parseInt(e.target.value) || 1)); setError(""); }}
+          disabled={guessing} className="w-28 h-8 text-xs text-center" />
+      </div>
+
+      <div className="flex justify-center">
+        <Button size="lg" onClick={() => { setResult(null); setError(""); guessMutation.mutate(); }}
+          disabled={!canPlay} className="gap-2">
+          {guessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
+          {guessing ? (isRu ? 'Угадываем...' : 'Guessing...') :
+           balance < betAmount ? (isRu ? 'Мало монет' : 'Not enough') :
+           `${isRu ? 'Угадать' : 'Guess'} (${betAmount} LC)`}
+        </Button>
+      </div>
+
+      <p className="text-center text-xs text-muted-foreground">
+        {isRu ? 'Точное попадание = x10. До ±3 = x5. До ±7 = x3. До ±15 = x1.5' : 'Exact = x10. ±3 = x5. ±7 = x3. ±15 = x1.5'}
+      </p>
+    </div>
+  );
+}
+
+// ============= CRASH GAME =============
+
+function CrashGame() {
+  const { user, updateBalance } = useAuth();
+  const { language } = useLanguage();
+  const isRu = (language || 'ru') === 'ru';
+  const [playing, setPlaying] = useState(false);
+  const [cashoutAt, setCashoutAt] = useState(2);
+  const [animMultiplier, setAnimMultiplier] = useState(1);
+  const [result, setResult] = useState<{
+    crashPoint: number; cashoutAt: number; survived: boolean;
+    multiplier: number; reward: number;
+  } | null>(null);
+  const [betAmount, setBetAmount] = useState(10);
+  const [error, setError] = useState("");
+  const animRef = useRef<number | null>(null);
+  const balance = user?.lumiCoins ?? 0;
+
+  const crashMutation = useMutation({
+    mutationFn: async () => {
+      const gc = getGoldCard();
+      const res = await apiRequest("POST", "/api/mini-games/crash", {
+        discordId: user?.discordId, bet: betAmount, cashoutAt, hasGoldCard: !!gc,
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setError("");
+      setPlaying(true);
+      // Animate multiplier climbing
+      const crashAt = data.crashPoint;
+      const cashout = data.cashoutAt;
+      const target = Math.min(crashAt, cashout);
+      let current = 1;
+      const speed = 0.05;
+      const tick = () => {
+        current += speed;
+        if (current >= target) {
+          current = target;
+          setAnimMultiplier(current);
+          setTimeout(() => {
+            setPlaying(false);
+            setResult(data);
+            updateBalance(data.newBalance);
+            saveGameHistory({ game: 'crash', bet: betAmount, reward: data.reward, result: `x${cashout}→${crashAt.toFixed(2)}` });
+          }, 500);
+          return;
+        }
+        setAnimMultiplier(current);
+        animRef.current = window.setTimeout(tick, 50);
+      };
+      tick();
+    },
+    onError: (err: Error) => {
+      setError(err.message.includes("Not enough") ? (isRu ? "Недостаточно LC!" : "Not enough LC!") : err.message);
+    }
+  });
+
+  useEffect(() => {
+    return () => { if (animRef.current) clearTimeout(animRef.current); };
+  }, []);
+
+  const canPlay = balance >= betAmount && !playing && !crashMutation.isPending && !!user?.discordId;
+
+  const displayColor = playing ? 'text-green-400' :
+    result ? (result.survived ? 'text-green-400' : 'text-red-400') : 'text-muted-foreground';
+
+  return (
+    <div className="space-y-6">
+      {/* Crash display */}
+      <div className="flex justify-center">
+        <div className={`w-40 h-40 rounded-2xl border-2 flex flex-col items-center justify-center transition-all ${
+          playing ? 'border-green-400 bg-green-400/10' :
+          result?.survived ? 'border-green-400 bg-green-400/10' :
+          result ? 'border-red-400 bg-red-400/10' :
+          'border-muted bg-muted/10'
+        }`}>
+          <TrendingUp className={`h-6 w-6 mb-1 ${displayColor} ${playing ? 'animate-bounce' : ''}`} />
+          <span className={`text-4xl font-bold ${displayColor}`}>
+            {playing ? `${animMultiplier.toFixed(2)}x` :
+             result ? `${result.crashPoint.toFixed(2)}x` : '1.00x'}
+          </span>
+          {result && !playing && (
+            <span className={`text-xs mt-1 ${result.survived ? 'text-green-400' : 'text-red-400'}`}>
+              {result.survived ? (isRu ? '💰 Успел!' : '💰 Cashed out!') : (isRu ? '💥 Крэш!' : '💥 Crashed!')}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {result && !playing && (
+        <div className="text-center space-y-1">
+          <p className="text-xs text-muted-foreground">
+            {isRu ? `Крэш на x${result.crashPoint.toFixed(2)}, кэшаут x${result.cashoutAt}` :
+             `Crash @x${result.crashPoint.toFixed(2)}, cashout x${result.cashoutAt}`}
+          </p>
+          <Badge className={`gap-1 ${result.reward > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+            <Coins className="h-3 w-3" /> {result.reward > 0 ? `+${result.reward}` : result.reward} LC
+          </Badge>
+        </div>
+      )}
+
+      {error && <p className="text-center text-sm text-red-400">{error}</p>}
+
+      {/* Cashout multiplier */}
+      <div className="max-w-xs mx-auto space-y-2">
+        <p className="text-xs text-center text-muted-foreground">{isRu ? 'Кэшаут на множителе:' : 'Cashout at multiplier:'}</p>
+        <div className="flex items-center gap-2">
+          <input type="range" min={1.1} max={10} step={0.1} value={cashoutAt}
+            onChange={e => setCashoutAt(Number(e.target.value))}
+            disabled={playing}
+            className="flex-1 accent-green-400" />
+          <span className="text-sm font-bold text-green-400 w-12 text-right">x{cashoutAt.toFixed(1)}</span>
+        </div>
+        <div className="flex justify-center gap-1">
+          {[1.5, 2, 3, 5, 10].map(v => (
+            <Button key={v} size="sm" variant={cashoutAt === v ? "default" : "outline"}
+              onClick={() => setCashoutAt(v)} disabled={playing} className="text-xs px-2">
+              x{v}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        <span className="text-sm text-muted-foreground">{isRu ? 'Ставка' : 'Bet'}:</span>
+        <div className="flex gap-1">
+          {[100, 1000, 10000].map(val => (
+            <Button key={val} size="sm" variant={betAmount === val ? "default" : "outline"}
+              onClick={() => { setBetAmount(val); setError(""); }} disabled={playing} className="text-xs">{val >= 1000 ? `${val/1000}K` : val}</Button>
+          ))}
+          <Button size="sm" variant="outline" onClick={() => { setBetAmount(balance); setError(""); }} disabled={playing} className="text-xs font-bold">MAX</Button>
+        </div>
+        <Input type="number" min={1} value={betAmount}
+          onChange={(e) => { setBetAmount(Math.max(1, parseInt(e.target.value) || 1)); setError(""); }}
+          disabled={playing} className="w-28 h-8 text-xs text-center" />
+      </div>
+
+      <div className="flex justify-center">
+        <Button size="lg" onClick={() => { setResult(null); setAnimMultiplier(1); setError(""); crashMutation.mutate(); }}
+          disabled={!canPlay}
+          className="gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white">
+          {playing ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+          {playing ? (isRu ? 'Летим...' : 'Flying...') :
+           balance < betAmount ? (isRu ? 'Мало монет' : 'Not enough') :
+           `${isRu ? 'Запуск' : 'Launch'} (${betAmount} LC)`}
+        </Button>
+      </div>
+
+      <p className="text-center text-xs text-muted-foreground">
+        {isRu ? 'Чем выше кэшаут, тем больше риск крэша!' : 'Higher cashout = higher crash risk!'}
+      </p>
+    </div>
+  );
+}
+
 // ============= GAME HISTORY (localStorage) =============
 
 function GameHistoryTab() {
@@ -870,6 +1399,9 @@ function GameHistoryTab() {
     coinflip: isRu ? 'Монетка' : 'Coin Flip',
     dice: isRu ? 'Кости' : 'Dice',
     slots: isRu ? 'Слоты' : 'Slots',
+    blackjack: isRu ? 'Блэкджек' : 'Blackjack',
+    'number-guess': isRu ? 'Число' : 'Number Guess',
+    crash: isRu ? 'Крэш' : 'Crash',
   };
 
   const gameIcons: Record<string, any> = {
@@ -878,6 +1410,9 @@ function GameHistoryTab() {
     coinflip: Coins,
     dice: Dices,
     slots: Cherry,
+    blackjack: Award,
+    'number-guess': Target,
+    crash: TrendingUp,
   };
 
   if (history.length === 0) {
@@ -932,17 +1467,43 @@ export default function MiniGamesPage() {
   const { language } = useLanguage();
   const isRu = (language || 'ru') === 'ru';
   const [activeTab, setActiveTab] = useState("wheel");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await containerRef.current?.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
   return (
-    <div className="container mx-auto px-4 py-8 max-w-3xl pt-24">
+    <div ref={containerRef} className={`container mx-auto px-4 py-8 max-w-3xl pt-24 ${isFullscreen ? 'bg-background pt-8 overflow-auto h-full' : ''}`}>
       <div className="flex items-center gap-3 mb-4">
         <Gamepad2 className="h-7 w-7 text-primary" />
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold">{isRu ? 'Мини-игры' : 'Mini-Games'}</h1>
           <p className="text-sm text-muted-foreground">{isRu ? 'Играй и зарабатывай LumiCoins' : 'Play and earn LumiCoins'}</p>
         </div>
+        <Button size="icon" variant="ghost" onClick={toggleFullscreen}
+          className="h-8 w-8 text-muted-foreground hover:text-primary" title={isRu ? 'Полный экран' : 'Fullscreen'}>
+          {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+        </Button>
       </div>
 
       <BalanceBar />
+      <GoldCardBanner />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full mb-6 flex-wrap h-auto gap-1">
@@ -961,8 +1522,17 @@ export default function MiniGamesPage() {
           <TabsTrigger value="slots" className="flex-1 gap-1 text-xs" data-ai="game-slots">
             <Cherry className="h-3 w-3" /> {isRu ? 'Слоты' : 'Slots'}
           </TabsTrigger>
+          <TabsTrigger value="blackjack" className="flex-1 gap-1 text-xs" data-ai="game-blackjack">
+            <Award className="h-3 w-3" /> {isRu ? '21' : 'BJ'}
+          </TabsTrigger>
+          <TabsTrigger value="number-guess" className="flex-1 gap-1 text-xs" data-ai="game-numguess">
+            <Target className="h-3 w-3" /> {isRu ? 'Число' : 'Guess'}
+          </TabsTrigger>
+          <TabsTrigger value="crash" className="flex-1 gap-1 text-xs" data-ai="game-crash">
+            <TrendingUp className="h-3 w-3" /> {isRu ? 'Крэш' : 'Crash'}
+          </TabsTrigger>
           <TabsTrigger value="history" className="flex-1 gap-1 text-xs" data-ai="game-history">
-            <History className="h-3 w-3" /> {isRu ? 'История' : 'History'}
+            <History className="h-3 w-3" /> {isRu ? 'Лог' : 'Log'}
           </TabsTrigger>
         </TabsList>
 
@@ -1028,6 +1598,45 @@ export default function MiniGamesPage() {
               <CardDescription>{isRu ? 'Крути барабаны — 3 в ряд на средней линии = выигрыш!' : 'Spin the reels — 3 in a row on the payline = win!'}</CardDescription>
             </CardHeader>
             <CardContent><SlotMachine /></CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="blackjack">
+          <Card className="glass glass-border">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Award className="h-4 w-4 text-amber-400" />
+                {isRu ? 'Блэкджек (21)' : 'Blackjack (21)'}
+              </CardTitle>
+              <CardDescription>{isRu ? 'Набери 21 — Blackjack x2.5, победа x2' : 'Get 21 — Blackjack x2.5, win x2'}</CardDescription>
+            </CardHeader>
+            <CardContent><BlackjackGame /></CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="number-guess">
+          <Card className="glass glass-border">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Target className="h-4 w-4 text-cyan-400" />
+                {isRu ? 'Угадай число' : 'Number Guess'}
+              </CardTitle>
+              <CardDescription>{isRu ? 'Угадай число 1-100. Точнее = больше выигрыш (до x10)' : 'Guess 1-100. Closer = bigger win (up to x10)'}</CardDescription>
+            </CardHeader>
+            <CardContent><NumberGuessGame /></CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="crash">
+          <Card className="glass glass-border">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-emerald-400" />
+                {isRu ? 'Крэш' : 'Crash'}
+              </CardTitle>
+              <CardDescription>{isRu ? 'Выбери множитель кэшаута — успей до крэша!' : 'Pick cashout multiplier — cash out before crash!'}</CardDescription>
+            </CardHeader>
+            <CardContent><CrashGame /></CardContent>
           </Card>
         </TabsContent>
 

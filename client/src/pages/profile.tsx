@@ -818,13 +818,13 @@ export default function ProfilePage() {
               </div>
               )}
             </div>
-            <div className="text-right space-y-2">
+            <div className="text-right space-y-2 group/actions">
               <div className="flex items-center gap-1.5 text-yellow-500 justify-end">
                 <Coins className="h-5 w-5" />
                 <span className="text-xl font-bold">{profile.lumiCoins?.toLocaleString()}</span>
               </div>
               <p className="text-xs text-muted-foreground">LumiCoins</p>
-              <div className="flex gap-1.5 justify-end flex-wrap">
+              <div className="flex gap-1.5 justify-end flex-wrap opacity-0 group-hover/actions:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
                 <button onClick={handleShareLink} disabled={sharing} className="group inline-flex items-center gap-1 h-7 px-2 rounded-md border border-border/60 bg-background/40 hover:bg-white/10 transition-colors duration-150 text-muted-foreground hover:text-white disabled:opacity-50" title={isRu ? 'Поделиться' : 'Share'}>
                   {sharing ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : copiedLink ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Share2 className="h-3.5 w-3.5 shrink-0" />}
                   <span className="text-xs font-medium hidden sm:inline">{isRu ? 'Поделиться' : 'Share'}</span>
