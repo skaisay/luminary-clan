@@ -1332,14 +1332,14 @@ function CrashGame() {
       <div className="max-w-xs mx-auto space-y-2">
         <p className="text-xs text-center text-muted-foreground">{isRu ? 'Кэшаут на множителе:' : 'Cashout at multiplier:'}</p>
         <div className="flex items-center gap-2">
-          <input type="range" min={1.1} max={10} step={0.1} value={cashoutAt}
+          <input type="range" min={1.1} max={100} step={0.1} value={cashoutAt}
             onChange={e => setCashoutAt(Number(e.target.value))}
             disabled={playing}
             className="flex-1 accent-green-400" />
-          <span className="text-sm font-bold text-green-400 w-12 text-right">x{cashoutAt.toFixed(1)}</span>
+          <span className="text-sm font-bold text-green-400 w-14 text-right">x{cashoutAt.toFixed(1)}</span>
         </div>
         <div className="flex justify-center gap-1">
-          {[1.5, 2, 3, 5, 10].map(v => (
+          {[1.5, 2, 5, 10, 25, 50, 100].map(v => (
             <Button key={v} size="sm" variant={cashoutAt === v ? "default" : "outline"}
               onClick={() => setCashoutAt(v)} disabled={playing} className="text-xs px-2">
               x{v}

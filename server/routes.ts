@@ -5155,7 +5155,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { discordId, bet, cashoutAt, hasGoldCard } = req.body;
       if (!discordId || !bet || bet < 1 || !cashoutAt) return res.status(400).json({ error: "Missing params" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
-      const cashout = Math.max(1.1, Math.min(20, Number(cashoutAt) || 2));
+      const cashout = Math.max(1.1, Math.min(100, Number(cashoutAt) || 2));
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
       if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });

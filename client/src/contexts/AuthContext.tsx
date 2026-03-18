@@ -2,6 +2,28 @@ import { createContext, useContext, useState, useEffect, ReactNode } from "react
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 
+const AUTH_CACHE_KEY = 'luminary_auth_cache';
+
+function getCachedAuth(): { user: UserType } | undefined {
+  try {
+    const raw = localStorage.getItem(AUTH_CACHE_KEY);
+    if (!raw) return undefined;
+    const data = JSON.parse(raw);
+    if (data?.user?.type) return data;
+  } catch {}
+  return undefined;
+}
+
+function setCachedAuth(data: { user: UserType } | null | undefined) {
+  try {
+    if (data?.user) {
+      localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(data));
+    } else {
+      localStorage.removeItem(AUTH_CACHE_KEY);
+    }
+  } catch {}
+}
+
 type UserType = {
   type: 'discord' | 'admin';
   id: string;
@@ -27,19 +49,33 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isGuest, setIsGuest] = useState(false);
 
+  // Seed react-query cache from localStorage so user is instantly available on reload
+  const cachedAuth = getCachedAuth();
+  if (cachedAuth && !queryClient.getQueryData(['/auth/user'])) {
+    queryClient.setQueryData(['/auth/user'], cachedAuth);
+  }
+
   const { data: authData, isLoading } = useQuery<{ user: UserType }>({
     queryKey: ['/auth/user'],
-    retry: false,
+    retry: 2,
+    retryDelay: 1500,
     staleTime: 5 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnMount: 'always',
-    refetchOnReconnect: false,
+    refetchOnReconnect: true,
+    initialData: cachedAuth,
   });
+
+  // Persist auth data to localStorage whenever it changes
+  useEffect(() => {
+    setCachedAuth(authData ?? null);
+  }, [authData]);
 
   const logoutMutation = useMutation({
     mutationFn: () => apiRequest('POST', '/auth/logout', {}),
     onSuccess: () => {
+      localStorage.removeItem(AUTH_CACHE_KEY);
       queryClient.invalidateQueries({ queryKey: ['/auth/user'] });
       window.location.href = '/login';
     },
