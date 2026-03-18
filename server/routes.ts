@@ -958,7 +958,6 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       return res.redirect("/login?error=discord_auth_failed");
     }
   });
-  );
 
   app.post("/auth/logout", (req, res) => {
     req.logout((err) => {
