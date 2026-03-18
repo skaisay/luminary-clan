@@ -833,48 +833,131 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     req.on('close', () => { sseClients.delete(res); });
   });
 
-  app.get("/auth/discord", (req, res, next) => {
-    // Валидируем и сохраняем returnTo параметр в session
+  // ─── Manual Discord OAuth (with retry on 429) ───────────────────
+
+  const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || '';
+  const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
+  const DISCORD_CALLBACK_URL = (() => {
+    if (process.env.CALLBACK_URL) return process.env.CALLBACK_URL;
+    if (process.env.RENDER_EXTERNAL_URL) return `${process.env.RENDER_EXTERNAL_URL}/auth/discord/callback`;
+    return 'http://localhost:5000/auth/discord/callback';
+  })();
+
+  app.get("/auth/discord", (req, res) => {
     const returnTo = req.query.returnTo as string;
-    const validatedReturnTo = validateReturnTo(returnTo);
-    req.session.returnTo = validatedReturnTo;
-    passport.authenticate("discord")(req, res, next);
+    req.session.returnTo = validateReturnTo(returnTo);
+
+    const params = new URLSearchParams({
+      client_id: DISCORD_CLIENT_ID,
+      redirect_uri: DISCORD_CALLBACK_URL,
+      response_type: 'code',
+      scope: 'identify',
+    });
+    res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
   });
 
-  app.get(
-    "/auth/discord/callback",
-    (req, res, next) => {
-      passport.authenticate("discord", (err: any, user: any, info: any) => {
-        if (err) {
-          console.error('[AUTH] Discord OAuth error:', err.message || err);
-          console.error('[AUTH] Full error:', JSON.stringify(err, null, 2));
+  app.get("/auth/discord/callback", async (req, res) => {
+    const code = req.query.code as string;
+    if (!code) return res.redirect("/login?error=discord_auth_failed");
 
-          // Cloudflare/Discord rate limit (429 / error 1015) — tell user to wait
-          const statusCode = err?.oauthError?.statusCode;
-          if (statusCode === 429) {
-            console.warn('[AUTH] Rate limited by Discord (429). Advising user to retry later.');
-            return res.redirect("/login?error=rate_limited");
-          }
-          return res.redirect("/login?error=discord_auth_failed&detail=" + encodeURIComponent(err.message || 'unknown'));
+    // Exchange authorization code for token — retry up to 3 times on 429
+    let tokenData: any = null;
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: DISCORD_CLIENT_ID,
+            client_secret: DISCORD_CLIENT_SECRET,
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: DISCORD_CALLBACK_URL,
+          }),
+        });
+
+        if (tokenRes.status === 429) {
+          const retryAfter = Math.max(
+            parseInt(tokenRes.headers.get('retry-after') || '0', 10),
+            3 * attempt          // fallback: 3s, 6s, 9s
+          );
+          console.warn(`[AUTH] Rate limited (attempt ${attempt}/${MAX_RETRIES}), retrying in ${retryAfter}s…`);
+          await new Promise(r => setTimeout(r, retryAfter * 1000));
+          continue;
         }
-        if (!user) {
-          console.error('[AUTH] Discord OAuth: no user returned, info:', info);
+
+        if (!tokenRes.ok) {
+          const text = await tokenRes.text();
+          console.error(`[AUTH] Token exchange failed (${tokenRes.status}):`, text);
           return res.redirect("/login?error=discord_auth_failed");
         }
-        req.logIn(user, (loginErr) => {
-          if (loginErr) {
-            console.error('[AUTH] Login error:', loginErr);
-            return res.redirect("/login?error=login_failed");
-          }
-          const returnTo = req.session.returnTo || "/";
-          delete req.session.returnTo;
-          req.session.save((saveErr) => {
-            if (saveErr) console.error('Ошибка сохранения сессии:', saveErr);
-            res.redirect(returnTo);
-          });
-        });
-      })(req, res, next);
+
+        tokenData = await tokenRes.json();
+        break;
+      } catch (err: any) {
+        console.error(`[AUTH] Token exchange error (attempt ${attempt}/${MAX_RETRIES}):`, err.message);
+        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 * attempt));
+      }
     }
+
+    if (!tokenData?.access_token) {
+      console.error('[AUTH] All token exchange attempts failed (rate limited).');
+      return res.redirect("/login?error=rate_limited");
+    }
+
+    // Fetch Discord user profile
+    try {
+      const userRes = await fetch('https://discord.com/api/v10/users/@me', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+
+      if (!userRes.ok) {
+        console.error(`[AUTH] User fetch failed: ${userRes.status}`);
+        return res.redirect("/login?error=discord_auth_failed");
+      }
+
+      const profile = await userRes.json();
+
+      // Create or update clan member
+      let member = await storage.getClanMemberByDiscordId(profile.id);
+      if (!member) {
+        member = await storage.createClanMember({
+          discordId: profile.id,
+          username: profile.username,
+          avatar: profile.avatar
+            ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+            : undefined,
+          role: "Member",
+        });
+      } else {
+        await storage.updateClanMember(member.id, {
+          username: profile.username,
+          avatar: profile.avatar
+            ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+            : member.avatar,
+        });
+      }
+
+      const user = { type: 'discord' as const, ...member };
+      req.logIn(user, (loginErr) => {
+        if (loginErr) {
+          console.error('[AUTH] Login error:', loginErr);
+          return res.redirect("/login?error=login_failed");
+        }
+        const returnTo = req.session.returnTo || "/";
+        delete req.session.returnTo;
+        req.session.save((saveErr) => {
+          if (saveErr) console.error('[AUTH] Session save error:', saveErr);
+          res.redirect(returnTo);
+        });
+      });
+    } catch (err: any) {
+      console.error('[AUTH] Profile fetch error:', err.message);
+      return res.redirect("/login?error=discord_auth_failed");
+    }
+  });
   );
 
   app.post("/auth/logout", (req, res) => {
