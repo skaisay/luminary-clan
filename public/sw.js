@@ -1,4 +1,4 @@
-const CACHE_NAME = 'clan-command-v3';
+const CACHE_NAME = 'clan-command-v4';
 
 self.addEventListener('install', (event) => {
   // Сразу активируем новый SW, не ждём закрытия вкладок
@@ -19,6 +19,12 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+
+  // API и auth запросы — ВСЕГДА только сеть, никакого кеширования
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
 
   // Навигация (HTML страницы) — ВСЕГДА сеть, fallback на кеш
   if (event.request.mode === 'navigate') {
@@ -50,6 +56,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // API запросы и всё остальное — только сеть
+  // Всё остальное — только сеть
   event.respondWith(fetch(event.request));
 });
