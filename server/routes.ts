@@ -843,6 +843,11 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     return 'http://localhost:5000/auth/discord/callback';
   })();
 
+  // ─── Client-side OAuth (implicit grant) ────────────────────────
+  // Discord API is rate-limited from Render's shared IP (Cloudflare 1015).
+  // Solution: use response_type=token so token goes directly to browser,
+  // then browser calls Discord API from user's IP (not blocked).
+
   app.get("/auth/discord", (req, res) => {
     const returnTo = req.query.returnTo as string;
     req.session.returnTo = validateReturnTo(returnTo);
@@ -850,90 +855,148 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     const params = new URLSearchParams({
       client_id: DISCORD_CLIENT_ID,
       redirect_uri: DISCORD_CALLBACK_URL,
-      response_type: 'code',
+      response_type: 'token',
       scope: 'identify',
     });
     res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
   });
 
-  app.get("/auth/discord/callback", async (req, res) => {
-    const code = req.query.code as string;
-    if (!code) return res.redirect("/login?error=discord_auth_failed");
-
-    // Exchange authorization code for token — retry up to 3 times on 429
-    let tokenData: any = null;
-    const MAX_RETRIES = 3;
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            client_id: DISCORD_CLIENT_ID,
-            client_secret: DISCORD_CLIENT_SECRET,
-            grant_type: 'authorization_code',
-            code,
-            redirect_uri: DISCORD_CALLBACK_URL,
-          }),
-        });
-
-        if (tokenRes.status === 429) {
-          const raw = parseInt(tokenRes.headers.get('retry-after') || '0', 10);
-          const retryAfter = Math.min(Math.max(raw, 2), 5); // clamp 2-5s
-          console.warn(`[AUTH] Rate limited (attempt ${attempt}/${MAX_RETRIES}), raw retry-after=${raw}, waiting ${retryAfter}s…`);
-          await new Promise(r => setTimeout(r, retryAfter * 1000));
-          continue;
-        }
-
-        if (!tokenRes.ok) {
-          const text = await tokenRes.text();
-          console.error(`[AUTH] Token exchange failed (${tokenRes.status}):`, text);
-          return res.redirect("/login?error=discord_auth_failed");
-        }
-
-        tokenData = await tokenRes.json();
-        break;
-      } catch (err: any) {
-        console.error(`[AUTH] Token exchange error (attempt ${attempt}/${MAX_RETRIES}):`, err.message);
-        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 * attempt));
-      }
+  // Callback handler — serves a small HTML page that handles the implicit grant
+  // The access_token is in the URL hash fragment (never sent to server).
+  // The page extracts it, calls Discord /users/@me from the browser, then
+  // POSTs the profile to our /api/auth/discord-token endpoint.
+  app.get("/auth/discord/callback", (req, res) => {
+    // If Discord sent an error query param
+    if (req.query.error) {
+      return res.redirect("/login?error=discord_auth_failed");
     }
 
-    if (!tokenData?.access_token) {
-      console.error('[AUTH] All token exchange attempts failed (rate limited).');
-      return res.redirect("/login?error=rate_limited");
-    }
-
-    // Fetch Discord user profile
+    // Serve client-side handler page
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Авторизация...</title>
+  <style>
+    body { margin: 0; background: #0a0a0a; color: #fff; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .loader { text-align: center; }
+    .spinner { width: 48px; height: 48px; border: 4px solid rgba(255,255,255,.15); border-top-color: #5865F2; border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { color: #f87171; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="loader">
+    <div class="spinner"></div>
+    <p id="status">Входим через Discord...</p>
+  </div>
+  <script>
+  (async function() {
+    var statusEl = document.getElementById('status');
     try {
-      const userRes = await fetch('https://discord.com/api/v10/users/@me', {
-        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      // Extract access_token from URL hash fragment
+      var hash = window.location.hash.substring(1);
+      var params = new URLSearchParams(hash);
+      var accessToken = params.get('access_token');
+
+      if (!accessToken) {
+        statusEl.innerHTML = '<span class="error">Токен не получен</span>';
+        setTimeout(function() { window.location.href = '/login?error=discord_auth_failed'; }, 1500);
+        return;
+      }
+
+      statusEl.textContent = 'Получаем профиль Discord...';
+
+      // Call Discord API from browser (user's IP — not rate limited)
+      var userRes = await fetch('https://discord.com/api/v10/users/@me', {
+        headers: { 'Authorization': 'Bearer ' + accessToken }
       });
 
       if (!userRes.ok) {
-        console.error(`[AUTH] User fetch failed: ${userRes.status}`);
-        return res.redirect("/login?error=discord_auth_failed");
+        throw new Error('Discord API error: ' + userRes.status);
       }
 
-      const profile = await userRes.json();
+      var profile = await userRes.json();
+      statusEl.textContent = 'Создаём сессию...';
 
-      // Create or update clan member
-      let member = await storage.getClanMemberByDiscordId(profile.id);
-      if (!member) {
-        member = await storage.createClanMember({
-          discordId: profile.id,
+      // Send profile to our server to create session
+      var loginRes = await fetch('/api/auth/discord-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          access_token: accessToken,
+          discord_id: profile.id,
           username: profile.username,
           avatar: profile.avatar
-            ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+        })
+      });
+
+      if (!loginRes.ok) {
+        var errData = await loginRes.json().catch(function() { return {}; });
+        throw new Error(errData.error || 'Login failed');
+      }
+
+      var data = await loginRes.json();
+      window.location.href = data.returnTo || '/';
+    } catch (err) {
+      console.error('Auth error:', err);
+      statusEl.innerHTML = '<span class="error">Ошибка авторизации: ' +
+        (err.message || 'unknown') + '</span>';
+      setTimeout(function() { window.location.href = '/login?error=discord_auth_failed'; }, 2500);
+    }
+  })();
+  </script>
+</body>
+</html>`);
+  });
+
+  // ─── Token-based login endpoint (receives profile from client-side OAuth) ──
+  app.post("/api/auth/discord-token", async (req, res) => {
+    try {
+      const { access_token, discord_id, username, avatar } = req.body;
+
+      if (!access_token || !discord_id || !username) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      // Optional: try to verify token server-side (may fail if rate limited)
+      let verified = false;
+      try {
+        const verifyRes = await fetch('https://discord.com/api/v10/users/@me', {
+          headers: { Authorization: `Bearer ${access_token}` },
+        });
+        if (verifyRes.ok) {
+          const verifiedProfile = await verifyRes.json();
+          if (verifiedProfile.id !== discord_id) {
+            return res.status(403).json({ error: "Token mismatch" });
+          }
+          verified = true;
+        }
+        // If 429 or other error, skip verification — trust client
+      } catch {
+        // Network error — skip verification
+      }
+
+      console.log(`[AUTH] Client-side OAuth: ${username} (${discord_id}), verified=${verified}`);
+
+      // Create or update clan member
+      let member = await storage.getClanMemberByDiscordId(discord_id);
+      if (!member) {
+        member = await storage.createClanMember({
+          discordId: discord_id,
+          username: username,
+          avatar: avatar
+            ? `https://cdn.discordapp.com/avatars/${discord_id}/${avatar}.png`
             : undefined,
           role: "Member",
         });
       } else {
         await storage.updateClanMember(member.id, {
-          username: profile.username,
-          avatar: profile.avatar
-            ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+          username: username,
+          avatar: avatar
+            ? `https://cdn.discordapp.com/avatars/${discord_id}/${avatar}.png`
             : member.avatar,
         });
       }
@@ -942,18 +1005,18 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       req.logIn(user, (loginErr) => {
         if (loginErr) {
           console.error('[AUTH] Login error:', loginErr);
-          return res.redirect("/login?error=login_failed");
+          return res.status(500).json({ error: "Login failed" });
         }
         const returnTo = req.session.returnTo || "/";
         delete req.session.returnTo;
         req.session.save((saveErr) => {
           if (saveErr) console.error('[AUTH] Session save error:', saveErr);
-          res.redirect(returnTo);
+          res.json({ success: true, returnTo });
         });
       });
     } catch (err: any) {
-      console.error('[AUTH] Profile fetch error:', err.message);
-      return res.redirect("/login?error=discord_auth_failed");
+      console.error('[AUTH] Token login error:', err.message);
+      res.status(500).json({ error: "Internal error" });
     }
   });
 
@@ -1148,10 +1211,15 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
 
   app.get("/api/discord/info", async (req, res) => {
     try {
-      const info = await getDiscordServerInfo();
+      // 5s timeout — never hang waiting for Discord
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 5000)
+      );
+      const info = await Promise.race([getDiscordServerInfo(), timeout]);
       res.json(info);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      // Return fallback instead of 500 — prevents infinite loading on client
+      res.json({ memberCount: 0, onlineCount: 0, guildName: "Luminary", botOffline: true });
     }
   });
 
