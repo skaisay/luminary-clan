@@ -76,14 +76,29 @@ const rankBadges: Record<string, { ru: string; en: string; color: string; icon: 
 };
 
 function getRankTitle(level: number): { ru: string; en: string; color: string; icon: any } {
-  if (level >= 50) return rankBadges.legend;
-  if (level >= 30) return rankBadges.elite;
-  if (level >= 15) return rankBadges.veteran;
+  if (level >= 200) return rankBadges.legend;
+  if (level >= 100) return rankBadges.elite;
+  if (level >= 30) return rankBadges.veteran;
   return rankBadges.fighter;
 }
 
-function getXpForNextLevel(level: number): number {
-  return level * 100 + 50;
+/** Level is derived from LumiCoins, max 300 */
+function getLevelFromCoins(coins: number): number {
+  return Math.min(300, Math.floor(Math.sqrt(coins / 3)));
+}
+
+/** Coins needed to reach a given level */
+function getCoinsForLevel(level: number): number {
+  return level * level * 3;
+}
+
+/** Progress % towards next level */
+function getLevelProgress(coins: number): number {
+  const level = getLevelFromCoins(coins);
+  if (level >= 300) return 100;
+  const currentLevelCoins = getCoinsForLevel(level);
+  const nextLevelCoins = getCoinsForLevel(level + 1);
+  return Math.min(100, Math.round(((coins - currentLevelCoins) / (nextLevelCoins - currentLevelCoins)) * 100));
 }
 
 // ============= DECORATIONS MODAL =============
@@ -549,8 +564,9 @@ export default function ProfilePage() {
   const { data: profile, isLoading: loadingProfile } = useQuery<MemberProfile>({
     queryKey: [`/api/profile/${targetDiscordId}`],
     enabled: !!targetDiscordId,
-    staleTime: 10_000,
+    staleTime: 5_000,
     refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 
   const { data: achievements, isLoading: loadingAchievements } = useQuery<ProfileAchievement[]>({
@@ -699,10 +715,12 @@ export default function ProfilePage() {
     );
   }
 
-  const rankInfo = getRankTitle(profile.level);
+  const calculatedLevel = getLevelFromCoins(profile.lumiCoins ?? 0);
+  const levelProgress = getLevelProgress(profile.lumiCoins ?? 0);
+  const coinsForNext = getCoinsForLevel(calculatedLevel + 1);
+  const coinsForCurrent = getCoinsForLevel(calculatedLevel);
+  const rankInfo = getRankTitle(calculatedLevel);
   const RankIcon = rankInfo.icon;
-  const xpForNext = getXpForNextLevel(profile.level);
-  const xpProgress = Math.min(100, Math.round((profile.experience % xpForNext) / xpForNext * 100));
   const completedAchievements = achievements?.filter(a => a.isCompleted) || [];
   const kd = profile.deaths > 0 ? (profile.kills / profile.deaths).toFixed(2) : profile.kills.toString();
   const winRate = (profile.wins + profile.losses) > 0
@@ -805,16 +823,16 @@ export default function ProfilePage() {
                   <RankIcon className="h-3 w-3" /> {rankInfo[language as 'ru' | 'en'] || rankInfo.ru}
                 </Badge>
                 <span className="text-sm text-muted-foreground">{profile.role}</span>
-                {!cd.hiddenSections?.includes('xpLevel') && <span className="text-sm text-muted-foreground">{t('profile.level')} {profile.level}</span>}
+                {!cd.hiddenSections?.includes('xpLevel') && <span className="text-sm text-muted-foreground">{t('profile.level')} {calculatedLevel}</span>}
               </div>
-              {/* XP Progress */}
+              {/* Level Progress */}
               {!cd.hiddenSections?.includes('xpLevel') && (
               <div className="mt-3 max-w-md">
                 <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                  <span>{t('profile.experience')}</span>
-                  <span>{profile.experience % xpForNext} / {xpForNext} XP</span>
+                  <span>{t('profile.level')} {calculatedLevel} / 300</span>
+                  <span>{(profile.lumiCoins ?? 0).toLocaleString()} / {coinsForNext.toLocaleString()} LC</span>
                 </div>
-                <Progress value={xpProgress} className="h-2" />
+                <Progress value={levelProgress} className="h-2" />
               </div>
               )}
             </div>

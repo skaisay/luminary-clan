@@ -269,7 +269,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const m = member[0];
       const avatarUrl = m.avatar || "";
-      const level = m.level ?? 1;
+      // Level is derived from LumiCoins now (max 300)
+      const level = Math.min(300, Math.floor(Math.sqrt((m.lumiCoins ?? 0) / 3)));
       const coins = m.lumiCoins ?? 0;
       const role = m.role || "Участник";
       const wins = m.wins ?? 0;
@@ -349,9 +350,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `<text x="${195 + 28 * i}" y="374" font-family="Arial,sans-serif" font-size="22">${b.emoji || '✦'}</text>`
       ).join("");
 
-      const xp = m.experience ?? 0;
-      const xpForNext = Math.max(100, level * 150);
-      const xpPct = Math.min(100, ((xp % xpForNext) / xpForNext) * 100);
+      const coinsForCurrent = level * level * 3;
+      const coinsForNext = (level + 1) * (level + 1) * 3;
+      const xpPct = level >= 300 ? 100 : Math.min(100, ((coins - coinsForCurrent) / (coinsForNext - coinsForCurrent)) * 100);
       const joinDate = m.joinedAt ? new Date(m.joinedAt).toLocaleDateString('ru-RU') : '—';
 
       // Generate SVG that mirrors the actual profile card layout (1200×630)
@@ -402,7 +403,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   <text x="202" y="381" font-family="Arial,sans-serif" font-size="14" fill="#a5b4fc">${escapeXml(role)}</text>
 
   <!-- XP bar -->
-  <text x="190" y="415" font-family="Arial,sans-serif" font-size="13" fill="#94a3b8">Уровень ${level} · ${xp % xpForNext}/${xpForNext} XP</text>
+  <text x="190" y="415" font-family="Arial,sans-serif" font-size="13" fill="#94a3b8">Уровень ${level} / 300 · ${coins.toLocaleString()} / ${coinsForNext.toLocaleString()} LC</text>
   <rect x="190" y="422" width="400" height="8" rx="4" fill="#1e1b4b"/>
   <rect x="190" y="422" width="${Math.max(8, (xpPct / 100) * 400)}" height="8" rx="4" fill="url(#xp-bar)"/>
 
@@ -475,7 +476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           db.select({ name: itemsTable.name, price: itemsTable.price, category: itemsTable.category, rarity: itemsTable.rarity }).from(itemsTable).where(eq(itemsTable.isAvailable, true)).limit(30),
           db.select({ name: shopItemsTable.name, price: shopItemsTable.price, category: shopItemsTable.category }).from(shopItemsTable).where(eq(shopItemsTable.isAvailable, true)).limit(20),
           db.select({ id: clanMembers.id }).from(clanMembers),
-          db.select({ username: clanMembers.username, level: clanMembers.level, lumiCoins: clanMembers.lumiCoins, role: clanMembers.role, wins: clanMembers.wins }).from(clanMembers).orderBy(desc(clanMembers.lumiCoins)).limit(5),
+          db.select({ username: clanMembers.username, lumiCoins: clanMembers.lumiCoins, role: clanMembers.role, wins: clanMembers.wins }).from(clanMembers).orderBy(desc(clanMembers.lumiCoins)).limit(5),
         ]);
 
         const allShop = [
@@ -484,7 +485,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ];
         shopInfo = allShop.length > 0 ? allShop.join('; ') : 'Магазин пуст';
         memberCount = members.length;
-        topMembersInfo = topMembers.map((m: any, i: number) => `${i + 1}. ${m.username} (lv${m.level}, ${m.lumiCoins} LC, ${m.wins}W, ${m.role})`).join('; ');
+        topMembersInfo = topMembers.map((m: any, i: number) => {
+          const lv = Math.min(300, Math.floor(Math.sqrt((m.lumiCoins ?? 0) / 3)));
+          return `${i + 1}. ${m.username} (lv${lv}, ${m.lumiCoins} LC, ${m.wins}W, ${m.role})`;
+        }).join('; ');
       } catch (e) {
         console.log('[AI] DB data fetch error:', e);
         shopInfo = 'данные недоступны';

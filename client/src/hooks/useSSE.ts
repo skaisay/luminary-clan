@@ -24,6 +24,8 @@ export function useSSE() {
         if (data.discordId === user.discordId) {
           // Own balance changed — update everything
           updateBalance(data.newBalance);
+          // Also invalidate profile query to keep it fresh
+          queryClient.invalidateQueries({ queryKey: [`/api/profile/${user.discordId}`] });
         }
         // Invalidate leaderboard/members list so others see updated balances
         queryClient.invalidateQueries({ queryKey: ["/api/members"] });

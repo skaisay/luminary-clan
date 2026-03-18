@@ -7,24 +7,36 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function CoinBalance() {
+  const { user, isAuthenticated } = useAuth();
   const [discordId, setDiscordId] = useState<string>("");
   const [showInput, setShowInput] = useState(false);
 
+  // Auto-sync with authenticated user's discordId
   useEffect(() => {
-    const savedId = localStorage.getItem("discord_id");
-    if (savedId) {
-      setDiscordId(savedId);
+    if (isAuthenticated && user?.discordId) {
+      setDiscordId(user.discordId);
+      localStorage.setItem("discord_id", user.discordId);
+    } else {
+      const savedId = localStorage.getItem("discord_id");
+      if (savedId) {
+        setDiscordId(savedId);
+      }
     }
-    // Do NOT auto-open the popup — keep it hidden by default
-  }, []);
+  }, [isAuthenticated, user?.discordId]);
+
+  // If authenticated, use auth balance directly (instant updates via SSE/updateBalance)
+  const authBalance = isAuthenticated ? (user?.lumiCoins ?? 0) : null;
 
   const { data: balanceData } = useQuery<{ balance: number }>({
     queryKey: ["/api/shop/balance", discordId],
-    enabled: !!discordId,
+    enabled: !!discordId && !isAuthenticated, // skip fetch if auth provides balance
     refetchInterval: 30000,
   });
+
+  const displayBalance = authBalance !== null ? authBalance : (balanceData?.balance ?? 0);
 
   const handleSaveDiscordId = (id: string) => {
     setDiscordId(id);
@@ -92,7 +104,7 @@ export function CoinBalance() {
         >
           <Coins className="h-4 w-4 text-primary mr-1" strokeWidth={1.5} />
           <span className="text-sm font-bold text-primary" data-testid="text-coin-balance">
-            {balanceData?.balance ? (balanceData.balance > 9999 ? '9.9k+' : balanceData.balance.toLocaleString()) : 0}
+            {displayBalance ? (displayBalance > 9999 ? '9.9k+' : displayBalance.toLocaleString()) : 0}
           </span>
         </Button>
       </PopoverTrigger>
@@ -102,7 +114,7 @@ export function CoinBalance() {
             <h4 className="font-medium text-sm mb-2">Ваш баланс LumiCoin</h4>
             <div className="flex items-center gap-2 text-2xl font-bold text-primary">
               <Coins className="h-6 w-6" strokeWidth={1.5} />
-              {balanceData?.balance ?? 0}
+              {displayBalance.toLocaleString()}
             </div>
           </div>
           <div className="text-xs text-muted-foreground space-y-1">
