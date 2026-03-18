@@ -5,7 +5,7 @@ import {
   Circle, Square, ChevronRight, History, Dices, CircleDot,
   ArrowUp, ArrowDown, Hash, Cherry, Maximize, Minimize,
   Crown, Timer, Zap, Target, TrendingUp, HelpCircle, Award, Shield,
-  Diamond, Gem, Clover, X, Sparkles
+  Diamond, Gem, Clover, X, Sparkles, Lock, KeyRound
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,15 @@ const BONUS_CARDS: CardConfig[] = [
 ];
 
 const CARDS_STORAGE_KEY = 'luminary_bonus_cards';
+const PROMO_UNLOCKED_KEY = 'luminary_cards_unlocked';
+const VALID_PROMO = 'Luminary2026';
+
+function isCardsUnlocked(): boolean {
+  try { return localStorage.getItem(PROMO_UNLOCKED_KEY) === 'true'; } catch { return false; }
+}
+function unlockCards() {
+  try { localStorage.setItem(PROMO_UNLOCKED_KEY, 'true'); } catch {}
+}
 
 interface ActiveCardData {
   key: string;
@@ -144,16 +153,31 @@ function CardsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [buying, setBuying] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [, forceUpdate] = useState(0);
+  const [unlocked, setUnlocked] = useState(isCardsUnlocked);
+  const [promoInput, setPromoInput] = useState('');
+  const [promoError, setPromoError] = useState('');
   const balance = user?.lumiCoins ?? 0;
 
   useEffect(() => {
     if (!open) return;
+    setUnlocked(isCardsUnlocked());
     const interval = setInterval(() => {
       setActiveCards(getActiveCards());
       forceUpdate(n => n + 1);
     }, 1000);
     return () => clearInterval(interval);
   }, [open]);
+
+  const handlePromo = () => {
+    if (promoInput.trim() === VALID_PROMO) {
+      unlockCards();
+      setUnlocked(true);
+      setPromoError('');
+      setPromoInput('');
+    } else {
+      setPromoError(isRu ? 'Неверный промокод' : 'Invalid promo code');
+    }
+  };
 
   const handleBuy = async (card: CardConfig) => {
     if (!user?.discordId || balance < card.cost) return;
@@ -202,7 +226,29 @@ function CardsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
 
         <div className="p-3 space-y-2">
-          {BONUS_CARDS.map(card => {
+          {!unlocked ? (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <Lock className="h-10 w-10 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground text-center">
+                {isRu ? 'Введите промокод для доступа к картам' : 'Enter promo code to unlock cards'}
+              </p>
+              <div className="flex gap-2 w-full max-w-xs">
+                <Input
+                  value={promoInput}
+                  onChange={e => { setPromoInput(e.target.value); setPromoError(''); }}
+                  onKeyDown={e => e.key === 'Enter' && handlePromo()}
+                  placeholder={isRu ? 'Промокод...' : 'Promo code...'}
+                  className="h-8 text-sm"
+                />
+                <Button size="sm" onClick={handlePromo} className="h-8 gap-1 text-xs">
+                  <KeyRound className="h-3 w-3" />
+                  {isRu ? 'Ввести' : 'Enter'}
+                </Button>
+              </div>
+              {promoError && <p className="text-xs text-red-400">{promoError}</p>}
+            </div>
+          ) : (
+          BONUS_CARDS.map(card => {
             const ac = activeCards.find(a => a.key === card.key);
             const isActive = !!ac;
             const timeLeft = ac ? ac.expiresAt - Date.now() : 0;
@@ -240,7 +286,8 @@ function CardsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                 </Button>
               </div>
             );
-          })}
+          })
+          )}
         </div>
 
         {error && <p className="text-xs text-red-400 text-center pb-3 px-3">{error}</p>}
@@ -261,6 +308,7 @@ function ActiveCardsIndicator({ onClick }: { onClick: () => void }) {
   const { language } = useLanguage();
   const isRu = (language || 'ru') === 'ru';
   const [activeCards, setActiveCards] = useState<ActiveCardData[]>(getActiveCards);
+  const unlocked = isCardsUnlocked();
 
   useEffect(() => {
     const interval = setInterval(() => setActiveCards(getActiveCards()), 1000);
@@ -271,9 +319,9 @@ function ActiveCardsIndicator({ onClick }: { onClick: () => void }) {
 
   return (
     <Button size="icon" variant="ghost" onClick={onClick}
-      className={`h-8 w-8 relative ${count > 0 ? 'text-yellow-400 hover:text-yellow-300' : 'text-muted-foreground hover:text-primary'}`}
+      className={`h-8 w-8 relative ${count > 0 ? 'text-yellow-400 hover:text-yellow-300' : unlocked ? 'text-muted-foreground hover:text-primary' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
       title={isRu ? 'Бонусные карты' : 'Bonus Cards'}>
-      <Sparkles className="h-4 w-4" />
+      {unlocked ? <Sparkles className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
       {count > 0 && (
         <span className="absolute -top-0.5 -right-0.5 bg-green-500 text-white text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center">
           {count}
