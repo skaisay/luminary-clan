@@ -4,7 +4,8 @@ import {
   Gamepad2, Coins, Loader2, RotateCw, Hand, Scissors,
   Circle, Square, ChevronRight, History, Dices, CircleDot,
   ArrowUp, ArrowDown, Hash, Cherry, Maximize, Minimize,
-  Crown, Timer, Zap, Target, TrendingUp, HelpCircle, Award, Shield
+  Crown, Timer, Zap, Target, TrendingUp, HelpCircle, Award, Shield,
+  Diamond, Gem, Clover, X, Sparkles
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,216 +16,270 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiRequest } from "@/lib/queryClient";
 
-// ============= GOLD CARD SYSTEM =============
+// ============= UNIFIED CARD SYSTEM =============
 
-const GOLD_CARD_KEY = 'luminary_gold_card';
-const GOLD_CARD_COST = 500;
-const GOLD_CARD_DURATION_MS = 30 * 60 * 1000; // 30 минут
-const GOLD_CARD_BONUS = 0.2; // +20% к выигрышу
+interface CardConfig {
+  key: string;
+  nameRu: string;
+  nameEn: string;
+  descRu: string;
+  descEn: string;
+  cost: number;
+  durationMs: number;
+  payoutBonus: number; // e.g. 0.2 = +20%
+  luckBonus: number;   // e.g. 0.5 = 50% reroll chance
+  emoji: string;
+  color: string; // tailwind color class
+  borderColor: string;
+  bgGradient: string;
+}
 
-interface GoldCardData {
+const BONUS_CARDS: CardConfig[] = [
+  {
+    key: 'bronze', nameRu: 'Бронзовая', nameEn: 'Bronze',
+    descRu: '+10% к выигрышу · 15 мин', descEn: '+10% winnings · 15 min',
+    cost: 100, durationMs: 15 * 60 * 1000,
+    payoutBonus: 0.1, luckBonus: 0,
+    emoji: '🥉', color: 'text-amber-600', borderColor: 'border-amber-600/30', bgGradient: 'from-amber-800/20 to-amber-700/20',
+  },
+  {
+    key: 'gold', nameRu: 'Золотая', nameEn: 'Gold',
+    descRu: '+20% к выигрышу · 30 мин', descEn: '+20% winnings · 30 min',
+    cost: 500, durationMs: 30 * 60 * 1000,
+    payoutBonus: 0.2, luckBonus: 0,
+    emoji: '👑', color: 'text-yellow-400', borderColor: 'border-yellow-500/30', bgGradient: 'from-yellow-500/15 to-amber-500/15',
+  },
+  {
+    key: 'lucky', nameRu: 'Удачливая', nameEn: 'Lucky',
+    descRu: '+25% шанс победы · 20 мин', descEn: '+25% win chance · 20 min',
+    cost: 10000, durationMs: 20 * 60 * 1000,
+    payoutBonus: 0, luckBonus: 0.25,
+    emoji: '🍀', color: 'text-green-400', borderColor: 'border-green-500/30', bgGradient: 'from-green-500/15 to-emerald-500/15',
+  },
+  {
+    key: 'silver', nameRu: 'Серебряная', nameEn: 'Silver',
+    descRu: '+50% шанс победы · 30 мин', descEn: '+50% win chance · 30 min',
+    cost: 50000, durationMs: 30 * 60 * 1000,
+    payoutBonus: 0, luckBonus: 0.5,
+    emoji: '🛡️', color: 'text-slate-300', borderColor: 'border-slate-400/30', bgGradient: 'from-slate-400/15 to-slate-300/15',
+  },
+  {
+    key: 'crystal', nameRu: 'Кристальная', nameEn: 'Crystal',
+    descRu: '+40% к выигрышу · 45 мин', descEn: '+40% winnings · 45 min',
+    cost: 75000, durationMs: 45 * 60 * 1000,
+    payoutBonus: 0.4, luckBonus: 0,
+    emoji: '💎', color: 'text-cyan-300', borderColor: 'border-cyan-400/30', bgGradient: 'from-cyan-500/15 to-blue-500/15',
+  },
+  {
+    key: 'diamond', nameRu: 'Алмазная', nameEn: 'Diamond',
+    descRu: '+30% выигрыш + 50% удача · 60 мин', descEn: '+30% payout + 50% luck · 60 min',
+    cost: 200000, durationMs: 60 * 60 * 1000,
+    payoutBonus: 0.3, luckBonus: 0.5,
+    emoji: '💠', color: 'text-purple-300', borderColor: 'border-purple-400/30', bgGradient: 'from-purple-500/15 to-pink-500/15',
+  },
+];
+
+const CARDS_STORAGE_KEY = 'luminary_bonus_cards';
+
+interface ActiveCardData {
+  key: string;
   activatedAt: number;
   expiresAt: number;
 }
 
-function getGoldCard(): GoldCardData | null {
+function getActiveCards(): ActiveCardData[] {
   try {
-    const raw = localStorage.getItem(GOLD_CARD_KEY);
-    if (!raw) return null;
-    const data: GoldCardData = JSON.parse(raw);
-    if (Date.now() > data.expiresAt) {
-      localStorage.removeItem(GOLD_CARD_KEY);
-      return null;
+    const raw = localStorage.getItem(CARDS_STORAGE_KEY);
+    if (!raw) return [];
+    const cards: ActiveCardData[] = JSON.parse(raw);
+    const now = Date.now();
+    const valid = cards.filter(c => c.expiresAt > now);
+    if (valid.length !== cards.length) {
+      localStorage.setItem(CARDS_STORAGE_KEY, JSON.stringify(valid));
     }
-    return data;
-  } catch { return null; }
+    return valid;
+  } catch { return []; }
 }
 
-function activateGoldCard() {
+function activateCard(cardKey: string) {
+  const config = BONUS_CARDS.find(c => c.key === cardKey);
+  if (!config) return;
+  const cards = getActiveCards().filter(c => c.key !== cardKey); // replace if already active
   const now = Date.now();
-  const data: GoldCardData = { activatedAt: now, expiresAt: now + GOLD_CARD_DURATION_MS };
-  localStorage.setItem(GOLD_CARD_KEY, JSON.stringify(data));
-  return data;
+  cards.push({ key: cardKey, activatedAt: now, expiresAt: now + config.durationMs });
+  localStorage.setItem(CARDS_STORAGE_KEY, JSON.stringify(cards));
 }
 
-// ============= SILVER CARD SYSTEM =============
-
-const SILVER_CARD_KEY = 'luminary_silver_card';
-const SILVER_CARD_COST = 50000;
-const SILVER_CARD_DURATION_MS = 30 * 60 * 1000; // 30 минут
-
-interface SilverCardData {
-  activatedAt: number;
-  expiresAt: number;
-}
-
-function getSilverCard(): SilverCardData | null {
-  try {
-    const raw = localStorage.getItem(SILVER_CARD_KEY);
-    if (!raw) return null;
-    const data: SilverCardData = JSON.parse(raw);
-    if (Date.now() > data.expiresAt) {
-      localStorage.removeItem(SILVER_CARD_KEY);
-      return null;
+function getCardBonuses(): { payoutBonus: number; luckBonus: number } {
+  const active = getActiveCards();
+  let payoutBonus = 0;
+  let luckBonus = 0;
+  for (const ac of active) {
+    const cfg = BONUS_CARDS.find(c => c.key === ac.key);
+    if (cfg) {
+      payoutBonus += cfg.payoutBonus;
+      // luckBonus: use 1 - product(1-luck) for stacking
+      luckBonus = 1 - (1 - luckBonus) * (1 - cfg.luckBonus);
     }
-    return data;
-  } catch { return null; }
+  }
+  return { payoutBonus: Math.min(payoutBonus, 1), luckBonus: Math.min(luckBonus, 1) };
 }
 
-function activateSilverCard() {
-  const now = Date.now();
-  const data: SilverCardData = { activatedAt: now, expiresAt: now + SILVER_CARD_DURATION_MS };
-  localStorage.setItem(SILVER_CARD_KEY, JSON.stringify(data));
-  return data;
+// Backwards compat helpers (game mutations still call these)
+function getGoldCard() { return getActiveCards().find(c => c.key === 'gold') || null; }
+function getSilverCard() { return getActiveCards().find(c => c.key === 'silver') || null; }
+
+function formatTimeLeft(ms: number): string {
+  if (ms <= 0) return '0:00';
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.floor((ms % 60000) / 1000);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function GoldCardBanner() {
+function CardsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, updateBalance } = useAuth();
   const { language } = useLanguage();
   const isRu = (language || 'ru') === 'ru';
-  const [card, setCard] = useState<GoldCardData | null>(getGoldCard);
-  const [timeLeft, setTimeLeft] = useState('');
-  const [buying, setBuying] = useState(false);
+  const [activeCards, setActiveCards] = useState<ActiveCardData[]>(getActiveCards);
+  const [buying, setBuying] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [, forceUpdate] = useState(0);
   const balance = user?.lumiCoins ?? 0;
 
   useEffect(() => {
+    if (!open) return;
     const interval = setInterval(() => {
-      const c = getGoldCard();
-      setCard(c);
-      if (c) {
-        const left = c.expiresAt - Date.now();
-        if (left <= 0) { setCard(null); return; }
-        const mins = Math.floor(left / 60000);
-        const secs = Math.floor((left % 60000) / 1000);
-        setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
-      }
+      setActiveCards(getActiveCards());
+      forceUpdate(n => n + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [open]);
 
-  const handleBuy = async () => {
-    if (!user?.discordId || balance < GOLD_CARD_COST) return;
-    setBuying(true);
+  const handleBuy = async (card: CardConfig) => {
+    if (!user?.discordId || balance < card.cost) return;
+    setBuying(card.key);
     setError('');
     try {
-      const res = await apiRequest("POST", "/api/mini-games/buy-gold-card", {
+      const res = await apiRequest("POST", "/api/mini-games/buy-card", {
         discordId: user.discordId,
+        cardType: card.key,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Error");
       }
       const data = await res.json();
-      activateGoldCard();
-      setCard(getGoldCard());
+      activateCard(card.key);
+      setActiveCards(getActiveCards());
       updateBalance(data.newBalance);
     } catch (e: any) {
       setError(e.message);
     } finally {
-      setBuying(false);
+      setBuying(null);
     }
   };
 
-  if (card) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gradient-to-r from-yellow-500/15 to-amber-500/15 border border-yellow-500/30 mb-3 mx-auto">
-        <Crown className="h-4 w-4 text-yellow-400" />
-        <span className="text-sm font-semibold text-yellow-400">{isRu ? 'Золотая карта' : 'Gold Card'}</span>
-        <Badge className="bg-yellow-500/20 text-yellow-300 text-xs gap-1">
-          <Timer className="h-3 w-3" /> {timeLeft}
-        </Badge>
-        <span className="text-xs text-yellow-400/70">+20% {isRu ? 'к выигрышу' : 'bonus'}</span>
-      </div>
-    );
-  }
+  if (!open) return null;
+
+  const activeCount = activeCards.length;
 
   return (
-    <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gradient-to-r from-yellow-900/20 to-amber-900/20 border border-yellow-500/15 mb-3 mx-auto flex-wrap">
-      <Crown className="h-4 w-4 text-yellow-500/60" />
-      <span className="text-xs text-muted-foreground">{isRu ? 'Золотая карта: +20% к выигрышу на 30 мин' : 'Gold Card: +20% winnings for 30 min'}</span>
-      <Button size="sm" variant="outline" className="h-6 text-xs gap-1 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
-        onClick={handleBuy} disabled={buying || balance < GOLD_CARD_COST || !user?.discordId}>
-        {buying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Coins className="h-3 w-3" />}
-        {GOLD_CARD_COST} LC
-      </Button>
-      {error && <span className="text-xs text-red-400">{error}</span>}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="relative bg-background border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-auto"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-yellow-400" />
+            <h2 className="text-lg font-bold">{isRu ? 'Бонусные карты' : 'Bonus Cards'}</h2>
+            {activeCount > 0 && (
+              <Badge className="bg-green-500/20 text-green-400 text-xs">{activeCount} {isRu ? 'активно' : 'active'}</Badge>
+            )}
+          </div>
+          <Button size="icon" variant="ghost" onClick={onClose} className="h-7 w-7">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="p-3 space-y-2">
+          {BONUS_CARDS.map(card => {
+            const ac = activeCards.find(a => a.key === card.key);
+            const isActive = !!ac;
+            const timeLeft = ac ? ac.expiresAt - Date.now() : 0;
+            const canAfford = balance >= card.cost;
+
+            return (
+              <div key={card.key}
+                className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                  isActive
+                    ? `bg-gradient-to-r ${card.bgGradient} ${card.borderColor}`
+                    : 'bg-card/50 border-border/50 hover:border-border'
+                }`}>
+                <span className="text-2xl">{card.emoji}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-sm font-semibold ${isActive ? card.color : 'text-foreground'}`}>
+                      {isRu ? card.nameRu : card.nameEn}
+                    </span>
+                    {isActive && (
+                      <Badge className="bg-green-500/20 text-green-300 text-[10px] gap-0.5 px-1.5 py-0">
+                        <Timer className="h-2.5 w-2.5" /> {formatTimeLeft(timeLeft)}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{isRu ? card.descRu : card.descEn}</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={isActive ? "secondary" : "outline"}
+                  className={`h-7 text-xs gap-1 shrink-0 ${isActive ? 'opacity-50' : card.borderColor + ' ' + card.color + ' hover:bg-white/5'}`}
+                  onClick={() => handleBuy(card)}
+                  disabled={!!buying || isActive || !canAfford || !user?.discordId}>
+                  {buying === card.key ? <Loader2 className="h-3 w-3 animate-spin" /> : <Coins className="h-3 w-3" />}
+                  {card.cost >= 1000 ? `${(card.cost / 1000).toFixed(0)}K` : card.cost}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+
+        {error && <p className="text-xs text-red-400 text-center pb-3 px-3">{error}</p>}
+
+        <div className="p-3 pt-0 border-t border-border/50 mt-1">
+          <p className="text-[10px] text-muted-foreground text-center">
+            {isRu
+              ? 'Карты суммируются! Можно активировать несколько одновременно.'
+              : 'Cards stack! You can activate multiple at once.'}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
 
-function SilverCardBanner() {
-  const { user, updateBalance } = useAuth();
+function ActiveCardsIndicator({ onClick }: { onClick: () => void }) {
   const { language } = useLanguage();
   const isRu = (language || 'ru') === 'ru';
-  const [card, setCard] = useState<SilverCardData | null>(getSilverCard);
-  const [timeLeft, setTimeLeft] = useState('');
-  const [buying, setBuying] = useState(false);
-  const [error, setError] = useState('');
-  const balance = user?.lumiCoins ?? 0;
+  const [activeCards, setActiveCards] = useState<ActiveCardData[]>(getActiveCards);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      const c = getSilverCard();
-      setCard(c);
-      if (c) {
-        const left = c.expiresAt - Date.now();
-        if (left <= 0) { setCard(null); return; }
-        const mins = Math.floor(left / 60000);
-        const secs = Math.floor((left % 60000) / 1000);
-        setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
-      }
-    }, 1000);
+    const interval = setInterval(() => setActiveCards(getActiveCards()), 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleBuy = async () => {
-    if (!user?.discordId || balance < SILVER_CARD_COST) return;
-    setBuying(true);
-    setError('');
-    try {
-      const res = await apiRequest("POST", "/api/mini-games/buy-silver-card", {
-        discordId: user.discordId,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Error");
-      }
-      const data = await res.json();
-      activateSilverCard();
-      setCard(getSilverCard());
-      updateBalance(data.newBalance);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setBuying(false);
-    }
-  };
-
-  if (card) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gradient-to-r from-slate-400/15 to-slate-300/15 border border-slate-400/30 mb-3 mx-auto">
-        <Shield className="h-4 w-4 text-slate-300" />
-        <span className="text-sm font-semibold text-slate-300">{isRu ? 'Серебряная карта' : 'Silver Card'}</span>
-        <Badge className="bg-slate-400/20 text-slate-200 text-xs gap-1">
-          <Timer className="h-3 w-3" /> {timeLeft}
-        </Badge>
-        <span className="text-xs text-slate-300/70">+50% {isRu ? 'шанс победы' : 'win chance'}</span>
-      </div>
-    );
-  }
+  const count = activeCards.length;
 
   return (
-    <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gradient-to-r from-slate-800/20 to-slate-700/20 border border-slate-500/15 mb-3 mx-auto flex-wrap">
-      <Shield className="h-4 w-4 text-slate-400/60" />
-      <span className="text-xs text-muted-foreground">{isRu ? 'Серебряная карта: +50% шанс победы на 30 мин' : 'Silver Card: +50% win chance for 30 min'}</span>
-      <Button size="sm" variant="outline" className="h-6 text-xs gap-1 border-slate-400/30 text-slate-300 hover:bg-slate-400/10"
-        onClick={handleBuy} disabled={buying || balance < SILVER_CARD_COST || !user?.discordId}>
-        {buying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Coins className="h-3 w-3" />}
-        {SILVER_CARD_COST.toLocaleString()} LC
-      </Button>
-      {error && <span className="text-xs text-red-400">{error}</span>}
-    </div>
+    <Button size="icon" variant="ghost" onClick={onClick}
+      className={`h-8 w-8 relative ${count > 0 ? 'text-yellow-400 hover:text-yellow-300' : 'text-muted-foreground hover:text-primary'}`}
+      title={isRu ? 'Бонусные карты' : 'Bonus Cards'}>
+      <Sparkles className="h-4 w-4" />
+      {count > 0 && (
+        <span className="absolute -top-0.5 -right-0.5 bg-green-500 text-white text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center">
+          {count}
+        </span>
+      )}
+    </Button>
   );
 }
 
@@ -306,13 +361,12 @@ function WheelOfFortune() {
 
   const spinMutation = useMutation({
     mutationFn: async () => {
-      const gc = getGoldCard();
-      const sc = getSilverCard();
+      const bonuses = getCardBonuses();
       const res = await apiRequest("POST", "/api/mini-games/wheel", {
         discordId: user?.discordId,
         bet: betAmount,
-        hasGoldCard: !!gc,
-        hasSilverCard: !!sc,
+        payoutBonus: bonuses.payoutBonus,
+        luckBonus: bonuses.luckBonus,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -493,10 +547,9 @@ function RockPaperScissors() {
 
   const playMutation = useMutation({
     mutationFn: async (choice: RPSChoice) => {
-      const gc = getGoldCard();
-      const sc = getSilverCard();
+      const bonuses = getCardBonuses();
       const res = await apiRequest("POST", "/api/mini-games/rps", {
-        discordId: user?.discordId, choice, bet: betAmount, hasGoldCard: !!gc, hasSilverCard: !!sc,
+        discordId: user?.discordId, choice, bet: betAmount, payoutBonus: bonuses.payoutBonus, luckBonus: bonuses.luckBonus,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -632,10 +685,9 @@ function CoinFlip() {
 
   const flipMutation = useMutation({
     mutationFn: async (guess: "heads" | "tails") => {
-      const gc = getGoldCard();
-      const sc = getSilverCard();
+      const bonuses = getCardBonuses();
       const res = await apiRequest("POST", "/api/mini-games/coinflip", {
-        discordId: user?.discordId, bet: betAmount, guess, hasGoldCard: !!gc, hasSilverCard: !!sc,
+        discordId: user?.discordId, bet: betAmount, guess, payoutBonus: bonuses.payoutBonus, luckBonus: bonuses.luckBonus,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -758,10 +810,9 @@ function DiceGame() {
 
   const rollMutation = useMutation({
     mutationFn: async (guess: string) => {
-      const gc = getGoldCard();
-      const sc = getSilverCard();
+      const bonuses = getCardBonuses();
       const res = await apiRequest("POST", "/api/mini-games/dice", {
-        discordId: user?.discordId, bet: betAmount, guess, hasGoldCard: !!gc, hasSilverCard: !!sc,
+        discordId: user?.discordId, bet: betAmount, guess, payoutBonus: bonuses.payoutBonus, luckBonus: bonuses.luckBonus,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -922,10 +973,9 @@ function SlotMachine() {
 
   const spinMutation = useMutation({
     mutationFn: async () => {
-      const gc = getGoldCard();
-      const sc = getSilverCard();
+      const bonuses = getCardBonuses();
       const res = await apiRequest("POST", "/api/mini-games/slots", {
-        discordId: user?.discordId, bet: betAmount, hasGoldCard: !!gc, hasSilverCard: !!sc,
+        discordId: user?.discordId, bet: betAmount, payoutBonus: bonuses.payoutBonus, luckBonus: bonuses.luckBonus,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -1095,10 +1145,9 @@ function BlackjackGame() {
 
   const dealMutation = useMutation({
     mutationFn: async () => {
-      const gc = getGoldCard();
-      const sc = getSilverCard();
+      const bonuses = getCardBonuses();
       const res = await apiRequest("POST", "/api/mini-games/blackjack", {
-        discordId: user?.discordId, bet: betAmount, hasGoldCard: !!gc, hasSilverCard: !!sc,
+        discordId: user?.discordId, bet: betAmount, payoutBonus: bonuses.payoutBonus, luckBonus: bonuses.luckBonus,
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
       return res.json();
@@ -1226,10 +1275,9 @@ function NumberGuessGame() {
 
   const guessMutation = useMutation({
     mutationFn: async () => {
-      const gc = getGoldCard();
-      const sc = getSilverCard();
+      const bonuses = getCardBonuses();
       const res = await apiRequest("POST", "/api/mini-games/number-guess", {
-        discordId: user?.discordId, bet: betAmount, guess: guessValue, hasGoldCard: !!gc, hasSilverCard: !!sc,
+        discordId: user?.discordId, bet: betAmount, guess: guessValue, payoutBonus: bonuses.payoutBonus, luckBonus: bonuses.luckBonus,
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
       return res.json();
@@ -1357,10 +1405,9 @@ function CrashGame() {
 
   const crashMutation = useMutation({
     mutationFn: async () => {
-      const gc = getGoldCard();
-      const sc = getSilverCard();
+      const bonuses = getCardBonuses();
       const res = await apiRequest("POST", "/api/mini-games/crash", {
-        discordId: user?.discordId, bet: betAmount, cashoutAt, hasGoldCard: !!gc, hasSilverCard: !!sc,
+        discordId: user?.discordId, bet: betAmount, cashoutAt, payoutBonus: bonuses.payoutBonus, luckBonus: bonuses.luckBonus,
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
       return res.json();
@@ -1583,6 +1630,7 @@ export default function MiniGamesPage() {
   const isRu = (language || 'ru') === 'ru';
   const [activeTab, setActiveTab] = useState("wheel");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [cardsModalOpen, setCardsModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const toggleFullscreen = useCallback(async () => {
@@ -1611,6 +1659,7 @@ export default function MiniGamesPage() {
           <h1 className="text-2xl font-bold">{isRu ? 'Мини-игры' : 'Mini-Games'}</h1>
           <p className="text-sm text-muted-foreground">{isRu ? 'Играй и зарабатывай LumiCoins' : 'Play and earn LumiCoins'}</p>
         </div>
+        <ActiveCardsIndicator onClick={() => setCardsModalOpen(true)} />
         <Button size="icon" variant="ghost" onClick={toggleFullscreen}
           className="h-8 w-8 text-muted-foreground hover:text-primary" title={isRu ? 'Полный экран' : 'Fullscreen'}>
           {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
@@ -1618,8 +1667,7 @@ export default function MiniGamesPage() {
       </div>
 
       <BalanceBar />
-      <GoldCardBanner />
-      <SilverCardBanner />
+      <CardsModal open={cardsModalOpen} onClose={() => setCardsModalOpen(false)} />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full mb-6 flex-wrap h-auto gap-1">

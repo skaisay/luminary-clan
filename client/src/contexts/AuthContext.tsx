@@ -110,6 +110,7 @@ async function tryAutoReLogin(creds: StoredCreds): Promise<{ user: UserType } | 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isGuest, setIsGuest] = useState(false);
   const reLoginAttempted = useRef(false);
+  const reLoginTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Seed react-query cache from localStorage
   const cachedAuth = getCachedAuth();
@@ -120,13 +121,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { data: authData, isLoading } = useQuery<{ user: UserType }>({
     queryKey: ['/auth/user'],
     queryFn: fetchAuthUser, // custom — never throws
-    retry: 2,
-    retryDelay: 1500,
-    staleTime: 5 * 60 * 1000,
+    retry: 3,
+    retryDelay: 2000,
+    staleTime: 2 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
     refetchOnMount: 'always',
     refetchOnReconnect: true,
+    refetchInterval: 10 * 60 * 1000, // check session every 10 minutes
     initialData: cachedAuth,
   });
 
@@ -137,9 +139,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Valid Discord session — cache it
       setCachedAuth(authData);
       reLoginAttempted.current = false;
+      if (reLoginTimer.current) { clearTimeout(reLoginTimer.current); reLoginTimer.current = null; }
     } else if (!authData.user || authData.user.type !== 'discord') {
       // Session lost or is admin — try auto re-login with stored creds
-      if (!reLoginAttempted.current) {
+      const attemptReLogin = () => {
+        if (reLoginAttempted.current) return;
         reLoginAttempted.current = true;
         const creds = getStoredCreds();
         if (creds) {
@@ -147,13 +151,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (result?.user) {
               queryClient.setQueryData(['/auth/user'], result);
               setCachedAuth(result);
+              reLoginAttempted.current = false;
+            } else {
+              // Re-login failed — retry again in 3 minutes
+              reLoginTimer.current = setTimeout(() => {
+                reLoginAttempted.current = false;
+                queryClient.invalidateQueries({ queryKey: ['/auth/user'] });
+              }, 3 * 60 * 1000);
             }
-            // If re-login failed, keep cached data visible (don't log out)
           });
         }
-      }
+      };
+      attemptReLogin();
     }
   }, [authData]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => { if (reLoginTimer.current) clearTimeout(reLoginTimer.current); };
+  }, []);
 
   const logoutMutation = useMutation({
     mutationFn: () => apiRequest('POST', '/auth/logout', {}),
