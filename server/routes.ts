@@ -4792,6 +4792,29 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   });
 
   // ============================================================
+  // SILVER CARD — buy 30 min bonus (+50% win chance)
+  // ============================================================
+  app.post("/api/mini-games/buy-silver-card", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { discordId } = req.body;
+      const SILVER_CARD_COST = 50000;
+      if (!discordId) return res.status(400).json({ error: "discordId required" });
+      const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
+      if (!member[0]) return res.status(404).json({ error: "Member not found" });
+      if ((member[0].lumiCoins || 0) < SILVER_CARD_COST) return res.status(400).json({ error: "Not enough LumiCoins" });
+      const newBalance = (member[0].lumiCoins || 0) - SILVER_CARD_COST;
+      await db.update(clanMembers).set({ lumiCoins: newBalance }).where(eq(clanMembers.id, member[0].id));
+      if (app.locals.broadcastSSE) app.locals.broadcastSSE('balance-update', { discordId, newBalance, username: member[0].username });
+      res.json({ success: true, newBalance });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================
   // MINI-GAMES API
   // ============================================================
 
@@ -4808,7 +4831,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { db } = await import("./db");
       const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { discordId, bet, hasGoldCard } = req.body;
+      const { discordId, bet, hasGoldCard, hasSilverCard } = req.body;
       if (!discordId || !bet || bet < 1) return res.status(400).json({ error: "discordId and bet required" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
@@ -4816,7 +4839,12 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
       // Multiplier-based wheel: must match client WHEEL_SEGMENTS order
       const multipliers = [0, 0.5, 0, 1, 0.5, 0, 1.5, 0.5, 0, 1, 2, 3];
-      const segmentIndex = Math.floor(Math.random() * multipliers.length);
+      let segmentIndex = Math.floor(Math.random() * multipliers.length);
+      // Silver Card: if landed on x0, 50% chance to reroll to a paying segment
+      if (hasSilverCard && multipliers[segmentIndex] === 0 && Math.random() < 0.5) {
+        const payingIndices = multipliers.map((m, i) => ({ m, i })).filter(x => x.m > 0);
+        segmentIndex = payingIndices[Math.floor(Math.random() * payingIndices.length)].i;
+      }
       const multiplier = multipliers[segmentIndex];
       const payout = Math.floor(betAmount * multiplier);
       const reward = applyGoldCardBonus(payout - betAmount, !!hasGoldCard);
@@ -4835,14 +4863,24 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { db } = await import("./db");
       const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { discordId, choice, bet, hasGoldCard } = req.body;
+      const { discordId, choice, bet, hasGoldCard, hasSilverCard } = req.body;
       if (!discordId || !choice || !bet || bet < 1) return res.status(400).json({ error: "discordId, choice, and bet required" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
       if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
       const choices = ["rock", "paper", "scissors"] as const;
-      const botChoice = choices[Math.floor(Math.random() * 3)];
+      let botChoice = choices[Math.floor(Math.random() * 3)];
+      // Silver Card: if player would lose, 50% chance to switch bot to a losing move
+      if (hasSilverCard && choice !== botChoice) {
+        const wouldLose = (choice === "rock" && botChoice === "paper") ||
+                          (choice === "paper" && botChoice === "scissors") ||
+                          (choice === "scissors" && botChoice === "rock");
+        if (wouldLose && Math.random() < 0.5) {
+          const losingMoves: Record<string, string> = { rock: "scissors", paper: "rock", scissors: "paper" };
+          botChoice = losingMoves[choice] as typeof botChoice;
+        }
+      }
       let result: "win" | "lose" | "draw" = "draw";
       if (choice !== botChoice) {
         if ((choice === "rock" && botChoice === "scissors") ||
@@ -4874,13 +4912,17 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { db } = await import("./db");
       const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { discordId, bet, guess, hasGoldCard } = req.body;
+      const { discordId, bet, guess, hasGoldCard, hasSilverCard } = req.body;
       if (!discordId || !bet || bet < 1 || !guess) return res.status(400).json({ error: "Missing params" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
       if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
-      const coin = Math.random() < 0.5 ? "heads" : "tails";
+      let coin = Math.random() < 0.5 ? "heads" : "tails";
+      // Silver Card: if you would lose, 50% chance to flip the coin in your favor
+      if (hasSilverCard && coin !== guess && Math.random() < 0.5) {
+        coin = guess;
+      }
       const won = coin === guess;
       const reward = won ? applyGoldCardBonus(betAmount, !!hasGoldCard) : -betAmount;
       const newBalance = Math.max(0, (member[0].lumiCoins || 0) + reward);
@@ -4899,13 +4941,27 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { db } = await import("./db");
       const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { discordId, bet, guess, hasGoldCard } = req.body;
+      const { discordId, bet, guess, hasGoldCard, hasSilverCard } = req.body;
       if (!discordId || !bet || bet < 1 || !guess) return res.status(400).json({ error: "Missing params" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
       if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
-      const roll = Math.floor(Math.random() * 6) + 1;
+      let roll = Math.floor(Math.random() * 6) + 1;
+      // Silver Card: if you would lose, 50% chance to reroll to a favorable outcome
+      const checkDiceWin = (r: number, g: string) => {
+        if (g === "high") return r >= 4;
+        if (g === "low") return r <= 3;
+        if (g === "even") return r % 2 === 0;
+        if (g === "odd") return r % 2 === 1;
+        return false;
+      };
+      if (hasSilverCard && !checkDiceWin(roll, guess) && Math.random() < 0.5) {
+        if (guess === "high") roll = Math.floor(Math.random() * 3) + 4;
+        else if (guess === "low") roll = Math.floor(Math.random() * 3) + 1;
+        else if (guess === "even") roll = [2, 4, 6][Math.floor(Math.random() * 3)];
+        else if (guess === "odd") roll = [1, 3, 5][Math.floor(Math.random() * 3)];
+      }
       let won = false;
       let multiplier = 0;
       if (guess === "exact") {
@@ -4942,7 +4998,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { db } = await import("./db");
       const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { discordId, bet, hasGoldCard } = req.body;
+      const { discordId, bet, hasGoldCard, hasSilverCard } = req.body;
       if (!discordId || !bet || bet < 1) return res.status(400).json({ error: "Missing params" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
@@ -4970,8 +5026,14 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         [spinReel(), spinReel(), spinReel()], // row 3
       ];
 
-      // Check middle row (main payline)
+      // Silver Card: if no match on middle row, 50% chance to force at least a pair
       const middle = reels[1];
+      if (hasSilverCard && middle[0] !== middle[1] && middle[1] !== middle[2] && middle[0] !== middle[2] && Math.random() < 0.5) {
+        middle[2] = middle[0]; // Force a pair
+        if (Math.random() < 0.25) middle[1] = middle[0]; // 25% chance for triple
+      }
+
+      // Check middle row (main payline)
       let multiplier = 0;
       let resultDesc = "";
 
@@ -5045,7 +5107,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { db } = await import("./db");
       const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { discordId, bet, hasGoldCard } = req.body;
+      const { discordId, bet, hasGoldCard, hasSilverCard } = req.body;
       if (!discordId || !bet || bet < 1) return res.status(400).json({ error: "Missing params" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
       const member = await db.select().from(clanMembers).where(eq(clanMembers.discordId, discordId)).limit(1);
@@ -5081,6 +5143,10 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
 
       // Player auto-hits until 17+
       while (handValue(playerCards) < 17) playerCards.push(draw());
+      // Silver Card: if player busts with extra cards, 50% chance to undo last hit
+      if (hasSilverCard && handValue(playerCards) > 21 && playerCards.length > 2 && Math.random() < 0.5) {
+        playerCards.pop();
+      }
       const playerVal = handValue(playerCards);
 
       // Dealer hits until 17+
@@ -5125,7 +5191,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { db } = await import("./db");
       const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { discordId, bet, guess, hasGoldCard } = req.body;
+      const { discordId, bet, guess, hasGoldCard, hasSilverCard } = req.body;
       if (!discordId || !bet || bet < 1 || guess == null) return res.status(400).json({ error: "Missing params" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
       const guessNum = Math.min(100, Math.max(1, Math.floor(Number(guess) || 50)));
@@ -5133,7 +5199,12 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       if (!member[0]) return res.status(404).json({ error: "Member not found" });
       if ((member[0].lumiCoins || 0) < betAmount) return res.status(400).json({ error: "Not enough LumiCoins" });
 
-      const secret = Math.floor(Math.random() * 100) + 1;
+      let secret = Math.floor(Math.random() * 100) + 1;
+      // Silver Card: nudge secret 40% closer to the guess
+      if (hasSilverCard) {
+        secret = Math.round(secret + (guessNum - secret) * 0.4);
+        secret = Math.min(100, Math.max(1, secret));
+      }
       const diff = Math.abs(secret - guessNum);
       let multiplier = 0;
       let resultLabel = '';
@@ -5162,7 +5233,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const { db } = await import("./db");
       const { clanMembers, gameHistory } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      const { discordId, bet, cashoutAt, hasGoldCard } = req.body;
+      const { discordId, bet, cashoutAt, hasGoldCard, hasSilverCard } = req.body;
       if (!discordId || !bet || bet < 1 || !cashoutAt) return res.status(400).json({ error: "Missing params" });
       const betAmount = Math.floor(Math.max(1, Number(bet) || 0));
       const cashout = Math.max(1.1, Math.min(100, Number(cashoutAt) || 2));
@@ -5173,7 +5244,11 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       // Generate crash point: exponential distribution, avg crash ~2x
       // P(crash <= x) = 1 - 1/x for x>=1, so crashPoint = 1/(1-rand)
       const r = Math.random();
-      const crashPoint = Math.max(1, Math.floor(100 / (1 - r * 0.99)) / 100);
+      let crashPoint = Math.min(100, Math.max(1, Math.floor(100 / (1 - r)) / 100));
+      // Silver Card: boost crash point by 50% (less likely to crash early)
+      if (hasSilverCard) {
+        crashPoint = Math.min(100, Math.max(1, Math.round(crashPoint * 1.5 * 100) / 100));
+      }
 
       const survived = cashout <= crashPoint;
       const multiplier = survived ? cashout : 0;

@@ -4,7 +4,7 @@ import {
   Gamepad2, Coins, Loader2, RotateCw, Hand, Scissors,
   Circle, Square, ChevronRight, History, Dices, CircleDot,
   ArrowUp, ArrowDown, Hash, Cherry, Maximize, Minimize,
-  Crown, Timer, Zap, Target, TrendingUp, HelpCircle, Award
+  Crown, Timer, Zap, Target, TrendingUp, HelpCircle, Award, Shield
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,37 @@ function activateGoldCard() {
   const now = Date.now();
   const data: GoldCardData = { activatedAt: now, expiresAt: now + GOLD_CARD_DURATION_MS };
   localStorage.setItem(GOLD_CARD_KEY, JSON.stringify(data));
+  return data;
+}
+
+// ============= SILVER CARD SYSTEM =============
+
+const SILVER_CARD_KEY = 'luminary_silver_card';
+const SILVER_CARD_COST = 50000;
+const SILVER_CARD_DURATION_MS = 30 * 60 * 1000; // 30 минут
+
+interface SilverCardData {
+  activatedAt: number;
+  expiresAt: number;
+}
+
+function getSilverCard(): SilverCardData | null {
+  try {
+    const raw = localStorage.getItem(SILVER_CARD_KEY);
+    if (!raw) return null;
+    const data: SilverCardData = JSON.parse(raw);
+    if (Date.now() > data.expiresAt) {
+      localStorage.removeItem(SILVER_CARD_KEY);
+      return null;
+    }
+    return data;
+  } catch { return null; }
+}
+
+function activateSilverCard() {
+  const now = Date.now();
+  const data: SilverCardData = { activatedAt: now, expiresAt: now + SILVER_CARD_DURATION_MS };
+  localStorage.setItem(SILVER_CARD_KEY, JSON.stringify(data));
   return data;
 }
 
@@ -116,6 +147,81 @@ function GoldCardBanner() {
         onClick={handleBuy} disabled={buying || balance < GOLD_CARD_COST || !user?.discordId}>
         {buying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Coins className="h-3 w-3" />}
         {GOLD_CARD_COST} LC
+      </Button>
+      {error && <span className="text-xs text-red-400">{error}</span>}
+    </div>
+  );
+}
+
+function SilverCardBanner() {
+  const { user, updateBalance } = useAuth();
+  const { language } = useLanguage();
+  const isRu = (language || 'ru') === 'ru';
+  const [card, setCard] = useState<SilverCardData | null>(getSilverCard);
+  const [timeLeft, setTimeLeft] = useState('');
+  const [buying, setBuying] = useState(false);
+  const [error, setError] = useState('');
+  const balance = user?.lumiCoins ?? 0;
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const c = getSilverCard();
+      setCard(c);
+      if (c) {
+        const left = c.expiresAt - Date.now();
+        if (left <= 0) { setCard(null); return; }
+        const mins = Math.floor(left / 60000);
+        const secs = Math.floor((left % 60000) / 1000);
+        setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleBuy = async () => {
+    if (!user?.discordId || balance < SILVER_CARD_COST) return;
+    setBuying(true);
+    setError('');
+    try {
+      const res = await apiRequest("POST", "/api/mini-games/buy-silver-card", {
+        discordId: user.discordId,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Error");
+      }
+      const data = await res.json();
+      activateSilverCard();
+      setCard(getSilverCard());
+      updateBalance(data.newBalance);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBuying(false);
+    }
+  };
+
+  if (card) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gradient-to-r from-slate-400/15 to-slate-300/15 border border-slate-400/30 mb-3 mx-auto">
+        <Shield className="h-4 w-4 text-slate-300" />
+        <span className="text-sm font-semibold text-slate-300">{isRu ? 'Серебряная карта' : 'Silver Card'}</span>
+        <Badge className="bg-slate-400/20 text-slate-200 text-xs gap-1">
+          <Timer className="h-3 w-3" /> {timeLeft}
+        </Badge>
+        <span className="text-xs text-slate-300/70">+50% {isRu ? 'шанс победы' : 'win chance'}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gradient-to-r from-slate-800/20 to-slate-700/20 border border-slate-500/15 mb-3 mx-auto flex-wrap">
+      <Shield className="h-4 w-4 text-slate-400/60" />
+      <span className="text-xs text-muted-foreground">{isRu ? 'Серебряная карта: +50% шанс победы на 30 мин' : 'Silver Card: +50% win chance for 30 min'}</span>
+      <Button size="sm" variant="outline" className="h-6 text-xs gap-1 border-slate-400/30 text-slate-300 hover:bg-slate-400/10"
+        onClick={handleBuy} disabled={buying || balance < SILVER_CARD_COST || !user?.discordId}>
+        {buying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Coins className="h-3 w-3" />}
+        {SILVER_CARD_COST.toLocaleString()} LC
       </Button>
       {error && <span className="text-xs text-red-400">{error}</span>}
     </div>
@@ -201,10 +307,12 @@ function WheelOfFortune() {
   const spinMutation = useMutation({
     mutationFn: async () => {
       const gc = getGoldCard();
+      const sc = getSilverCard();
       const res = await apiRequest("POST", "/api/mini-games/wheel", {
         discordId: user?.discordId,
         bet: betAmount,
         hasGoldCard: !!gc,
+        hasSilverCard: !!sc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -386,8 +494,9 @@ function RockPaperScissors() {
   const playMutation = useMutation({
     mutationFn: async (choice: RPSChoice) => {
       const gc = getGoldCard();
+      const sc = getSilverCard();
       const res = await apiRequest("POST", "/api/mini-games/rps", {
-        discordId: user?.discordId, choice, bet: betAmount, hasGoldCard: !!gc,
+        discordId: user?.discordId, choice, bet: betAmount, hasGoldCard: !!gc, hasSilverCard: !!sc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -524,8 +633,9 @@ function CoinFlip() {
   const flipMutation = useMutation({
     mutationFn: async (guess: "heads" | "tails") => {
       const gc = getGoldCard();
+      const sc = getSilverCard();
       const res = await apiRequest("POST", "/api/mini-games/coinflip", {
-        discordId: user?.discordId, bet: betAmount, guess, hasGoldCard: !!gc,
+        discordId: user?.discordId, bet: betAmount, guess, hasGoldCard: !!gc, hasSilverCard: !!sc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -649,8 +759,9 @@ function DiceGame() {
   const rollMutation = useMutation({
     mutationFn: async (guess: string) => {
       const gc = getGoldCard();
+      const sc = getSilverCard();
       const res = await apiRequest("POST", "/api/mini-games/dice", {
-        discordId: user?.discordId, bet: betAmount, guess, hasGoldCard: !!gc,
+        discordId: user?.discordId, bet: betAmount, guess, hasGoldCard: !!gc, hasSilverCard: !!sc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -812,8 +923,9 @@ function SlotMachine() {
   const spinMutation = useMutation({
     mutationFn: async () => {
       const gc = getGoldCard();
+      const sc = getSilverCard();
       const res = await apiRequest("POST", "/api/mini-games/slots", {
-        discordId: user?.discordId, bet: betAmount, hasGoldCard: !!gc,
+        discordId: user?.discordId, bet: betAmount, hasGoldCard: !!gc, hasSilverCard: !!sc,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -984,8 +1096,9 @@ function BlackjackGame() {
   const dealMutation = useMutation({
     mutationFn: async () => {
       const gc = getGoldCard();
+      const sc = getSilverCard();
       const res = await apiRequest("POST", "/api/mini-games/blackjack", {
-        discordId: user?.discordId, bet: betAmount, hasGoldCard: !!gc,
+        discordId: user?.discordId, bet: betAmount, hasGoldCard: !!gc, hasSilverCard: !!sc,
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
       return res.json();
@@ -1114,8 +1227,9 @@ function NumberGuessGame() {
   const guessMutation = useMutation({
     mutationFn: async () => {
       const gc = getGoldCard();
+      const sc = getSilverCard();
       const res = await apiRequest("POST", "/api/mini-games/number-guess", {
-        discordId: user?.discordId, bet: betAmount, guess: guessValue, hasGoldCard: !!gc,
+        discordId: user?.discordId, bet: betAmount, guess: guessValue, hasGoldCard: !!gc, hasSilverCard: !!sc,
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
       return res.json();
@@ -1244,8 +1358,9 @@ function CrashGame() {
   const crashMutation = useMutation({
     mutationFn: async () => {
       const gc = getGoldCard();
+      const sc = getSilverCard();
       const res = await apiRequest("POST", "/api/mini-games/crash", {
-        discordId: user?.discordId, bet: betAmount, cashoutAt, hasGoldCard: !!gc,
+        discordId: user?.discordId, bet: betAmount, cashoutAt, hasGoldCard: !!gc, hasSilverCard: !!sc,
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || "Error"); }
       return res.json();
@@ -1504,6 +1619,7 @@ export default function MiniGamesPage() {
 
       <BalanceBar />
       <GoldCardBanner />
+      <SilverCardBanner />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full mb-6 flex-wrap h-auto gap-1">
