@@ -879,11 +879,9 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         });
 
         if (tokenRes.status === 429) {
-          const retryAfter = Math.max(
-            parseInt(tokenRes.headers.get('retry-after') || '0', 10),
-            3 * attempt          // fallback: 3s, 6s, 9s
-          );
-          console.warn(`[AUTH] Rate limited (attempt ${attempt}/${MAX_RETRIES}), retrying in ${retryAfter}s…`);
+          const raw = parseInt(tokenRes.headers.get('retry-after') || '0', 10);
+          const retryAfter = Math.min(Math.max(raw, 2), 5); // clamp 2-5s
+          console.warn(`[AUTH] Rate limited (attempt ${attempt}/${MAX_RETRIES}), raw retry-after=${raw}, waiting ${retryAfter}s…`);
           await new Promise(r => setTimeout(r, retryAfter * 1000));
           continue;
         }

@@ -418,7 +418,6 @@ export async function setupDiscordBot() {
 
   client.once('ready', async () => {
     console.log(`✅ Discord бот запущен: ${client.user?.tag}`);
-    console.log(`📊 База данных: ${process.env.DATABASE_URL?.substring(0, 50)}...`);
     console.log(`🌍 Окружение: ${process.env.NODE_ENV || 'development'}`);
     
     // Инициализация музыкальной системы DisTube
@@ -431,12 +430,14 @@ export async function setupDiscordBot() {
     }
     
     // Глобальная регистрация slash-команд через REST API
+    // Ждём 5 секунд после ready чтобы не попасть под Cloudflare rate-limit
+    await new Promise(r => setTimeout(r, 5000));
     try {
       console.log(`📝 Регистрация ${commands.length} slash-команд...`);
       const rest = new REST({ version: '10' }).setToken(botToken!);
       const commandData = commands.map(cmd => cmd.toJSON());
       
-      // Регистрируем глобально (надёжный способ — работает даже если guild cache пуст)
+      // Регистрируем глобально
       await rest.put(
         Routes.applicationCommands(client.user!.id),
         { body: commandData }
@@ -448,17 +449,18 @@ export async function setupDiscordBot() {
       console.log(`🔍 Серверов в кэше: ${guilds.size}`);
       for (const guild of guilds.values()) {
         try {
+          await new Promise(r => setTimeout(r, 1000)); // Пауза между гильдиями
           await rest.put(
             Routes.applicationGuildCommands(client.user!.id, guild.id),
             { body: commandData }
           );
           console.log(`✅ Команды зарегистрированы на: ${guild.name} (${guild.id})`);
-        } catch (guildErr) {
-          console.error(`❌ Ошибка регистрации команд на ${guild.name}:`, guildErr);
+        } catch (guildErr: any) {
+          console.error(`❌ Ошибка регистрации команд на ${guild.name}:`, guildErr?.message || guildErr);
         }
       }
-    } catch (regError) {
-      console.error('❌ Ошибка регистрации slash-команд:', regError);
+    } catch (regError: any) {
+      console.error('❌ Ошибка регистрации slash-команд:', regError?.message || regError);
     }
 
     // Синхронизация всех существующих участников Discord с базой данных
