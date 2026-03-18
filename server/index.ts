@@ -213,10 +213,21 @@ app.use((req, res, next) => {
     await ensureProductionData();
   }
   
-  // Запуск Discord бота (DisTube инициализируется автоматически внутри)
-  setupDiscordBot().catch(err => {
-    console.error('Ошибка запуска Discord бота:', err);
-  });
+  // Запуск Discord бота с автоматическим retry при rate-limit
+  const startBot = async (attempt = 1) => {
+    try {
+      await setupDiscordBot();
+      console.log('[BOT] Discord бот успешно запущен');
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      const isRateLimit = msg.includes('429') || msg.includes('rate') || msg.includes('1015');
+      const nextDelay = isRateLimit ? 60 : Math.min(30 * attempt, 120); // 60s if rate-limited, else 30s * attempt (max 2min)
+      console.error(`[BOT] Ошибка запуска бота (попытка ${attempt}): ${msg}`);
+      console.log(`[BOT] Следующая попытка через ${nextDelay}с...`);
+      setTimeout(() => startBot(attempt + 1), nextDelay * 1000);
+    }
+  };
+  startBot();
   
   const server = await registerRoutes(app);
 
