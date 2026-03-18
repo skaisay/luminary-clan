@@ -843,18 +843,30 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
 
   app.get(
     "/auth/discord/callback",
-    passport.authenticate("discord", { 
-      failureRedirect: "/login?error=discord_auth_failed"
-    }),
-    (req, res) => {
-      // Получаем сохраненный returnTo (уже валидированный) или используем дефолтный
-      const returnTo = req.session.returnTo || "/";
-      delete req.session.returnTo; // Очищаем после использования
-      // Явно сохраняем сессию перед редиректом чтобы данные успели записаться в БД
-      req.session.save((err) => {
-        if (err) console.error('Ошибка сохранения сессии:', err);
-        res.redirect(returnTo);
-      });
+    (req, res, next) => {
+      passport.authenticate("discord", (err: any, user: any, info: any) => {
+        if (err) {
+          console.error('[AUTH] Discord OAuth error:', err.message || err);
+          console.error('[AUTH] Full error:', JSON.stringify(err, null, 2));
+          return res.redirect("/login?error=discord_auth_failed&detail=" + encodeURIComponent(err.message || 'unknown'));
+        }
+        if (!user) {
+          console.error('[AUTH] Discord OAuth: no user returned, info:', info);
+          return res.redirect("/login?error=discord_auth_failed");
+        }
+        req.logIn(user, (loginErr) => {
+          if (loginErr) {
+            console.error('[AUTH] Login error:', loginErr);
+            return res.redirect("/login?error=login_failed");
+          }
+          const returnTo = req.session.returnTo || "/";
+          delete req.session.returnTo;
+          req.session.save((saveErr) => {
+            if (saveErr) console.error('Ошибка сохранения сессии:', saveErr);
+            res.redirect(returnTo);
+          });
+        });
+      })(req, res, next);
     }
   );
 

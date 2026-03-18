@@ -24,6 +24,14 @@ const getCallbackURL = () => {
 
 const CALLBACK_URL = getCallbackURL();
 
+// Debug logging for Discord OAuth setup
+console.log('[AUTH] Discord OAuth config:');
+console.log('[AUTH]   CLIENT_ID:', DISCORD_CLIENT_ID ? `${DISCORD_CLIENT_ID.substring(0, 6)}...` : 'NOT SET');
+console.log('[AUTH]   CLIENT_SECRET:', DISCORD_CLIENT_SECRET ? `${DISCORD_CLIENT_SECRET.substring(0, 4)}...` : 'NOT SET');
+console.log('[AUTH]   CALLBACK_URL:', CALLBACK_URL);
+console.log('[AUTH]   RENDER_EXTERNAL_URL:', process.env.RENDER_EXTERNAL_URL || 'NOT SET');
+console.log('[AUTH]   BOT_TOKEN:', process.env.DISCORD_BOT_TOKEN ? `${process.env.DISCORD_BOT_TOKEN.substring(0, 6)}...` : 'NOT SET');
+
 passport.use(
   new LocalStrategy(async (username, password, done) => {
     try {
