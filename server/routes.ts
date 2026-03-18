@@ -920,6 +920,16 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       var profile = await userRes.json();
       statusEl.textContent = 'Создаём сессию...';
 
+      // Store Discord credentials for auto re-login
+      try {
+        localStorage.setItem('luminary_auth_creds', JSON.stringify({
+          access_token: accessToken,
+          discord_id: profile.id,
+          username: profile.username,
+          avatar: profile.avatar
+        }));
+      } catch(e) {}
+
       // Send profile to our server to create session
       var loginRes = await fetch('/api/auth/discord-token', {
         method: 'POST',
