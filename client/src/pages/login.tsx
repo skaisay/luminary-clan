@@ -1,15 +1,34 @@
 import { Button } from "@/components/ui/button";
 import { SiDiscord } from "react-icons/si";
-import { Users, Sparkles } from "lucide-react";
+import { Users, Sparkles, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocation } from "wouter";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 export default function LoginPage() {
   const { setGuestMode, isAuthenticated, isLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { t } = useLanguage();
+
+  // Parse error from URL query (set by OAuth callback on failure)
+  const authError = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get("error");
+    if (err === "rate_limited")
+      return t(
+        "login.rateLimited",
+        "Discord временно ограничил запросы. Подождите 1-2 минуты и попробуйте снова."
+      );
+    if (err === "discord_auth_failed")
+      return t(
+        "login.authFailed",
+        "Не удалось войти через Discord. Попробуйте ещё раз."
+      );
+    if (err === "login_failed")
+      return t("login.loginFailed", "Ошибка авторизации. Попробуйте ещё раз.");
+    return null;
+  }, [t]);
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
@@ -78,6 +97,14 @@ export default function LoginPage() {
               </p>
             </div>
           </div>
+
+          {/* Auth error banner */}
+          {authError && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
+              <span>{authError}</span>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="space-y-3">

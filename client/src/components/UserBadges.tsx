@@ -18,9 +18,8 @@ type AllEquipped = Record<string, DecorationEntry[]>;
 export function useEquippedDecorations() {
   return useQuery<AllEquipped>({
     queryKey: ["/api/decorations/all-equipped"],
-    staleTime: 5_000,
-    refetchInterval: 30_000,
-    refetchOnMount: 'always' as const,
+    staleTime: 5 * 60_000,       // 5 min — SSE invalidates on change
+    refetchInterval: 5 * 60_000,  // fallback poll every 5 min
   });
 }
 

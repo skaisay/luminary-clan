@@ -848,6 +848,13 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         if (err) {
           console.error('[AUTH] Discord OAuth error:', err.message || err);
           console.error('[AUTH] Full error:', JSON.stringify(err, null, 2));
+
+          // Cloudflare/Discord rate limit (429 / error 1015) — tell user to wait
+          const statusCode = err?.oauthError?.statusCode;
+          if (statusCode === 429) {
+            console.warn('[AUTH] Rate limited by Discord (429). Advising user to retry later.');
+            return res.redirect("/login?error=rate_limited");
+          }
           return res.redirect("/login?error=discord_auth_failed&detail=" + encodeURIComponent(err.message || 'unknown'));
         }
         if (!user) {

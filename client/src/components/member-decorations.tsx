@@ -22,9 +22,8 @@ const rarityGlow: Record<string, string> = {
 export function useAllDecorations() {
   return useQuery<AllEquippedDecorations>({
     queryKey: ["/api/decorations/all-equipped"],
-    staleTime: 5000,
-    refetchInterval: 30000,
-    refetchOnMount: 'always' as const,
+    staleTime: 5 * 60_000,       // 5 min — SSE invalidates on change
+    refetchInterval: 5 * 60_000,  // fallback poll every 5 min
   });
 }
 
