@@ -6,6 +6,42 @@
   /* Old sidebar styles removed - now using TopNav with glassmorphism */
 }
 
+/* ============== PWA Window Controls Overlay ============== */
+/* When installed as PWA with WCO, the title bar becomes part of the app */
+@media (display-mode: window-controls-overlay) {
+  body {
+    /* Account for the title bar controls area */
+    padding-top: env(titlebar-area-height, 0px);
+  }
+  
+  .pwa-titlebar-drag {
+    position: fixed;
+    top: 0;
+    left: env(titlebar-area-x, 0px);
+    width: env(titlebar-area-width, 100%);
+    height: env(titlebar-area-height, 33px);
+    -webkit-app-region: drag;
+    app-region: drag;
+    z-index: 9999;
+    background: transparent;
+  }
+  
+  .pwa-titlebar-drag button,
+  .pwa-titlebar-drag a,
+  .pwa-titlebar-drag input {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+}
+
+/* PWA standalone mode detection (no WCO) */
+@media (display-mode: standalone) {
+  /* Title bar blends with background */
+  body {
+    background-color: #0a0e1a;
+  }
+}
+
 /* Отключить выделение текста на всём сайте */
 * {
   -webkit-user-select: none;

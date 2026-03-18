@@ -1,11 +1,12 @@
 {
-  "name": "LUMINARY - Панель Управления Кланом",
+  "name": "LUMINARY",
   "short_name": "LUMINARY",
-  "description": "Футуристическая панель для управления игровым кланом LUMINARY с Discord интеграцией",
+  "description": "LUMINARY Clan — Dashboard",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay"],
   "background_color": "#0a0e1a",
-  "theme_color": "#000000",
+  "theme_color": "#0a0e1a",
   "orientation": "any",
   "icons": [
     {

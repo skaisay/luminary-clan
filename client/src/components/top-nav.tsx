@@ -146,6 +146,16 @@ export function TopNav() {
   const { t } = useLanguage();
   const { isAuthenticated, isGuest, user, logout } = useAuth();
   
+  // Detect PWA standalone mode
+  const [isPWA, setIsPWA] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(display-mode: standalone)');
+    setIsPWA(mq.matches || (navigator as any).standalone === true);
+    const handler = (e: MediaQueryListEvent) => setIsPWA(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  
   // На мобильных используем более высокий threshold чтобы навигация не исчезала слишком быстро
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
   
@@ -214,6 +224,9 @@ export function TopNav() {
 
   return (
     <>
+      {/* PWA title bar drag region (only active in window-controls-overlay mode) */}
+      <div className="pwa-titlebar-drag" />
+      
       {/* Floating Top Navigation Island */}
       <nav 
         className="fixed left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-7xl transition-transform duration-300 ease-in-out"
