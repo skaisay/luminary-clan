@@ -451,8 +451,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Health endpoint for keep-alive pings and monitoring
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date().toISOString() });
+  app.get("/api/health", async (_req, res) => {
+    let botStatus = "unknown";
+    try {
+      const { botClient } = await import("./bot-commands");
+      botStatus = botClient?.isReady() ? "online" : "offline";
+    } catch {}
+    res.json({ 
+      status: "ok", 
+      uptime: process.uptime(), 
+      timestamp: new Date().toISOString(),
+      bot: botStatus,
+      botToken: process.env.DISCORD_BOT_TOKEN ? "set" : "MISSING"
+    });
   });
 
   // === AI Chat Proxy (free APIs, no key needed) ===
