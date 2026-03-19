@@ -37,34 +37,53 @@ export let botStartAttempts: number = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+let voiceCheckInterval: ReturnType<typeof setInterval> | null = null;
+let hourSyncInterval: ReturnType<typeof setInterval> | null = null;
+let isReconnecting = false; // Lock to prevent concurrent reconnects
 
 /**
  * Destroys the old client and creates a fresh bot connection.
- * Called when the bot loses connection (ban/unban, session invalidation, etc.)
+ * Has a lock so only ONE reconnect runs at a time.
  */
 async function reconnectBot(reason: string) {
+  // Prevent concurrent reconnects
+  if (isReconnecting) {
+    console.log(`[BOT-RECONNECT] Already reconnecting, skipping: ${reason}`);
+    return;
+  }
+  
   reconnectAttempts++;
   const delay = Math.min(15 * reconnectAttempts, 120); // 15s, 30s, 45s, ... max 120s
   console.log(`[BOT-RECONNECT] ${reason}. Attempt #${reconnectAttempts}, retrying in ${delay}s...`);
 
-  // Clear any pending reconnect
+  // Clear any pending reconnect timer
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 
   reconnectTimer = setTimeout(async () => {
+    if (isReconnecting) return;
+    isReconnecting = true;
+    
     try {
       // Destroy old client gracefully
       if (botClient) {
-        try { botClient.destroy(); } catch {}
+        try { botClient.removeAllListeners(); botClient.destroy(); } catch {}
         botClient = null;
       }
+      // Clear stacked intervals
+      if (voiceCheckInterval) { clearInterval(voiceCheckInterval); voiceCheckInterval = null; }
+      if (hourSyncInterval) { clearInterval(hourSyncInterval); hourSyncInterval = null; }
+      
       console.log(`[BOT-RECONNECT] Starting fresh bot connection (attempt #${reconnectAttempts})...`);
       await setupDiscordBot();
       console.log(`[BOT-RECONNECT] ✅ Bot reconnected successfully after ${reconnectAttempts} attempt(s)`);
-      reconnectAttempts = 0; // Reset on success
+      reconnectAttempts = 0;
     } catch (err: any) {
-      console.error(`[BOT-RECONNECT] ❌ Reconnect failed: ${err?.message || err}`);
-      // Will be picked up by health check or retry
+      lastBotError = `Reconnect #${reconnectAttempts} failed: ${err?.message || err}`;
+      console.error(`[BOT-RECONNECT] ❌ ${lastBotError}`);
+      // Schedule another attempt
       reconnectBot('Reconnect failed, retrying');
+    } finally {
+      isReconnecting = false;
     }
   }, delay * 1000);
 }
@@ -458,26 +477,26 @@ export async function setupDiscordBot() {
 
   // === Auto-reconnect on disconnect / invalid session ===
   client.on('shardDisconnect', (event, shardId) => {
-    console.warn(`[BOT] Shard ${shardId} disconnected (code ${event.code}). Scheduling reconnect...`);
-    reconnectBot(`Shard ${shardId} disconnected with code ${event.code}`);
+    console.warn(`[BOT] Shard ${shardId} disconnected (code ${event.code}).`);
+    if (!isReconnecting) reconnectBot(`Shard ${shardId} disconnected with code ${event.code}`);
   });
 
   client.on('invalidated', () => {
-    console.warn('[BOT] Session invalidated. Scheduling reconnect...');
-    reconnectBot('Session invalidated');
+    console.warn('[BOT] Session invalidated.');
+    if (!isReconnecting) reconnectBot('Session invalidated');
   });
 
-  // Periodic health check — every 90s, verify bot is still connected
+  // Periodic health check — every 3 min, only trigger if not already reconnecting
   if (healthCheckInterval) clearInterval(healthCheckInterval);
   healthCheckInterval = setInterval(() => {
+    if (isReconnecting) return; // Don't trigger while reconnect is in progress
     if (!botClient || !botClient.isReady()) {
       console.warn('[BOT-HEALTHCHECK] Bot is NOT ready. Triggering reconnect...');
       reconnectBot('Health check detected bot offline');
     } else {
-      // Reset attempt counter on sustained health
       if (reconnectAttempts > 0) reconnectAttempts = 0;
     }
-  }, 90 * 1000);
+  }, 3 * 60 * 1000); // 3 minutes (not 90s — give login time to complete)
 
   client.once('ready', async () => {
     console.log(`✅ Discord бот запущен: ${client.user?.tag}`);
@@ -587,7 +606,8 @@ export async function setupDiscordBot() {
     }
     
     // Автоматическая синхронизация каждый час
-    setInterval(async () => {
+    if (hourSyncInterval) clearInterval(hourSyncInterval); // Prevent stacking
+    hourSyncInterval = setInterval(async () => {
       try {
         console.log('🔄 Автоматическая синхронизация участников (каждый час)...');
         const guilds = client.guilds.cache;
@@ -1040,7 +1060,8 @@ export async function setupDiscordBot() {
 
   // Периодическое начисление наград для пользователей в голосовых каналах
   // Каждые 5 минут начисляем награды всем, кто находится в войсе
-  setInterval(async () => {
+  if (voiceCheckInterval) clearInterval(voiceCheckInterval); // Prevent stacking
+  voiceCheckInterval = setInterval(async () => {
     try {
       const now = Date.now();
       const rewards: Array<{ userId: string; minutes: number }> = [];
@@ -1078,13 +1099,22 @@ export async function setupDiscordBot() {
   try {
     botStartAttempts++;
     console.log(`[BOT] Attempting login (attempt #${botStartAttempts})...`);
-    await client.login(botToken);
+    
+    // Login with 30s timeout — if Discord gateway doesn't respond, fail fast
+    const loginPromise = client.login(botToken);
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('Login timed out after 30s — Discord gateway not responding')), 30_000)
+    );
+    await Promise.race([loginPromise, timeoutPromise]);
+    
     botClient = client; // Сохраняем глобально для мониторинга
     lastBotError = '';
-    console.log(`[BOT] Login successful, waiting for ready event...`);
+    console.log(`[BOT] ✅ Login successful, client connected to gateway. Waiting for ready event...`);
   } catch (loginErr: any) {
     lastBotError = `Login failed: ${loginErr?.message || loginErr}`;
-    console.error(`[BOT] ${lastBotError}`);
+    console.error(`[BOT] ❌ ${lastBotError}`);
+    // Cleanup: destroy the client that failed to connect
+    try { client.removeAllListeners(); client.destroy(); } catch {}
     throw loginErr;
   }
   return client;
