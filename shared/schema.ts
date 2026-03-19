@@ -37,6 +37,7 @@ export const clanSettings = pgTable("clan_settings", {
 
 export const clanMembers = pgTable("clan_members", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  guildId: text("guild_id"), // null = primary/original server
   discordId: text("discord_id").unique(),
   username: text("username").notNull(),
   avatar: text("avatar"),
@@ -778,6 +779,32 @@ export type ProfileDecoration = typeof profileDecorations.$inferSelect;
 export type InsertProfileDecoration = z.infer<typeof insertProfileDecorationSchema>;
 export type MemberDecoration = typeof memberDecorations.$inferSelect;
 export type InsertMemberDecoration = z.infer<typeof insertMemberDecorationSchema>;
+
+// ==================== CONNECTED SERVERS (Multi-tenant) ====================
+export const connectedServers = pgTable("connected_servers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  guildId: text("guild_id").notNull().unique(),
+  guildName: text("guild_name").notNull(),
+  guildIcon: text("guild_icon"),
+  botToken: text("bot_token").notNull(),
+  ownerDiscordId: text("owner_discord_id").notNull(),
+  ownerUsername: text("owner_username").notNull(),
+  memberCount: integer("member_count").default(0),
+  isActive: boolean("is_active").default(true).notNull(),
+  isPrimary: boolean("is_primary").default(false).notNull(), // true = site owner's server
+  settings: jsonb("settings").default({}),
+  connectedAt: timestamp("connected_at").defaultNow().notNull(),
+  lastSyncAt: timestamp("last_sync_at"),
+});
+
+export const insertConnectedServerSchema = createInsertSchema(connectedServers).omit({
+  id: true,
+  connectedAt: true,
+  lastSyncAt: true,
+});
+
+export type ConnectedServer = typeof connectedServers.$inferSelect;
+export type InsertConnectedServer = z.infer<typeof insertConnectedServerSchema>;
 
 // ==================== PROFILE CUSTOMIZATION (DB) ====================
 export const profileCustoms = pgTable("profile_customs", {

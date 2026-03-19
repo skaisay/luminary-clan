@@ -3002,6 +3002,309 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     }
   });
 
+  // ==================== CONNECTED SERVERS (Multi-tenant Platform) ====================
+
+  // List all connected servers
+  app.get("/api/admin/servers", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { connectedServers } = await import("@shared/schema");
+      const servers = await db.select({
+        id: connectedServers.id,
+        guildId: connectedServers.guildId,
+        guildName: connectedServers.guildName,
+        guildIcon: connectedServers.guildIcon,
+        ownerDiscordId: connectedServers.ownerDiscordId,
+        ownerUsername: connectedServers.ownerUsername,
+        memberCount: connectedServers.memberCount,
+        isActive: connectedServers.isActive,
+        isPrimary: connectedServers.isPrimary,
+        connectedAt: connectedServers.connectedAt,
+        lastSyncAt: connectedServers.lastSyncAt,
+      }).from(connectedServers);
+      res.json(servers);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Connect a new server (validate token, fetch guild info, save)
+  app.post("/api/admin/servers/connect", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { connectedServers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const { botToken, isPrimary } = req.body;
+
+      if (!botToken || typeof botToken !== 'string' || botToken.length < 20) {
+        return res.status(400).json({ error: "Невалидный токен бота" });
+      }
+
+      // Validate token by fetching bot user info from Discord API
+      const botRes = await fetch("https://discord.com/api/v10/users/@me", {
+        headers: { Authorization: `Bot ${botToken}` },
+      });
+      if (!botRes.ok) {
+        const err = await botRes.json().catch(() => ({}));
+        return res.status(400).json({ error: `Токен не работает: ${err.message || botRes.status}` });
+      }
+      const botUser = await botRes.json();
+
+      // Fetch guilds the bot is in
+      const guildsRes = await fetch("https://discord.com/api/v10/users/@me/guilds", {
+        headers: { Authorization: `Bot ${botToken}` },
+      });
+      if (!guildsRes.ok) {
+        return res.status(400).json({ error: "Не удалось получить серверы бота" });
+      }
+      const guilds = await guildsRes.json();
+      if (!guilds || guilds.length === 0) {
+        return res.status(400).json({ error: "Бот не добавлен ни на один сервер" });
+      }
+
+      // Use first guild (primary server for this bot)
+      const guild = guilds[0];
+      const guildIcon = guild.icon 
+        ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128`
+        : null;
+
+      // Check if this guild is already connected
+      const existing = await db.select().from(connectedServers)
+        .where(eq(connectedServers.guildId, guild.id)).limit(1);
+      
+      if (existing[0]) {
+        // Update existing
+        await db.update(connectedServers)
+          .set({
+            botToken,
+            guildName: guild.name,
+            guildIcon,
+            ownerUsername: botUser.username,
+            isActive: true,
+          })
+          .where(eq(connectedServers.guildId, guild.id));
+        return res.json({ 
+          message: `Сервер "${guild.name}" обновлён`, 
+          server: { ...existing[0], guildName: guild.name, guildIcon, isActive: true }
+        });
+      }
+
+      // Get admin discordId from session
+      const ownerDiscordId = (req as any).session?.passport?.user?.discordId || 'admin';
+      const ownerUsername = (req as any).session?.passport?.user?.username || botUser.username;
+
+      // Insert new server
+      const [newServer] = await db.insert(connectedServers).values({
+        guildId: guild.id,
+        guildName: guild.name,
+        guildIcon,
+        botToken,
+        ownerDiscordId,
+        ownerUsername,
+        memberCount: guild.approximate_member_count || 0,
+        isActive: true,
+        isPrimary: isPrimary || false,
+      }).returning();
+
+      // Fetch and sync members for this guild
+      try {
+        const membersRes = await fetch(`https://discord.com/api/v10/guilds/${guild.id}/members?limit=1000`, {
+          headers: { Authorization: `Bot ${botToken}` },
+        });
+        if (membersRes.ok) {
+          const discordMembers = await membersRes.json();
+          const { clanMembers } = await import("@shared/schema");
+          let synced = 0;
+          for (const m of discordMembers) {
+            if (m.user.bot) continue;
+            const existingMember = await db.select().from(clanMembers)
+              .where(eq(clanMembers.discordId, m.user.id)).limit(1);
+            if (!existingMember[0]) {
+              await db.insert(clanMembers).values({
+                guildId: guild.id,
+                discordId: m.user.id,
+                username: m.user.username,
+                avatar: m.user.avatar 
+                  ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
+                  : null,
+                role: 'Member',
+              });
+              synced++;
+            }
+          }
+          // Update member count
+          await db.update(connectedServers)
+            .set({ memberCount: discordMembers.filter((m: any) => !m.user.bot).length, lastSyncAt: new Date() })
+            .where(eq(connectedServers.guildId, guild.id));
+          console.log(`[SERVERS] Synced ${synced} new members for ${guild.name}`);
+        }
+      } catch (syncErr) {
+        console.error('[SERVERS] Member sync error:', syncErr);
+      }
+
+      res.json({ 
+        message: `🎉 Сервер "${guild.name}" успешно подключён!`, 
+        server: newServer 
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Disconnect / deactivate a server
+  app.post("/api/admin/servers/:serverId/disconnect", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { connectedServers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.update(connectedServers)
+        .set({ isActive: false })
+        .where(eq(connectedServers.id, req.params.serverId));
+      res.json({ message: "Сервер отключён" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Reactivate a server
+  app.post("/api/admin/servers/:serverId/activate", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { connectedServers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.update(connectedServers)
+        .set({ isActive: true })
+        .where(eq(connectedServers.id, req.params.serverId));
+      res.json({ message: "Сервер активирован" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete a server permanently
+  app.delete("/api/admin/servers/:serverId", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { connectedServers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.delete(connectedServers).where(eq(connectedServers.id, req.params.serverId));
+      res.json({ message: "Сервер удалён" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Sync members for a specific server
+  app.post("/api/admin/servers/:serverId/sync", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { connectedServers, clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const [server] = await db.select().from(connectedServers)
+        .where(eq(connectedServers.id, req.params.serverId)).limit(1);
+      if (!server) return res.status(404).json({ error: "Сервер не найден" });
+
+      const membersRes = await fetch(`https://discord.com/api/v10/guilds/${server.guildId}/members?limit=1000`, {
+        headers: { Authorization: `Bot ${server.botToken}` },
+      });
+      if (!membersRes.ok) {
+        return res.status(400).json({ error: `Discord API error: ${membersRes.status}` });
+      }
+
+      const discordMembers = await membersRes.json();
+      let synced = 0, updated = 0;
+      for (const m of discordMembers) {
+        if (m.user.bot) continue;
+        const existing = await db.select().from(clanMembers)
+          .where(eq(clanMembers.discordId, m.user.id)).limit(1);
+        const avatarUrl = m.user.avatar 
+          ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
+          : null;
+        if (!existing[0]) {
+          await db.insert(clanMembers).values({
+            guildId: server.guildId,
+            discordId: m.user.id,
+            username: m.user.username,
+            avatar: avatarUrl,
+            role: 'Member',
+          });
+          synced++;
+        } else if (existing[0].username !== m.user.username || existing[0].avatar !== avatarUrl) {
+          await db.update(clanMembers)
+            .set({ username: m.user.username, avatar: avatarUrl, guildId: server.guildId })
+            .where(eq(clanMembers.id, existing[0].id));
+          updated++;
+        }
+      }
+
+      await db.update(connectedServers)
+        .set({ memberCount: discordMembers.filter((m: any) => !m.user.bot).length, lastSyncAt: new Date() })
+        .where(eq(connectedServers.id, req.params.serverId));
+
+      res.json({ message: `Синхронизировано: +${synced} новых, ${updated} обновлено` });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get members filtered by guild
+  app.get("/api/servers/:guildId/members", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { clanMembers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const members = await db.select().from(clanMembers)
+        .where(eq(clanMembers.guildId, req.params.guildId));
+      res.json(members);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get server info (public, for server pages)
+  app.get("/api/servers/:guildId/info", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { connectedServers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const [server] = await db.select({
+        guildId: connectedServers.guildId,
+        guildName: connectedServers.guildName,
+        guildIcon: connectedServers.guildIcon,
+        memberCount: connectedServers.memberCount,
+        isActive: connectedServers.isActive,
+        connectedAt: connectedServers.connectedAt,
+      }).from(connectedServers)
+        .where(eq(connectedServers.guildId, req.params.guildId)).limit(1);
+      if (!server) return res.status(404).json({ error: "Сервер не найден" });
+      res.json(server);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // List all active connected servers (public)
+  app.get("/api/servers", async (_req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { connectedServers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const servers = await db.select({
+        guildId: connectedServers.guildId,
+        guildName: connectedServers.guildName,
+        guildIcon: connectedServers.guildIcon,
+        memberCount: connectedServers.memberCount,
+        isPrimary: connectedServers.isPrimary,
+        connectedAt: connectedServers.connectedAt,
+      }).from(connectedServers)
+        .where(eq(connectedServers.isActive, true));
+      res.json(servers);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ==================== ROBUX CONVERSION ENDPOINTS ====================
 
   // Получение настроек конвертации

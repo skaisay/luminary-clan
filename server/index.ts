@@ -147,6 +147,22 @@ app.use((req, res, next) => {
         image_base64 TEXT NOT NULL,
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE clan_members ADD COLUMN IF NOT EXISTS guild_id TEXT;
+      CREATE TABLE IF NOT EXISTS connected_servers (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL UNIQUE,
+        guild_name TEXT NOT NULL,
+        guild_icon TEXT,
+        bot_token TEXT NOT NULL,
+        owner_discord_id TEXT NOT NULL,
+        owner_username TEXT NOT NULL,
+        member_count INTEGER DEFAULT 0,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        is_primary BOOLEAN NOT NULL DEFAULT false,
+        settings JSONB DEFAULT '{}',
+        connected_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        last_sync_at TIMESTAMP
+      );
       CREATE TABLE IF NOT EXISTS ad_spots (
         id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
         discord_id TEXT NOT NULL,
