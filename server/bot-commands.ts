@@ -29,6 +29,42 @@ let earningSettingsCacheTime = 0;
 // Глобальный Discord Bot Client
 export let botClient: Client | null = null;
 
+// Reconnection state
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
+let healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Destroys the old client and creates a fresh bot connection.
+ * Called when the bot loses connection (ban/unban, session invalidation, etc.)
+ */
+async function reconnectBot(reason: string) {
+  reconnectAttempts++;
+  const delay = Math.min(15 * reconnectAttempts, 120); // 15s, 30s, 45s, ... max 120s
+  console.log(`[BOT-RECONNECT] ${reason}. Attempt #${reconnectAttempts}, retrying in ${delay}s...`);
+
+  // Clear any pending reconnect
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+  reconnectTimer = setTimeout(async () => {
+    try {
+      // Destroy old client gracefully
+      if (botClient) {
+        try { botClient.destroy(); } catch {}
+        botClient = null;
+      }
+      console.log(`[BOT-RECONNECT] Starting fresh bot connection (attempt #${reconnectAttempts})...`);
+      await setupDiscordBot();
+      console.log(`[BOT-RECONNECT] ✅ Bot reconnected successfully after ${reconnectAttempts} attempt(s)`);
+      reconnectAttempts = 0; // Reset on success
+    } catch (err: any) {
+      console.error(`[BOT-RECONNECT] ❌ Reconnect failed: ${err?.message || err}`);
+      // Will be picked up by health check or retry
+      reconnectBot('Reconnect failed, retrying');
+    }
+  }, delay * 1000);
+}
+
 async function getEarningSettings() {
   const now = Date.now();
   if (earningSettingsCache && (now - earningSettingsCacheTime) < 30000) {
@@ -415,6 +451,29 @@ export async function setupDiscordBot() {
   client.on('shardError', (error) => {
     console.error('[Discord Shard Error]', error.message);
   });
+
+  // === Auto-reconnect on disconnect / invalid session ===
+  client.on('shardDisconnect', (event, shardId) => {
+    console.warn(`[BOT] Shard ${shardId} disconnected (code ${event.code}). Scheduling reconnect...`);
+    reconnectBot(`Shard ${shardId} disconnected with code ${event.code}`);
+  });
+
+  client.on('invalidated', () => {
+    console.warn('[BOT] Session invalidated. Scheduling reconnect...');
+    reconnectBot('Session invalidated');
+  });
+
+  // Periodic health check — every 90s, verify bot is still connected
+  if (healthCheckInterval) clearInterval(healthCheckInterval);
+  healthCheckInterval = setInterval(() => {
+    if (!botClient || !botClient.isReady()) {
+      console.warn('[BOT-HEALTHCHECK] Bot is NOT ready. Triggering reconnect...');
+      reconnectBot('Health check detected bot offline');
+    } else {
+      // Reset attempt counter on sustained health
+      if (reconnectAttempts > 0) reconnectAttempts = 0;
+    }
+  }, 90 * 1000);
 
   client.once('ready', async () => {
     console.log(`✅ Discord бот запущен: ${client.user?.tag}`);
