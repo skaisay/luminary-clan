@@ -29,6 +29,10 @@ let earningSettingsCacheTime = 0;
 // Глобальный Discord Bot Client
 export let botClient: Client | null = null;
 
+// Diagnostic: last bot error for troubleshooting
+export let lastBotError: string = '';
+export let botStartAttempts: number = 0;
+
 // Reconnection state
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
@@ -1071,8 +1075,18 @@ export async function setupDiscordBot() {
     }
   }, 5 * 60 * 1000); // Каждые 5 минут
 
-  await client.login(botToken);
-  botClient = client; // Сохраняем глобально для мониторинга
+  try {
+    botStartAttempts++;
+    console.log(`[BOT] Attempting login (attempt #${botStartAttempts})...`);
+    await client.login(botToken);
+    botClient = client; // Сохраняем глобально для мониторинга
+    lastBotError = '';
+    console.log(`[BOT] Login successful, waiting for ready event...`);
+  } catch (loginErr: any) {
+    lastBotError = `Login failed: ${loginErr?.message || loginErr}`;
+    console.error(`[BOT] ${lastBotError}`);
+    throw loginErr;
+  }
   return client;
 }
 

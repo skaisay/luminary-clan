@@ -453,16 +453,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Health endpoint for keep-alive pings and monitoring
   app.get("/api/health", async (_req, res) => {
     let botStatus = "unknown";
+    let botError = '';
+    let botAttempts = 0;
     try {
-      const { botClient } = await import("./bot-commands");
+      const { botClient, lastBotError, botStartAttempts } = await import("./bot-commands");
       botStatus = botClient?.isReady() ? "online" : "offline";
+      botError = lastBotError || '';
+      botAttempts = botStartAttempts || 0;
     } catch {}
     res.json({ 
       status: "ok", 
       uptime: process.uptime(), 
       timestamp: new Date().toISOString(),
       bot: botStatus,
-      botToken: process.env.DISCORD_BOT_TOKEN ? "set" : "MISSING"
+      botToken: process.env.DISCORD_BOT_TOKEN ? "set" : "MISSING",
+      botError: botError || null,
+      botAttempts
     });
   });
 

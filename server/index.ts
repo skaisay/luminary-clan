@@ -220,6 +220,11 @@ app.use((req, res, next) => {
       console.log('[BOT] Discord бот успешно запущен');
     } catch (err: any) {
       const msg = err?.message || String(err);
+      // Update diagnostic
+      try {
+        const botMod = await import("./bot-commands");
+        (botMod as any).lastBotError = `startBot attempt ${attempt}: ${msg}`;
+      } catch {}
       const isRateLimit = msg.includes('429') || msg.includes('rate') || msg.includes('1015');
       const nextDelay = isRateLimit ? 60 : Math.min(30 * attempt, 120); // 60s if rate-limited, else 30s * attempt (max 2min)
       console.error(`[BOT] Ошибка запуска бота (попытка ${attempt}): ${msg}`);
