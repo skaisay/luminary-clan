@@ -461,12 +461,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       botError = lastBotError || '';
       botAttempts = botStartAttempts || 0;
     } catch {}
+    
+    // Check token source
+    let tokenSource = "none";
+    if (process.env.DISCORD_BOT_TOKEN) {
+      tokenSource = "env";
+    } else {
+      try {
+        const settings = await storage.getClanSettings();
+        if (settings?.discordBotToken) tokenSource = "db-settings";
+      } catch {}
+    }
+    
     res.json({ 
       status: "ok", 
       uptime: process.uptime(), 
       timestamp: new Date().toISOString(),
       bot: botStatus,
-      botToken: process.env.DISCORD_BOT_TOKEN ? "set" : "MISSING",
+      botToken: tokenSource,
       botError: botError || null,
       botAttempts
     });
@@ -1315,7 +1327,31 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
 
   app.put("/api/admin/settings", requireAdmin, async (req, res) => {
     try {
+      const oldSettings = await storage.getClanSettings();
       const settings = await storage.updateClanSettings(req.body);
+      
+      // If bot token changed, restart the bot with the new token
+      if (req.body.discordBotToken && req.body.discordBotToken !== oldSettings?.discordBotToken) {
+        console.log('[ADMIN] Discord bot token updated — restarting bot...');
+        try {
+          const { botClient, reconnectBot } = await import("./bot-commands");
+          // Destroy old client
+          if (botClient) {
+            try { botClient.removeAllListeners(); botClient.destroy(); } catch {}
+          }
+          // Use dynamic import to call reconnectBot (which is not exported yet, so we call setupDiscordBot via index startBot approach)
+          const { setupDiscordBot } = await import("./bot-commands");
+          // Fire and forget — don't block the response
+          setupDiscordBot().then(() => {
+            console.log('[ADMIN] ✅ Bot restarted with new token');
+          }).catch((err: any) => {
+            console.error('[ADMIN] ❌ Bot restart failed:', err?.message || err);
+          });
+        } catch (e: any) {
+          console.error('[ADMIN] Bot restart error:', e?.message);
+        }
+      }
+      
       res.json(settings);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

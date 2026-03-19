@@ -240,15 +240,19 @@ export default function AdminSettingsTab() {
                 name="discordBotToken"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Discord Bot Token (опционально)</FormLabel>
+                    <FormLabel>Discord Bot Token</FormLabel>
                     <FormControl>
                       <Input
                         {...field}
                         type="password"
-                        placeholder="Token..."
+                        placeholder="MTxxxxxxxx.xxxxxx.xxxxxxxxxxxx"
                         data-testid="input-discord-token"
                       />
                     </FormControl>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      🔑 Токен бота из <a href="https://discord.com/developers/applications" target="_blank" rel="noopener" className="text-primary underline">Developer Portal</a> → Bot → Reset Token.
+                      При сохранении бот автоматически перезапустится с новым токеном.
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

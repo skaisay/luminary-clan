@@ -122,11 +122,25 @@ async function getEarningSettings() {
 }
 
 export async function setupDiscordBot() {
-  const botToken = process.env.DISCORD_BOT_TOKEN;
+  // 1) Try env variable first
+  let botToken = process.env.DISCORD_BOT_TOKEN;
+  
+  // 2) Fallback: try token from admin settings (DB)
+  if (!botToken) {
+    try {
+      const settings = await storage.getClanSettings();
+      if (settings?.discordBotToken) {
+        botToken = settings.discordBotToken;
+        console.log('[BOT] Using bot token from admin settings (DB)');
+      }
+    } catch (e) {
+      console.error('[BOT] Failed to read token from DB:', e);
+    }
+  }
   
   if (!botToken) {
-    console.log('⚠️ DISCORD_BOT_TOKEN не найден, бот не будет запущен');
-    console.log('💡 Пожалуйста, установите переменную окружения DISCORD_BOT_TOKEN');
+    console.log('⚠️ DISCORD_BOT_TOKEN не найден ни в env, ни в настройках. Бот не будет запущен.');
+    console.log('💡 Вставьте токен в Admin Panel → Настройки → Discord Bot Token');
     return null;
   }
 
