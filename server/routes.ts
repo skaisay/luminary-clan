@@ -18,7 +18,12 @@ import {
   getVoiceChannels,
   getDiscordRoles,
   createBeautifulTestRoles,
-  changeDiscordNickname
+  changeDiscordNickname,
+  createDiscordChannel,
+  deleteDiscordChannel,
+  getDiscordChannelsDetailed,
+  scanChannelMessages,
+  deleteDiscordMessages,
 } from "./discord";
 import { requireAdmin, requireDiscordAuth } from "./auth";
 import { 
@@ -43,6 +48,8 @@ import {
   memberDecorations,
   profileCustoms,
   adSpots,
+  discordChannelRules,
+  flaggedMessages,
 } from "@shared/schema";
 import { videoUpload } from "./upload";
 import {
@@ -156,6 +163,8 @@ async function generateVideoThumbnail(videoPath: string, outputPath: string, fil
 export async function registerRoutes(app: Express): Promise<Server> {
   // Serve uploaded files (banners, etc.)
   const express = await import('express');
+  const { db } = await import('./db');
+  const { eq } = await import('drizzle-orm');
   app.use('/uploads', express.default.static(path.join(process.cwd(), 'uploads')));
 
   // In-memory cache for OG screenshots (avoids DB hit on every Discord bot request)
@@ -1565,6 +1574,245 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     try {
       const result = await createBeautifulTestRoles();
       res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== CHANNEL MANAGEMENT ====================
+
+  // Get detailed channel list (includes categories)
+  app.get("/api/admin/discord/channels-detailed", requireAdmin, async (req, res) => {
+    try {
+      const data = await getDiscordChannelsDetailed();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create a new Discord channel
+  app.post("/api/admin/discord/create-channel", requireAdmin, async (req, res) => {
+    try {
+      const { name, type, category, topic } = req.body;
+      if (!name || !type) {
+        return res.status(400).json({ error: "name и type обязательны" });
+      }
+      if (!['text', 'voice'].includes(type)) {
+        return res.status(400).json({ error: "type должен быть 'text' или 'voice'" });
+      }
+      const result = await createDiscordChannel({ name, type, category, topic });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete a Discord channel
+  app.post("/api/admin/discord/delete-channel", requireAdmin, async (req, res) => {
+    try {
+      const { channelId } = req.body;
+      if (!channelId) return res.status(400).json({ error: "channelId обязателен" });
+
+      // Also remove any rules for this channel
+      await db.delete(discordChannelRules).where(eq(discordChannelRules.channelId, channelId));
+      await db.delete(flaggedMessages).where(eq(flaggedMessages.channelId, channelId));
+
+      const result = await deleteDiscordChannel(channelId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== CHANNEL MODERATION RULES ====================
+
+  // Get all channel rules
+  app.get("/api/admin/discord/channel-rules", requireAdmin, async (req, res) => {
+    try {
+      const rules = await db.select().from(discordChannelRules).orderBy(discordChannelRules.channelName);
+      res.json(rules);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create or update channel rule
+  app.post("/api/admin/discord/channel-rules", requireAdmin, async (req, res) => {
+    try {
+      const { channelId, channelName, channelType, languageRestriction, blockProfanity, blockDiscrimination, autoDelete } = req.body;
+      if (!channelId || !channelName) {
+        return res.status(400).json({ error: "channelId и channelName обязательны" });
+      }
+
+      // Upsert: check if rule exists for this channel
+      const existing = await db.select().from(discordChannelRules)
+        .where(eq(discordChannelRules.channelId, channelId)).limit(1);
+
+      if (existing.length > 0) {
+        await db.update(discordChannelRules)
+          .set({
+            channelName,
+            channelType: channelType || 'text',
+            languageRestriction: languageRestriction || null,
+            blockProfanity: blockProfanity ?? false,
+            blockDiscrimination: blockDiscrimination ?? false,
+            autoDelete: autoDelete ?? false,
+            isActive: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(discordChannelRules.channelId, channelId));
+        res.json({ ...existing[0], updated: true });
+      } else {
+        const [rule] = await db.insert(discordChannelRules).values({
+          channelId,
+          channelName,
+          channelType: channelType || 'text',
+          languageRestriction: languageRestriction || null,
+          blockProfanity: blockProfanity ?? false,
+          blockDiscrimination: blockDiscrimination ?? false,
+          autoDelete: autoDelete ?? false,
+        }).returning();
+        res.json(rule);
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete channel rule
+  app.delete("/api/admin/discord/channel-rules/:id", requireAdmin, async (req, res) => {
+    try {
+      await db.delete(discordChannelRules).where(eq(discordChannelRules.id, req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== MESSAGE MODERATION / SCANNING ====================
+
+  // Scan channels for violations (button click from admin panel)
+  app.post("/api/admin/discord/scan-channels", requireAdmin, async (req, res) => {
+    try {
+      const rules = await db.select().from(discordChannelRules)
+        .where(eq(discordChannelRules.isActive, true));
+
+      if (rules.length === 0) {
+        return res.json({ totalViolations: 0, message: "Нет правил модерации для каналов" });
+      }
+
+      let allViolations: any[] = [];
+
+      for (const rule of rules) {
+        try {
+          const violations = await scanChannelMessages(rule.channelId, {
+            languageRestriction: rule.languageRestriction,
+            blockProfanity: rule.blockProfanity,
+            blockDiscrimination: rule.blockDiscrimination,
+          }, 100);
+
+          allViolations.push(...violations);
+
+          // Rate limit: 1.5s delay between scanning different channels
+          await new Promise(r => setTimeout(r, 1500));
+        } catch (err: any) {
+          console.log(`[SCAN] Skipping channel ${rule.channelName}: ${err.message}`);
+        }
+      }
+
+      // Save flagged messages to DB (avoid duplicates by messageId)
+      let saved = 0;
+      for (const v of allViolations) {
+        const existing = await db.select({ id: flaggedMessages.id }).from(flaggedMessages)
+          .where(eq(flaggedMessages.messageId, v.messageId)).limit(1);
+        if (existing.length === 0) {
+          await db.insert(flaggedMessages).values({
+            messageId: v.messageId,
+            channelId: v.channelId,
+            channelName: v.channelName,
+            authorId: v.authorId,
+            authorUsername: v.authorUsername,
+            content: v.content,
+            reason: v.reason,
+            reasonDetail: v.reasonDetail,
+            status: 'pending',
+            messageTimestamp: v.messageTimestamp,
+          });
+          saved++;
+        }
+      }
+
+      res.json({
+        totalViolations: allViolations.length,
+        newFlagged: saved,
+        channelsScanned: rules.length,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get flagged messages
+  app.get("/api/admin/discord/flagged-messages", requireAdmin, async (req, res) => {
+    try {
+      const { desc: descOrder } = await import("drizzle-orm");
+      const messages = await db.select().from(flaggedMessages)
+        .where(eq(flaggedMessages.status, 'pending'))
+        .orderBy(descOrder(flaggedMessages.createdAt))
+        .limit(200);
+      res.json(messages);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete flagged messages from Discord and mark as deleted
+  app.post("/api/admin/discord/delete-flagged", requireAdmin, async (req, res) => {
+    try {
+      const { messageIds } = req.body; // array of flaggedMessage DB ids
+      if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
+        return res.status(400).json({ error: "messageIds обязателен (массив)" });
+      }
+
+      // Get flagged records
+      const { inArray } = await import("drizzle-orm");
+      const flagged = await db.select().from(flaggedMessages)
+        .where(inArray(flaggedMessages.id, messageIds));
+
+      if (flagged.length === 0) {
+        return res.json({ deleted: 0, failed: 0, errors: [] });
+      }
+
+      // Delete from Discord
+      const toDelete = flagged.map(f => ({ channelId: f.channelId, messageId: f.messageId }));
+      const result = await deleteDiscordMessages(toDelete);
+
+      // Mark as deleted in DB
+      await db.update(flaggedMessages)
+        .set({ status: 'deleted' })
+        .where(inArray(flaggedMessages.id, messageIds));
+
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Approve (dismiss) flagged messages - mark as approved
+  app.post("/api/admin/discord/approve-flagged", requireAdmin, async (req, res) => {
+    try {
+      const { messageIds } = req.body;
+      if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
+        return res.status(400).json({ error: "messageIds обязателен (массив)" });
+      }
+
+      const { inArray } = await import("drizzle-orm");
+      await db.update(flaggedMessages)
+        .set({ status: 'approved' })
+        .where(inArray(flaggedMessages.id, messageIds));
+
+      res.json({ approved: messageIds.length });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

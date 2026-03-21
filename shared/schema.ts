@@ -840,3 +840,50 @@ export const adSpots = pgTable("ad_spots", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ==================== DISCORD CHANNEL MODERATION ====================
+// Rules set per-channel from admin panel (e.g. "English only", "no profanity")
+export const discordChannelRules = pgTable("discord_channel_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  channelId: text("channel_id").notNull(), // Discord channel ID
+  channelName: text("channel_name").notNull(),
+  channelType: text("channel_type").notNull().default("text"), // text | voice
+  languageRestriction: text("language_restriction"), // "en" | "ru" | null (any)
+  blockProfanity: boolean("block_profanity").default(false).notNull(),
+  blockDiscrimination: boolean("block_discrimination").default(false).notNull(),
+  autoDelete: boolean("auto_delete").default(false).notNull(), // auto-delete violations
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Messages flagged by scanning for admin review
+export const flaggedMessages = pgTable("flagged_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  messageId: text("message_id").notNull(), // Discord message ID
+  channelId: text("channel_id").notNull(),
+  channelName: text("channel_name").notNull(),
+  authorId: text("author_id").notNull(),
+  authorUsername: text("author_username").notNull(),
+  content: text("content").notNull(),
+  reason: text("reason").notNull(), // "wrong_language" | "profanity" | "discrimination"
+  reasonDetail: text("reason_detail"), // Human-readable explanation
+  status: text("status").notNull().default("pending"), // "pending" | "deleted" | "approved"
+  messageTimestamp: timestamp("message_timestamp"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertDiscordChannelRuleSchema = createInsertSchema(discordChannelRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertFlaggedMessageSchema = createInsertSchema(flaggedMessages).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type DiscordChannelRule = typeof discordChannelRules.$inferSelect;
+export type InsertDiscordChannelRule = z.infer<typeof insertDiscordChannelRuleSchema>;
+export type FlaggedMessage = typeof flaggedMessages.$inferSelect;
+export type InsertFlaggedMessage = z.infer<typeof insertFlaggedMessageSchema>;
+

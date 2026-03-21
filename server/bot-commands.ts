@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, PermissionFlagsBits, GuildMember, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes } from 'discord.js';
 import { storage } from './storage';
 import { db } from './db';
-import { discordActivity, clanMembers, transactions, shopItems } from '@shared/schema';
+import { discordActivity, clanMembers, transactions, shopItems, discordChannelRules } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 
 // Try to import music system - optional if modules not installed
@@ -25,6 +25,35 @@ const userMessageHistory = new Map<string, UserMessageTimestamp>();
 // Кэш настроек начисления очков (обновляется каждые 30 секунд)
 let earningSettingsCache: any = null;
 let earningSettingsCacheTime = 0;
+
+// Кэш правил модерации каналов (обновляется каждые 60 секунд)
+let channelRulesCache: Map<string, any> | null = null;
+let channelRulesCacheTime = 0;
+
+/**
+ * Get moderation rules for a specific channel (cached 60s).
+ * Returns null if no rules set for that channel.
+ */
+async function getChannelModerationRules(channelId: string) {
+  const now = Date.now();
+  if (!channelRulesCache || (now - channelRulesCacheTime) > 60000) {
+    try {
+      const rules = await db.select().from(discordChannelRules)
+        .where(eq(discordChannelRules.isActive, true));
+      channelRulesCache = new Map();
+      for (const rule of rules) {
+        channelRulesCache.set(rule.channelId, rule);
+      }
+      channelRulesCacheTime = now;
+    } catch (err) {
+      // Table might not exist yet
+      channelRulesCache = new Map();
+      channelRulesCacheTime = now;
+      return null;
+    }
+  }
+  return channelRulesCache.get(channelId) || null;
+}
 
 // Глобальный Discord Bot Client
 export let botClient: Client | null = null;
@@ -708,7 +737,7 @@ export async function setupDiscordBot() {
     }
   });
 
-  // Отслеживание сообщений
+  // Отслеживание сообщений + модерация по правилам каналов
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
@@ -716,6 +745,56 @@ export async function setupDiscordBot() {
       await trackMessageActivity(message.author.id);
     } catch (error) {
       console.error('Ошибка отслеживания сообщения:', error);
+    }
+
+    // Channel moderation: check rules for this channel
+    try {
+      if (message.content && message.content.length >= 2 && message.channelId) {
+        const rules = await getChannelModerationRules(message.channelId);
+        if (rules) {
+          const { checkMessageViolations } = await import('./discord');
+          const violation = checkMessageViolations(message.content, {
+            languageRestriction: rules.languageRestriction,
+            blockProfanity: rules.blockProfanity,
+            blockDiscrimination: rules.blockDiscrimination,
+          });
+          if (violation) {
+            if (rules.autoDelete) {
+              // Auto-delete with rate-limit safety
+              try {
+                await message.delete();
+                console.log(`[MOD] Auto-deleted message by ${message.author.username} in #${message.channel && 'name' in message.channel ? message.channel.name : message.channelId}: ${violation.reason}`);
+              } catch (delErr: any) {
+                console.error(`[MOD] Failed to delete message: ${delErr.message}`);
+              }
+            }
+            // Also save to flagged_messages DB for admin review
+            try {
+              const { discordChannelRules: _dcrIgnore, flaggedMessages } = await import('@shared/schema');
+              await db.insert(flaggedMessages).values({
+                messageId: message.id,
+                channelId: message.channelId,
+                channelName: message.channel && 'name' in message.channel ? (message.channel as any).name : 'unknown',
+                authorId: message.author.id,
+                authorUsername: message.author.username,
+                content: message.content.substring(0, 500),
+                reason: violation.reason,
+                reasonDetail: violation.reasonDetail,
+                status: rules.autoDelete ? 'deleted' : 'pending',
+                messageTimestamp: message.createdAt,
+              });
+            } catch (dbErr: any) {
+              // Don't break on DB error
+              console.error('[MOD] Failed to save flagged message:', dbErr.message);
+            }
+          }
+        }
+      }
+    } catch (modErr: any) {
+      // Non-critical: don't crash bot on moderation errors
+      if (!modErr.message?.includes('no such table')) {
+        console.error('[MOD] Moderation check error:', modErr.message);
+      }
     }
   });
 

@@ -184,6 +184,33 @@ app.use((req, res, next) => {
         updated_by TEXT,
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS discord_channel_rules (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        channel_id TEXT NOT NULL,
+        channel_name TEXT NOT NULL,
+        channel_type TEXT NOT NULL DEFAULT 'text',
+        language_restriction TEXT,
+        block_profanity BOOLEAN NOT NULL DEFAULT false,
+        block_discrimination BOOLEAN NOT NULL DEFAULT false,
+        auto_delete BOOLEAN NOT NULL DEFAULT false,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS flagged_messages (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        message_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        channel_name TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        author_username TEXT NOT NULL,
+        content TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        reason_detail TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        message_timestamp TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
     `);
     console.log('[DB] Ensured all custom tables exist');
 
