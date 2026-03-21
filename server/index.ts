@@ -193,6 +193,7 @@ app.use((req, res, next) => {
         block_profanity BOOLEAN NOT NULL DEFAULT false,
         block_discrimination BOOLEAN NOT NULL DEFAULT false,
         auto_delete BOOLEAN NOT NULL DEFAULT false,
+        commands_only BOOLEAN NOT NULL DEFAULT false,
         is_active BOOLEAN NOT NULL DEFAULT true,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -211,6 +212,18 @@ app.use((req, res, next) => {
         message_timestamp TIMESTAMP,
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+
+      -- Add commands_only column if it doesn't exist (for existing databases)
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'discord_channel_rules' AND column_name = 'commands_only'
+        ) THEN
+          ALTER TABLE discord_channel_rules ADD COLUMN commands_only BOOLEAN NOT NULL DEFAULT false;
+        END IF;
+      END
+      $$;
     `);
     console.log('[DB] Ensured all custom tables exist');
 

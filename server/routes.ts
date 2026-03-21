@@ -1640,7 +1640,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   // Create or update channel rule
   app.post("/api/admin/discord/channel-rules", requireAdmin, async (req, res) => {
     try {
-      const { channelId, channelName, channelType, languageRestriction, blockProfanity, blockDiscrimination, autoDelete } = req.body;
+      const { channelId, channelName, channelType, languageRestriction, blockProfanity, blockDiscrimination, autoDelete, commandsOnly } = req.body;
       if (!channelId || !channelName) {
         return res.status(400).json({ error: "channelId и channelName обязательны" });
       }
@@ -1658,6 +1658,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
             blockProfanity: blockProfanity ?? false,
             blockDiscrimination: blockDiscrimination ?? false,
             autoDelete: autoDelete ?? false,
+            commandsOnly: commandsOnly ?? false,
             isActive: true,
             updatedAt: new Date(),
           })
@@ -1672,6 +1673,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
           blockProfanity: blockProfanity ?? false,
           blockDiscrimination: blockDiscrimination ?? false,
           autoDelete: autoDelete ?? false,
+          commandsOnly: commandsOnly ?? false,
         }).returning();
         res.json(rule);
       }

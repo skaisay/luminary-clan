@@ -874,6 +874,60 @@ export async function setupDiscordBot() {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════
+  // MYSTICAL BOT PERSONALITY — occasional witty responses
+  // ═══════════════════════════════════════════════════════════════
+  const JOKE_CHANCE = 0.02; // 2% chance per message to respond
+  const JOKE_COOLDOWN_MS = 120000; // 2 min between jokes (global)
+  let lastJokeTime = 0;
+
+  const MYSTICAL_RESPONSES_RU = [
+    "✨ Звёзды шепчут мне, что {user} пытается что-то сказать...",
+    "🔮 Мой хрустальный шар показывает, что {user} не спит...",
+    "🌙 Луна одобряет активность {user} в этом чате.",
+    "⚡ Древние силы Luminary заметили присутствие {user}.",
+    "🌟 Интересно... {user} снова здесь. Совпадение? Не думаю.",
+    "🎭 *шепчет из теней* {user}, я вижу тебя...",
+    "🌀 Пророчество гласит: {user} напишет ещё одно сообщение.",
+    "💫 Luminary приветствует {user}. Или предупреждает. Решай сам(а).",
+    "🦉 Мудрая сова Luminary кивает {user} из темноты.",
+    "🔥 Огонь чата горит ярче благодаря {user}!",
+  ];
+
+  const MYSTICAL_RESPONSES_EN = [
+    "✨ The stars whisper that {user} has arrived...",
+    "🔮 My crystal ball foretold {user}'s message.",
+    "🌙 The moon acknowledges {user}'s presence.",
+    "⚡ The ancient powers of Luminary sense {user}.",
+    "🌟 Interesting... {user} is here again. Coincidence? I think not.",
+    "🎭 *whispers from the shadows* {user}, I see you...",
+    "🌀 The prophecy says: {user} will type another message.",
+    "💫 Luminary greets {user}. Or warns. You decide.",
+    "🦉 The wise owl of Luminary nods at {user} from the darkness.",
+    "🔥 The fire of chat burns brighter because of {user}!",
+  ];
+
+  /**
+   * Send a private warning to user via DM.
+   * Falls back to a self-deleting channel message if DMs are blocked.
+   */
+  async function sendPrivateWarning(message: any, text: string) {
+    try {
+      // Try DM first — only the user sees this
+      await message.author.send({
+        content: `⚠️ **Luminary Moderation** — #${message.channel && 'name' in message.channel ? (message.channel as any).name : 'канал'}\n\n${text}`,
+      });
+    } catch {
+      // DMs blocked — send ephemeral-like message that auto-deletes in 5s
+      try {
+        const warnMsg = await (message.channel as any).send({
+          content: `⚠️ <@${message.author.id}> ${text}`,
+        });
+        setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
+      } catch {}
+    }
+  }
+
   // Отслеживание сообщений + ADVANCED модерация с антиспамом
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
@@ -883,10 +937,45 @@ export async function setupDiscordBot() {
 
     // ── Channel moderation with anti-spam ──
     try {
-      if (!message.content || message.content.length < 2 || !message.channelId) return;
+      if (!message.channelId) return;
 
       const rules = await getChannelModerationRules(message.channelId);
-      if (!rules) return;
+
+      // ── COMMANDS-ONLY MODE ──
+      // If channel is commands-only, delete ALL non-slash messages from users
+      if (rules?.commandsOnly) {
+        // Allow messages starting with / (slash command previews) — Discord handles actual slash commands via interactions
+        // Also allow empty content (which happens with attachments/embeds from interactions)
+        if (message.content && !message.content.startsWith('/')) {
+          // Delete instantly
+          message.delete().catch(() => {});
+          // DM the user
+          sendPrivateWarning(message, 
+            `Этот канал только для команд ботов. Обычные сообщения здесь запрещены.\nThis channel is for bot commands only. Regular messages are not allowed.`
+          );
+          return;
+        }
+        // If starts with / but bot didn't handle it, still delete (it's not a real slash command)
+        if (message.content) {
+          message.delete().catch(() => {});
+          return;
+        }
+      }
+
+      // Skip very short messages for content moderation
+      if (!message.content || message.content.length < 2) {
+        // Still do joke check even for short messages in non-moderated channels
+        if (!rules) {
+          maybeJoke(message);
+        }
+        return;
+      }
+
+      // No rules for this channel — just maybe joke
+      if (!rules) {
+        maybeJoke(message);
+        return;
+      }
 
       // 1) Check for spam first — if user is flooding, auto-moderate regardless of content
       const spamming = isSpamming(message.author.id, message.channelId);
@@ -900,40 +989,23 @@ export async function setupDiscordBot() {
       });
 
       // If spamming in moderated channel, treat as violation even if content seems ok
-      // (catches rapid-fire attempts to overwhelm the bot)
       const effectiveViolation = violation || (spamming ? {
         reason: 'spam',
         reasonDetail: `Спам в модерируемом канале (${SPAM_MAX_MESSAGES}+ сообщений за ${SPAM_WINDOW_MS / 1000}с)`,
       } : null);
 
-      if (!effectiveViolation) return;
+      if (!effectiveViolation) {
+        // Clean message — maybe joke
+        maybeJoke(message);
+        return;
+      }
 
       // 3) Record violation & determine escalation
       const escalation = recordViolation(message.author.id);
       const channelName = message.channel && 'name' in message.channel
         ? (message.channel as any).name : 'unknown';
 
-      // 4) Auto-delete — use queue for batching when spamming
-      if (rules.autoDelete) {
-        if (spamming) {
-          // Queue for batch delete (more efficient under spam)
-          deleteQueue.push({
-            channelId: message.channelId,
-            messageId: message.id,
-            timestamp: Date.now(),
-          });
-          // Trigger batch processing
-          processDeleteQueue(client);
-        } else {
-          // Single message — delete immediately
-          message.delete().catch((err: any) => {
-            console.error(`[MOD] Failed to delete: ${err.message}`);
-          });
-        }
-        console.log(`[MOD] ${spamming ? 'Queue-' : ''}Deleted msg by ${message.author.username} in #${channelName}: ${effectiveViolation.reason} (violations: ${escalation.count})`);
-      }
-
-      // 5) Escalate punishment for repeat offenders
+      // 4) TIMEOUT FIRST — apply before deleting so Discord blocks input immediately
       if (escalation.level === 'timeout' || escalation.level === 'timeout_long') {
         const duration = escalation.level === 'timeout_long' ? TIMEOUT_ESCALATE_MS : TIMEOUT_DURATION_MS;
         const durationText = duration >= 300000 ? '5 минут' : '1 минуту';
@@ -947,37 +1019,44 @@ export async function setupDiscordBot() {
           console.error(`[MOD] Failed to timeout user: ${timeoutErr.message}`);
         }
 
-        // Send warning to channel (rate-limited)
+        // Send private warning about timeout
         const record = userViolations.get(message.author.id);
         if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
           record.lastWarning = Date.now();
-          try {
-            const warnMsg = await (message.channel as any).send({
-              content: `⚠️ <@${message.author.id}> заглушен(а) на ${durationText} за повторные нарушения (${escalation.count}x). Соблюдайте правила канала.`,
-            });
-            // Auto-delete warning after 15s
-            setTimeout(() => warnMsg.delete().catch(() => {}), 15000);
-          } catch {}
+          sendPrivateWarning(message,
+            `Вы заглушены на ${durationText} за повторные нарушения (${escalation.count}x).\nYou have been timed out for ${durationText} for repeated violations (${escalation.count}x).`
+          );
         }
       } else if (escalation.count <= 2) {
-        // First violations — send a brief warning (rate-limited)
+        // First violations — send private warning
         const record = userViolations.get(message.author.id);
         if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
           record.lastWarning = Date.now();
-          try {
-            const langWarning = effectiveViolation.reason === 'wrong_language'
-              ? `Этот канал только для ${rules.languageRestriction === 'en' ? 'английского' : 'русского'} языка.`
-              : effectiveViolation.reasonDetail;
-            const warnMsg = await (message.channel as any).send({
-              content: `⚠️ <@${message.author.id}> ${langWarning}`,
-            });
-            // Auto-delete warning after 10s
-            setTimeout(() => warnMsg.delete().catch(() => {}), 10000);
-          } catch {}
+          const langWarning = effectiveViolation.reason === 'wrong_language'
+            ? `Этот канал только для ${rules.languageRestriction === 'en' ? 'английского' : 'русского'} языка.\nThis channel is ${rules.languageRestriction === 'en' ? 'English' : 'Russian'} only.`
+            : effectiveViolation.reasonDetail;
+          sendPrivateWarning(message, langWarning);
         }
       }
 
-      // 6) Save to flagged_messages DB (fire-and-forget — don't slow down moderation)
+      // 5) Auto-delete AFTER timeout — message disappears, input field already blocked
+      if (rules.autoDelete) {
+        if (spamming) {
+          deleteQueue.push({
+            channelId: message.channelId,
+            messageId: message.id,
+            timestamp: Date.now(),
+          });
+          processDeleteQueue(client);
+        } else {
+          message.delete().catch((err: any) => {
+            console.error(`[MOD] Failed to delete: ${err.message}`);
+          });
+        }
+        console.log(`[MOD] ${spamming ? 'Queue-' : ''}Deleted msg by ${message.author.username} in #${channelName}: ${effectiveViolation.reason} (violations: ${escalation.count})`);
+      }
+
+      // 6) Save to flagged_messages DB (fire-and-forget)
       db.insert(
         (await import('@shared/schema')).flaggedMessages
       ).values({
@@ -1003,6 +1082,33 @@ export async function setupDiscordBot() {
       }
     }
   });
+
+  /**
+   * Maybe send a mystical joke response (2% chance, 2min cooldown).
+   */
+  function maybeJoke(message: any) {
+    const now = Date.now();
+    if (now - lastJokeTime < JOKE_COOLDOWN_MS) return;
+    if (Math.random() > JOKE_CHANCE) return;
+
+    lastJokeTime = now;
+
+    // Detect language of channel name or message to pick response set
+    const channelName = message.channel && 'name' in message.channel ? (message.channel as any).name : '';
+    const hasRussian = /[\u0400-\u04FF]/.test(message.content);
+    const isRuChannel = channelName.includes('ru') || channelName.includes('рус') || channelName.includes('общ');
+    const useRu = hasRussian || isRuChannel;
+
+    const responses = useRu ? MYSTICAL_RESPONSES_RU : MYSTICAL_RESPONSES_EN;
+    const response = responses[Math.floor(Math.random() * responses.length)]
+      .replace('{user}', `<@${message.author.id}>`);
+
+    setTimeout(async () => {
+      try {
+        await (message.channel as any).send({ content: response });
+      } catch {}
+    }, 1500 + Math.random() * 3000); // Random 1.5-4.5s delay for natural feel
+  }
 
   // Отслеживание реакций
   client.on('messageReactionAdd', async (reaction, user) => {

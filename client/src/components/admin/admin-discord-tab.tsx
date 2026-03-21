@@ -38,6 +38,7 @@ interface ChannelRule {
   blockProfanity: boolean;
   blockDiscrimination: boolean;
   autoDelete: boolean;
+  commandsOnly: boolean;
   isActive: boolean;
 }
 
@@ -72,6 +73,7 @@ export default function AdminDiscordTab() {
   const [ruleProfanity, setRuleProfanity] = useState(false);
   const [ruleDiscrimination, setRuleDiscrimination] = useState(false);
   const [ruleAutoDelete, setRuleAutoDelete] = useState(false);
+  const [ruleCommandsOnly, setRuleCommandsOnly] = useState(false);
 
   // Flagged message selection
   const [selectedFlagged, setSelectedFlagged] = useState<Set<string>>(new Set());
@@ -231,6 +233,7 @@ export default function AdminDiscordTab() {
       setRuleProfanity(false);
       setRuleDiscrimination(false);
       setRuleAutoDelete(false);
+      setRuleCommandsOnly(false);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/channel-rules"] });
     },
     onError: (error: any) => {
@@ -331,6 +334,7 @@ export default function AdminDiscordTab() {
       blockProfanity: ruleProfanity,
       blockDiscrimination: ruleDiscrimination,
       autoDelete: ruleAutoDelete,
+      commandsOnly: ruleCommandsOnly,
     });
   };
 
@@ -563,6 +567,14 @@ export default function AdminDiscordTab() {
                   </div>
                   <Switch checked={ruleAutoDelete} onCheckedChange={setRuleAutoDelete} />
                 </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Только команды</Label>
+                    <p className="text-xs text-muted-foreground">Игроки не могут писать — только слеш-команды ботов. Обычные сообщения мгновенно удаляются.</p>
+                  </div>
+                  <Switch checked={ruleCommandsOnly} onCheckedChange={setRuleCommandsOnly} />
+                </div>
               </div>
 
               <Button
@@ -616,6 +628,9 @@ export default function AdminDiscordTab() {
                           )}
                           {rule.autoDelete && (
                             <Badge className="text-xs bg-red-600">⚡ Автоудаление</Badge>
+                          )}
+                          {rule.commandsOnly && (
+                            <Badge className="text-xs bg-purple-600">🔒 Только команды</Badge>
                           )}
                         </div>
                       </div>

@@ -851,6 +851,7 @@ export const discordChannelRules = pgTable("discord_channel_rules", {
   blockProfanity: boolean("block_profanity").default(false).notNull(),
   blockDiscrimination: boolean("block_discrimination").default(false).notNull(),
   autoDelete: boolean("auto_delete").default(false).notNull(), // auto-delete violations
+  commandsOnly: boolean("commands_only").default(false).notNull(), // only bot commands allowed
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
