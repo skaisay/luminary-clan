@@ -76,24 +76,69 @@ export default function AdminDiscordTab() {
   // Flagged message selection
   const [selectedFlagged, setSelectedFlagged] = useState<Set<string>>(new Set());
 
-  const { data: channels, isLoading: channelsLoading } = useQuery<DiscordChannel[]>({
+  const { data: channels, isLoading: channelsLoading, error: channelsError } = useQuery<DiscordChannel[]>({
     queryKey: ["/api/admin/discord/channels"],
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/channels", { credentials: "include" });
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    },
   });
 
   const { data: channelsDetailed } = useQuery<{ channels: DiscordChannel[]; categories: { id: string; name: string }[] }>({
     queryKey: ["/api/admin/discord/channels-detailed"],
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/channels-detailed", { credentials: "include" });
+        if (!res.ok) return { channels: [], categories: [] };
+        return await res.json();
+      } catch { return { channels: [], categories: [] }; }
+    },
   });
 
   const { data: members, isLoading: membersLoading } = useQuery<DiscordMember[]>({
     queryKey: ["/api/admin/discord/members"],
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/members", { credentials: "include" });
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    },
   });
 
   const { data: channelRules, isLoading: rulesLoading } = useQuery<ChannelRule[]>({
     queryKey: ["/api/admin/discord/channel-rules"],
+    retry: false,
+    staleTime: 30_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/channel-rules", { credentials: "include" });
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    },
   });
 
   const { data: flaggedMessages, isLoading: flaggedLoading } = useQuery<FlaggedMessage[]>({
     queryKey: ["/api/admin/discord/flagged-messages"],
+    retry: false,
+    staleTime: 30_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/flagged-messages", { credentials: "include" });
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    },
   });
 
   const sendMessageMutation = useMutation({
@@ -267,7 +312,7 @@ export default function AdminDiscordTab() {
     createChannelMutation.mutate({
       name: newChannelName.trim().toLowerCase().replace(/\s+/g, "-"),
       type: newChannelType,
-      category: newChannelCategory || undefined,
+      category: (newChannelCategory && newChannelCategory !== "__none__") ? newChannelCategory : undefined,
       topic: newChannelTopic || undefined,
     });
   };
@@ -409,7 +454,7 @@ export default function AdminDiscordTab() {
                       <SelectValue placeholder="Без категории" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Без категории</SelectItem>
+                      <SelectItem value="__none__">Без категории</SelectItem>
                       {channelsDetailed?.categories?.map((cat) => (
                         <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
                       ))}
