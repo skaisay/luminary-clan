@@ -30,6 +30,143 @@ let earningSettingsCacheTime = 0;
 let channelRulesCache: Map<string, any> | null = null;
 let channelRulesCacheTime = 0;
 
+// ═══════════════════════════════════════════════════════════════
+// ANTI-SPAM SYSTEM — per-user violation tracking, escalating punishment
+// ═══════════════════════════════════════════════════════════════
+
+interface UserViolationRecord {
+  violations: number[];  // timestamps of violations
+  warnings: number;      // total warnings sent
+  lastWarning: number;   // last warning timestamp
+}
+
+// Track violations per user (userId → record)
+const userViolations = new Map<string, UserViolationRecord>();
+
+// Anti-spam: track message rate per user per channel (key = `userId:channelId`)
+const spamTracker = new Map<string, number[]>(); // timestamps of recent messages
+
+// Moderation delete queue — batch up deletes to avoid individual rate limits
+const deleteQueue: Array<{ channelId: string; messageId: string; timestamp: number }> = [];
+let deleteQueueProcessing = false;
+
+// Cache the checkMessageViolations import to avoid re-importing on every message
+let _checkViolations: typeof import('./discord').checkMessageViolations | null = null;
+async function getCachedViolationChecker() {
+  if (!_checkViolations) {
+    const mod = await import('./discord');
+    _checkViolations = mod.checkMessageViolations;
+  }
+  return _checkViolations;
+}
+
+// Spam thresholds
+const SPAM_WINDOW_MS = 5000;       // 5 seconds window
+const SPAM_MAX_MESSAGES = 5;       // max messages in window before counting as spam
+const VIOLATION_WINDOW_MS = 300000; // 5 minutes window for violation tracking
+const WARN_COOLDOWN_MS = 10000;    // min 10s between warnings to same user
+const TIMEOUT_THRESHOLD = 4;       // violations before timeout
+const TIMEOUT_DURATION_MS = 60000; // 1 minute timeout
+const TIMEOUT_ESCALATE_MS = 300000; // 5 minute timeout after 8+ violations
+
+/**
+ * Record a violation for a user and return the escalation level.
+ */
+function recordViolation(userId: string): { level: 'warn' | 'timeout' | 'timeout_long'; count: number } {
+  const now = Date.now();
+  let record = userViolations.get(userId);
+  if (!record) {
+    record = { violations: [], warnings: 0, lastWarning: 0 };
+    userViolations.set(userId, record);
+  }
+  // Clean old violations outside window
+  record.violations = record.violations.filter(t => now - t < VIOLATION_WINDOW_MS);
+  record.violations.push(now);
+  record.warnings++;
+
+  const count = record.violations.length;
+  if (count >= TIMEOUT_THRESHOLD * 2) return { level: 'timeout_long', count };
+  if (count >= TIMEOUT_THRESHOLD) return { level: 'timeout', count };
+  return { level: 'warn', count };
+}
+
+/**
+ * Check if user is spamming (too many messages in short window).
+ */
+function isSpamming(userId: string, channelId: string): boolean {
+  const key = `${userId}:${channelId}`;
+  const now = Date.now();
+  let timestamps = spamTracker.get(key) || [];
+  timestamps = timestamps.filter(t => now - t < SPAM_WINDOW_MS);
+  timestamps.push(now);
+  spamTracker.set(key, timestamps);
+  return timestamps.length > SPAM_MAX_MESSAGES;
+}
+
+/**
+ * Process the delete queue in batches.
+ * Uses bulkDelete when possible (messages < 14 days old, same channel).
+ */
+async function processDeleteQueue(client: Client) {
+  if (deleteQueueProcessing || deleteQueue.length === 0) return;
+  deleteQueueProcessing = true;
+
+  try {
+    // Group by channel
+    const byChannel = new Map<string, string[]>();
+    const toProcess = deleteQueue.splice(0, Math.min(deleteQueue.length, 50)); // process up to 50 at a time
+    for (const item of toProcess) {
+      const arr = byChannel.get(item.channelId) || [];
+      arr.push(item.messageId);
+      byChannel.set(item.channelId, arr);
+    }
+
+    for (const [channelId, msgIds] of byChannel) {
+      try {
+        const channel = client.channels.cache.get(channelId);
+        if (!channel || !('bulkDelete' in channel)) continue;
+
+        if (msgIds.length >= 2) {
+          // Bulk delete (much faster, 1 API call vs N calls)
+          await (channel as any).bulkDelete(msgIds, true).catch(() => {});
+        } else {
+          // Single message - individual delete
+          for (const msgId of msgIds) {
+            try {
+              const msg = await (channel as any).messages.fetch(msgId).catch(() => null);
+              if (msg) await msg.delete().catch(() => {});
+            } catch {}
+          }
+        }
+        // Small delay between channels
+        await new Promise(r => setTimeout(r, 200));
+      } catch (err) {
+        console.error(`[MOD] Bulk delete error in ${channelId}:`, err);
+      }
+    }
+  } finally {
+    deleteQueueProcessing = false;
+    // If more items accumulated, process again
+    if (deleteQueue.length > 0) {
+      setTimeout(() => processDeleteQueue(client), 500);
+    }
+  }
+}
+
+// Clean up old spam/violation tracking every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamps] of spamTracker) {
+    const fresh = timestamps.filter(t => now - t < SPAM_WINDOW_MS);
+    if (fresh.length === 0) spamTracker.delete(key);
+    else spamTracker.set(key, fresh);
+  }
+  for (const [userId, record] of userViolations) {
+    record.violations = record.violations.filter(t => now - t < VIOLATION_WINDOW_MS);
+    if (record.violations.length === 0) userViolations.delete(userId);
+  }
+}, 300000);
+
 /**
  * Get moderation rules for a specific channel (cached 60s).
  * Returns null if no rules set for that channel.
@@ -737,63 +874,132 @@ export async function setupDiscordBot() {
     }
   });
 
-  // Отслеживание сообщений + модерация по правилам каналов
+  // Отслеживание сообщений + ADVANCED модерация с антиспамом
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
-    try {
-      await trackMessageActivity(message.author.id);
-    } catch (error) {
-      console.error('Ошибка отслеживания сообщения:', error);
-    }
+    // Track activity (non-blocking)
+    trackMessageActivity(message.author.id).catch(() => {});
 
-    // Channel moderation: check rules for this channel
+    // ── Channel moderation with anti-spam ──
     try {
-      if (message.content && message.content.length >= 2 && message.channelId) {
-        const rules = await getChannelModerationRules(message.channelId);
-        if (rules) {
-          const { checkMessageViolations } = await import('./discord');
-          const violation = checkMessageViolations(message.content, {
-            languageRestriction: rules.languageRestriction,
-            blockProfanity: rules.blockProfanity,
-            blockDiscrimination: rules.blockDiscrimination,
+      if (!message.content || message.content.length < 2 || !message.channelId) return;
+
+      const rules = await getChannelModerationRules(message.channelId);
+      if (!rules) return;
+
+      // 1) Check for spam first — if user is flooding, auto-moderate regardless of content
+      const spamming = isSpamming(message.author.id, message.channelId);
+
+      // 2) Check content violations using cached function
+      const checkViolations = await getCachedViolationChecker();
+      const violation = checkViolations(message.content, {
+        languageRestriction: rules.languageRestriction,
+        blockProfanity: rules.blockProfanity,
+        blockDiscrimination: rules.blockDiscrimination,
+      });
+
+      // If spamming in moderated channel, treat as violation even if content seems ok
+      // (catches rapid-fire attempts to overwhelm the bot)
+      const effectiveViolation = violation || (spamming ? {
+        reason: 'spam',
+        reasonDetail: `Спам в модерируемом канале (${SPAM_MAX_MESSAGES}+ сообщений за ${SPAM_WINDOW_MS / 1000}с)`,
+      } : null);
+
+      if (!effectiveViolation) return;
+
+      // 3) Record violation & determine escalation
+      const escalation = recordViolation(message.author.id);
+      const channelName = message.channel && 'name' in message.channel
+        ? (message.channel as any).name : 'unknown';
+
+      // 4) Auto-delete — use queue for batching when spamming
+      if (rules.autoDelete) {
+        if (spamming) {
+          // Queue for batch delete (more efficient under spam)
+          deleteQueue.push({
+            channelId: message.channelId,
+            messageId: message.id,
+            timestamp: Date.now(),
           });
-          if (violation) {
-            if (rules.autoDelete) {
-              // Auto-delete with rate-limit safety
-              try {
-                await message.delete();
-                console.log(`[MOD] Auto-deleted message by ${message.author.username} in #${message.channel && 'name' in message.channel ? message.channel.name : message.channelId}: ${violation.reason}`);
-              } catch (delErr: any) {
-                console.error(`[MOD] Failed to delete message: ${delErr.message}`);
-              }
-            }
-            // Also save to flagged_messages DB for admin review
-            try {
-              const { discordChannelRules: _dcrIgnore, flaggedMessages } = await import('@shared/schema');
-              await db.insert(flaggedMessages).values({
-                messageId: message.id,
-                channelId: message.channelId,
-                channelName: message.channel && 'name' in message.channel ? (message.channel as any).name : 'unknown',
-                authorId: message.author.id,
-                authorUsername: message.author.username,
-                content: message.content.substring(0, 500),
-                reason: violation.reason,
-                reasonDetail: violation.reasonDetail,
-                status: rules.autoDelete ? 'deleted' : 'pending',
-                messageTimestamp: message.createdAt,
-              });
-            } catch (dbErr: any) {
-              // Don't break on DB error
-              console.error('[MOD] Failed to save flagged message:', dbErr.message);
-            }
+          // Trigger batch processing
+          processDeleteQueue(client);
+        } else {
+          // Single message — delete immediately
+          message.delete().catch((err: any) => {
+            console.error(`[MOD] Failed to delete: ${err.message}`);
+          });
+        }
+        console.log(`[MOD] ${spamming ? 'Queue-' : ''}Deleted msg by ${message.author.username} in #${channelName}: ${effectiveViolation.reason} (violations: ${escalation.count})`);
+      }
+
+      // 5) Escalate punishment for repeat offenders
+      if (escalation.level === 'timeout' || escalation.level === 'timeout_long') {
+        const duration = escalation.level === 'timeout_long' ? TIMEOUT_ESCALATE_MS : TIMEOUT_DURATION_MS;
+        const durationText = duration >= 300000 ? '5 минут' : '1 минуту';
+        try {
+          const member = message.member || await message.guild?.members.fetch(message.author.id).catch(() => null);
+          if (member && 'timeout' in member) {
+            await (member as any).timeout(duration, `Автомодерация: ${escalation.count} нарушений за 5 минут`);
+            console.log(`[MOD] ⏱ Timeout ${message.author.username} for ${durationText} (${escalation.count} violations)`);
           }
+        } catch (timeoutErr: any) {
+          console.error(`[MOD] Failed to timeout user: ${timeoutErr.message}`);
+        }
+
+        // Send warning to channel (rate-limited)
+        const record = userViolations.get(message.author.id);
+        if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
+          record.lastWarning = Date.now();
+          try {
+            const warnMsg = await (message.channel as any).send({
+              content: `⚠️ <@${message.author.id}> заглушен(а) на ${durationText} за повторные нарушения (${escalation.count}x). Соблюдайте правила канала.`,
+            });
+            // Auto-delete warning after 15s
+            setTimeout(() => warnMsg.delete().catch(() => {}), 15000);
+          } catch {}
+        }
+      } else if (escalation.count <= 2) {
+        // First violations — send a brief warning (rate-limited)
+        const record = userViolations.get(message.author.id);
+        if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
+          record.lastWarning = Date.now();
+          try {
+            const langWarning = effectiveViolation.reason === 'wrong_language'
+              ? `Этот канал только для ${rules.languageRestriction === 'en' ? 'английского' : 'русского'} языка.`
+              : effectiveViolation.reasonDetail;
+            const warnMsg = await (message.channel as any).send({
+              content: `⚠️ <@${message.author.id}> ${langWarning}`,
+            });
+            // Auto-delete warning after 10s
+            setTimeout(() => warnMsg.delete().catch(() => {}), 10000);
+          } catch {}
         }
       }
+
+      // 6) Save to flagged_messages DB (fire-and-forget — don't slow down moderation)
+      db.insert(
+        (await import('@shared/schema')).flaggedMessages
+      ).values({
+        messageId: message.id,
+        channelId: message.channelId,
+        channelName,
+        authorId: message.author.id,
+        authorUsername: message.author.username,
+        content: message.content.substring(0, 500),
+        reason: effectiveViolation.reason,
+        reasonDetail: effectiveViolation.reasonDetail,
+        status: rules.autoDelete ? 'deleted' : 'pending',
+        messageTimestamp: message.createdAt,
+      }).catch((dbErr: any) => {
+        if (!dbErr.message?.includes('no such table')) {
+          console.error('[MOD] DB save error:', dbErr.message);
+        }
+      });
+
     } catch (modErr: any) {
-      // Non-critical: don't crash bot on moderation errors
       if (!modErr.message?.includes('no such table')) {
-        console.error('[MOD] Moderation check error:', modErr.message);
+        console.error('[MOD] Moderation error:', modErr.message);
       }
     }
   });

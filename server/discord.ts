@@ -492,20 +492,83 @@ export async function getDiscordChannelsDetailed() {
 
 // ==================== MESSAGE MODERATION ====================
 
-// Simple language detection using character ranges and common words
-const CYRILLIC_REGEX = /[\u0400-\u04FF]/;
-const LATIN_REGEX = /[a-zA-Z]/;
+// ═══════════════════════════════════════════════════════════════
+// ADVANCED MODERATION ENGINE — Anti-evasion, anti-spam, anti-obfuscation
+// ═══════════════════════════════════════════════════════════════
+
+// ── Homoglyph map: Latin → Cyrillic lookalikes ──
+// Used to detect mixed-script attacks where players substitute 
+// Latin chars that look like Cyrillic to bypass detection
+const LATIN_TO_CYRILLIC: Record<string, string> = {
+  'a': 'а', 'e': 'е', 'o': 'о', 'p': 'р', 'c': 'с', 'x': 'х',
+  'y': 'у', 'k': 'к', 'n': 'п', 'm': 'м', 'b': 'в', 'h': 'н',
+  't': 'т', 'i': 'і', 'u': 'и',
+};
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x',
+  'у': 'y', 'к': 'k', 'п': 'n', 'м': 'm', 'в': 'b', 'н': 'h',
+  'т': 't', 'і': 'i', 'и': 'u',
+};
+
+// Characters to strip before analysis (decorators, zero-width, etc.)
+const JUNK_CHARS_REGEX = /[\u200B-\u200F\u2060\uFEFF\u034F\u00AD\u180E⠀​᠎\s\d_\-.,!?;:"'()\[\]{}<>@#$%^&*+=\/\\|~`™®©€£¥°±²³¹₀₁₂₃₄₅₆₇₈₉⁰¹²³⁴⁵⁶⁷⁸⁹]/g;
+
+// Leet-speak / obfuscation substitutions for profanity
+const LEET_MAP: Record<string, string> = {
+  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't',
+  '@': 'a', '$': 's', '!': 'i', '(': 'c',
+};
+
+/**
+ * Strip decorators, zero-width chars, symbols, numbers from text.
+ * Leaves only actual letters (Latin + Cyrillic).
+ */
+function stripJunk(text: string): string {
+  return text.replace(JUNK_CHARS_REGEX, '');
+}
+
+/**
+ * Normalize a string by converting all homoglyphs to a consistent script.
+ * If targetScript is 'cyrillic', Latin lookalikes → Cyrillic.
+ * If targetScript is 'latin', Cyrillic lookalikes → Latin.
+ */
+function normalizeHomoglyphs(text: string, targetScript: 'cyrillic' | 'latin'): string {
+  const map = targetScript === 'cyrillic' ? LATIN_TO_CYRILLIC : CYRILLIC_TO_LATIN;
+  return text.split('').map(ch => map[ch] || ch).join('');
+}
+
+/**
+ * Normalize leet-speak / obfuscation: replace 0→o, @→a, etc.
+ */
+function normalizeLeet(text: string): string {
+  return text.split('').map(ch => LEET_MAP[ch] || ch).join('');
+}
+
+/**
+ * Full normalization pipeline for moderation.
+ * Exported for reuse in bot-commands.ts
+ */
+export function normalizeForModeration(text: string): string {
+  let t = text.toLowerCase();
+  t = normalizeLeet(t);
+  // Remove repeating characters (>2) to handle "fuuuuck" → "fuck"
+  t = t.replace(/(.)\1{2,}/g, '$1$1');
+  return t;
+}
 
 // Common Russian profanity stems (abbreviated to avoid explicit content)
 const RU_PROFANITY_STEMS = [
-  'бля', 'хуй', 'хуе', 'хуё', 'пизд', 'ебат', 'ебан', 'ёбан', 'сука', 'сук ', 'нахуй', 'нахер',
-  'пидор', 'пидар', 'мудак', 'мудил', 'залуп', 'шлюх', 'дебил', 'уёб', 'уеб', 'ублюд',
+  'бля', 'хуй', 'хуе', 'хуё', 'пизд', 'ебат', 'ебан', 'ёбан', 'сука', 'сук ',
+  'нахуй', 'нахер', 'пидор', 'пидар', 'мудак', 'мудил', 'залуп', 'шлюх',
+  'дебил', 'уёб', 'уеб', 'ублюд', 'блят', 'пиздец', 'хуяр', 'ёб ', 'еб ',
+  'хер ', 'херов', 'сучк', 'сучар', 'пидр', 'ахуе', 'охуе', 'отъеб', 'отьеб',
 ];
 
 // Common English profanity stems
 const EN_PROFANITY_STEMS = [
-  'fuck', 'shit', 'bitch', 'asshole', 'dick', 'cunt', 'bastard', 'damn', 'whore', 'slut',
-  'retard', 'faggot', 'nigger', 'nigga',
+  'fuck', 'shit', 'bitch', 'asshole', 'dick', 'cunt', 'bastard', 'damn',
+  'whore', 'slut', 'retard', 'faggot', 'nigger', 'nigga', 'stfu', 'wtf',
+  'fck', 'fcuk', 'phuck', 'biatch', 'btch',
 ];
 
 // Discrimination keywords (both languages)
@@ -513,64 +576,187 @@ const DISCRIMINATION_KEYWORDS = [
   'nigger', 'nigga', 'фашист', 'нацист', 'nazi', 'расист',
   'хохол', 'жид', 'чурк', 'черножоп', 'негр',
   'чёрная обезьяна', 'черная обезьяна', 'monkey',
+  'расизм', 'white power', 'white suprem', 'heil', 'зига', 'зиг хайл',
 ];
 
+// ─── ADVANCED LANGUAGE DETECTION ────────────────────────────────
+
 /**
- * Detect predominant language of a text string.
- * Returns 'ru', 'en', or 'unknown'.
+ * Detect language of a SINGLE WORD after junk stripping.
+ * Returns 'ru', 'en', 'mixed', or 'unknown'.
  */
-function detectLanguage(text: string): 'ru' | 'en' | 'unknown' {
-  const cyrillicCount = (text.match(/[\u0400-\u04FF]/g) || []).length;
-  const latinCount = (text.match(/[a-zA-Z]/g) || []).length;
-  const total = cyrillicCount + latinCount;
-  if (total < 3) return 'unknown';
-  if (cyrillicCount / total > 0.5) return 'ru';
-  if (latinCount / total > 0.5) return 'en';
+function detectWordLanguage(word: string): 'ru' | 'en' | 'mixed' | 'unknown' {
+  const clean = stripJunk(word);
+  if (clean.length < 1) return 'unknown';
+  const cyrillic = (clean.match(/[\u0400-\u04FF]/g) || []).length;
+  const latin = (clean.match(/[a-zA-Z]/g) || []).length;
+  if (cyrillic === 0 && latin === 0) return 'unknown';
+  // If BOTH scripts present in single word → mixed (evasion attempt)
+  if (cyrillic > 0 && latin > 0) return 'mixed';
+  if (cyrillic > 0) return 'ru';
+  if (latin > 0) return 'en';
   return 'unknown';
+}
+
+/**
+ * Advanced language detection for full message.
+ * Analyzes per-word to catch mixed-language evasion.
+ * Returns detected language, list of foreign/mixed words count, and confidence.
+ */
+function detectLanguageAdvanced(text: string): {
+  primary: 'ru' | 'en' | 'unknown';
+  foreignWords: number;
+  mixedWords: number;
+  totalWords: number;
+  confidence: number;
+} {
+  // Split on whitespace + common separators
+  const words = text.split(/[\s,.!?;:\-_|/\\]+/).filter(w => stripJunk(w).length >= 2);
+  if (words.length === 0) return { primary: 'unknown', foreignWords: 0, mixedWords: 0, totalWords: 0, confidence: 0 };
+
+  let ruWords = 0, enWords = 0, mixedWords = 0, unknownWords = 0;
+  for (const word of words) {
+    const lang = detectWordLanguage(word);
+    switch (lang) {
+      case 'ru': ruWords++; break;
+      case 'en': enWords++; break;
+      case 'mixed': mixedWords++; break;
+      default: unknownWords++; break;
+    }
+  }
+
+  const identifiedWords = ruWords + enWords + mixedWords;
+  if (identifiedWords === 0) return { primary: 'unknown', foreignWords: 0, mixedWords, totalWords: words.length, confidence: 0 };
+
+  let primary: 'ru' | 'en' | 'unknown';
+  let foreignWords: number;
+  if (ruWords >= enWords) {
+    primary = 'ru';
+    foreignWords = enWords;
+  } else {
+    primary = 'en';
+    foreignWords = ruWords;
+  }
+
+  const confidence = (Math.max(ruWords, enWords) + mixedWords) / identifiedWords;
+  return { primary, foreignWords, mixedWords, totalWords: words.length, confidence };
 }
 
 /**
  * Check message content against moderation rules.
  * Returns violations found or null if clean.
+ * 
+ * Anti-evasion features:
+ * - Homoglyph normalization (Latin a→Cyrillic а, etc.)
+ * - Leet-speak normalization (@ → a, $ → s, etc.)
+ * - Repeated character collapsing (fuuuck → fuck)
+ * - Per-word language detection (catches even 1 foreign word)
+ * - Mixed-script word detection (пpивeт with Latin lookalikes)
+ * - Symbol/decorator stripping
  */
 export function checkMessageViolations(
   content: string,
   rules: { languageRestriction?: string | null; blockProfanity?: boolean; blockDiscrimination?: boolean }
 ): { reason: string; reasonDetail: string } | null {
-  const lower = content.toLowerCase().trim();
-  if (!lower || lower.length < 2) return null;
+  if (!content || content.trim().length < 2) return null;
 
-  // 1) Discrimination check (highest priority)
+  // Full normalization pipeline
+  const normalized = normalizeForModeration(content);
+  // Also create a version with homoglyphs resolved both ways
+  const asCyrillic = normalizeHomoglyphs(normalized, 'cyrillic');
+  const asLatin = normalizeHomoglyphs(normalized, 'latin');
+  // Stripped version (letters only, no symbols/spaces)
+  const stripped = stripJunk(normalized);
+  const strippedCyr = stripJunk(asCyrillic);
+  const strippedLat = stripJunk(asLatin);
+
+  // 1) Discrimination check (highest priority) — check all normalized versions
   if (rules.blockDiscrimination) {
     for (const kw of DISCRIMINATION_KEYWORDS) {
-      if (lower.includes(kw)) {
-        return { reason: 'discrimination', reasonDetail: `Обнаружена дискриминация: "${kw}"` };
+      if (normalized.includes(kw) || asCyrillic.includes(kw) || asLatin.includes(kw)
+          || stripped.includes(kw.replace(/\s/g, ''))
+          || strippedCyr.includes(kw.replace(/\s/g, ''))
+          || strippedLat.includes(kw.replace(/\s/g, ''))) {
+        return { reason: 'discrimination', reasonDetail: `Обнаружена дискриминация` };
       }
     }
   }
 
-  // 2) Profanity check
+  // 2) Profanity check — check normalized + homoglyph versions + stripped
   if (rules.blockProfanity) {
     for (const stem of RU_PROFANITY_STEMS) {
-      if (lower.includes(stem)) {
-        return { reason: 'profanity', reasonDetail: `Обнаружена нецензурная лексика (RU)` };
+      const stemClean = stem.trim();
+      if (normalized.includes(stemClean) || asCyrillic.includes(stemClean)
+          || stripped.includes(stemClean.replace(/\s/g, ''))
+          || strippedCyr.includes(stemClean.replace(/\s/g, ''))) {
+        return { reason: 'profanity', reasonDetail: `Нецензурная лексика (RU)` };
       }
     }
     for (const stem of EN_PROFANITY_STEMS) {
-      if (lower.includes(stem)) {
-        return { reason: 'profanity', reasonDetail: `Обнаружена нецензурная лексика (EN)` };
+      if (normalized.includes(stem) || asLatin.includes(stem)
+          || stripped.includes(stem) || strippedLat.includes(stem)) {
+        return { reason: 'profanity', reasonDetail: `Нецензурная лексика (EN)` };
       }
     }
   }
 
-  // 3) Language restriction check
+  // 3) Language restriction check — per-word analysis with anti-evasion
   if (rules.languageRestriction) {
-    const lang = detectLanguage(lower);
-    if (lang !== 'unknown' && lang !== rules.languageRestriction) {
+    const analysis = detectLanguageAdvanced(content);
+
+    // Any mixed-script word is an evasion attempt → violation
+    if (analysis.mixedWords > 0) {
       const langNames: Record<string, string> = { ru: 'русский', en: 'английский' };
       const expected = langNames[rules.languageRestriction] || rules.languageRestriction;
-      const actual = langNames[lang] || lang;
+      return {
+        reason: 'wrong_language',
+        reasonDetail: `Обнаружена попытка обхода: смешанные скрипты в словах (ожидается ${expected})`,
+      };
+    }
+
+    // If primary detected language differs from required
+    if (analysis.primary !== 'unknown' && analysis.primary !== rules.languageRestriction) {
+      const langNames: Record<string, string> = { ru: 'русский', en: 'английский' };
+      const expected = langNames[rules.languageRestriction] || rules.languageRestriction;
+      const actual = langNames[analysis.primary] || analysis.primary;
       return { reason: 'wrong_language', reasonDetail: `Ожидается ${expected}, обнаружен ${actual}` };
+    }
+
+    // Even if primary matches, if there are ANY foreign words → violation
+    // (catches: "Hello world привет" in an English channel where primary is en but has 1 RU word)
+    if (analysis.foreignWords > 0 && analysis.totalWords >= 2) {
+      const langNames: Record<string, string> = { ru: 'русский', en: 'английский' };
+      const expected = langNames[rules.languageRestriction] || rules.languageRestriction;
+      const foreignLang = rules.languageRestriction === 'en' ? 'русские' : 'английские';
+      return {
+        reason: 'wrong_language',
+        reasonDetail: `В тексте обнаружены ${foreignLang} слова (канал: только ${expected})`,
+      };
+    }
+
+    // Check via homoglyph normalization — after converting all to target script,
+    // see if the "pure" text reveals hidden foreign characters
+    if (rules.languageRestriction === 'en') {
+      // Force all to Latin, then check for remaining Cyrillic
+      const forcedLatin = normalizeHomoglyphs(normalized, 'latin');
+      const remainingCyrillic = (forcedLatin.match(/[\u0400-\u04FF]/g) || []).length;
+      if (remainingCyrillic > 0) {
+        return {
+          reason: 'wrong_language',
+          reasonDetail: 'Обнаружены кириллические символы (канал: только английский)',
+        };
+      }
+    } else if (rules.languageRestriction === 'ru') {
+      // Force all to Cyrillic, then check for remaining Latin
+      const forcedCyrillic = normalizeHomoglyphs(normalized, 'cyrillic');
+      const remainingLatin = (forcedCyrillic.match(/[a-zA-Z]/g) || []).length;
+      // Allow some tolerance — short English abbreviations like "ok", "lol" in Russian chat
+      if (remainingLatin > 3) {
+        return {
+          reason: 'wrong_language',
+          reasonDetail: 'Обнаружены латинские символы (канал: только русский)',
+        };
+      }
     }
   }
 
