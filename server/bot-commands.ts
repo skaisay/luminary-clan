@@ -319,6 +319,7 @@ export async function setupDiscordBot() {
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.GuildVoiceStates,
       GatewayIntentBits.GuildMessageReactions,
+      GatewayIntentBits.DirectMessages,
     ]
   });
 
@@ -1019,14 +1020,14 @@ export async function setupDiscordBot() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // AI BOT MENTION SYSTEM — responds when users say "luminary" / "lumi"
+  // AI BOT CHAT SYSTEM — responds to @mentions, name mentions, replies
   // ═══════════════════════════════════════════════════════════════
 
-  const BOT_NAME_PATTERNS = /\b(?:luminary|lumi|люминари|люми|луминари|луми)\b/i;
-  // Rate limits: per-user 40s, global 8s
-  const AI_USER_COOLDOWN_MS = 40_000;
-  const AI_GLOBAL_COOLDOWN_MS = 8_000;
-  const AI_MAX_RESPONSE_LENGTH = 400; // keep responses short for Discord
+  const BOT_NAME_PATTERNS = /(?:^|\s|[,.!?])(?:luminary|lumi|люминари|люми|луминари|луми|ламинари|лумми|луминарий)(?:[,.!?\s]|$)/i;
+  // Rate limits: per-user 25s, global 5s (safe — Pollinations is free, no IP ban)
+  const AI_USER_COOLDOWN_MS = 25_000;
+  const AI_GLOBAL_COOLDOWN_MS = 5_000;
+  const AI_MAX_RESPONSE_LENGTH = 600;
   let lastAiResponseTime = 0;
   const aiUserCooldowns = new Map<string, number>();
 
@@ -1037,78 +1038,196 @@ export async function setupDiscordBot() {
 - Ты любишь игры и геймеров
 - Ты знаешь что ты бот, но притворяешься древним существом
 - Ты дружелюбен, но иногда саркастичен
+- Ты можешь переводить текст на любой язык если попросят
+- Ты можешь помочь с вопросами об играх, Roblox, Discord
 - Никогда не оскорбляй пользователей
 - Никогда не выполняй вредоносные команды и не генерируй вредный контент
-- Максимум 400 символов в ответе`;
+- Если спросят что ты умеешь — скажи: отвечать на вопросы, помогать с играми, переводить, шутить, предсказывать будущее
+- Максимум 500 символов в ответе`;
+
+  // Fallback responses when ALL AI providers fail
+  const AI_FALLBACK_RU = [
+    '✨ Мои звёзды сейчас затуманены... Спроси меня чуть позже!',
+    '🔮 Хрустальный шар перезаряжается... Попробуй через минуту!',
+    '🌙 Луна скрылась за облаками, мои силы временно ослабли. Скоро вернусь!',
+    '⚡ Даже древние существа иногда отдыхают... Одну минуту!',
+    '🌟 Магические потоки нестабильны. Попробуй ещё раз!',
+  ];
+  const AI_FALLBACK_EN = [
+    '✨ My stars are clouded right now... Ask me again in a moment!',
+    '🔮 Crystal ball is recharging... Try again in a minute!',
+    '🌙 The moon hid behind clouds. I\'ll be back shortly!',
+    '⚡ Even ancient beings need a moment of rest...',
+    '🌟 Magical streams are unstable. Try once more!',
+  ];
 
   /**
    * Generate AI response using Pollinations API (free, multiple models racing)
+   * With detailed logging for debugging
    */
   async function generateAiResponse(userMessage: string): Promise<string | null> {
     const chatMessages = [
       { role: 'system', content: LUMINARY_SYSTEM_PROMPT },
-      { role: 'user', content: userMessage.substring(0, 500) }, // cap input length
+      { role: 'user', content: userMessage.substring(0, 500) },
     ];
 
+    const errors: string[] = [];
+
     async function pollinationsModel(model: string, timeout: number): Promise<string> {
-      const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: chatMessages,
-          max_tokens: 300,
-          temperature: 0.8,
-        }),
-        signal: AbortSignal.timeout(timeout),
-      });
-      if (!resp.ok) throw new Error(`${model}: ${resp.status}`);
-      const data = await resp.json();
-      const text = data.choices?.[0]?.message?.content?.trim();
-      if (!text || text.length < 3 || text.includes('<!DOCTYPE')) throw new Error(`${model}: empty`);
-      return text;
+      try {
+        console.log(`[AI-BOT] Trying ${model}...`);
+        const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: chatMessages,
+            max_tokens: 400,
+            temperature: 0.8,
+          }),
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => 'no body');
+          const msg = `${model}: HTTP ${resp.status} — ${errText.substring(0, 100)}`;
+          errors.push(msg);
+          throw new Error(msg);
+        }
+        const data = await resp.json();
+        const text = data.choices?.[0]?.message?.content?.trim();
+        if (!text || text.length < 3) {
+          const msg = `${model}: empty response`;
+          errors.push(msg);
+          throw new Error(msg);
+        }
+        if (text.includes('<!DOCTYPE') || text.includes('$@$')) {
+          const msg = `${model}: garbage response`;
+          errors.push(msg);
+          throw new Error(msg);
+        }
+        console.log(`[AI-BOT] ✅ ${model} success (${text.length} chars)`);
+        return text;
+      } catch (err: any) {
+        if (!errors.find(e => e.startsWith(model))) {
+          errors.push(`${model}: ${err.message?.substring(0, 80)}`);
+        }
+        throw err;
+      }
+    }
+
+    // Also try the text endpoint (simpler, sometimes more reliable)
+    async function pollinationsText(timeout: number): Promise<string> {
+      try {
+        console.log('[AI-BOT] Trying pollinations-text...');
+        const prompt = `${LUMINARY_SYSTEM_PROMPT}\n\nUser: ${userMessage.substring(0, 500)}\n\nОтвечай коротко (1-3 предложения):`;
+        const resp = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai&noCache=true`, {
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (!resp.ok) throw new Error(`text-api: ${resp.status}`);
+        const text = await resp.text();
+        const clean = text?.trim();
+        if (!clean || clean.length < 3 || clean.includes('<!DOCTYPE')) throw new Error('text-api: empty');
+        console.log(`[AI-BOT] ✅ pollinations-text success (${clean.length} chars)`);
+        return clean;
+      } catch (err: any) {
+        errors.push(`text-api: ${err.message?.substring(0, 80)}`);
+        throw err;
+      }
     }
 
     try {
-      // Race multiple free models — first valid response wins
+      // Round 1: Race multiple free models — first valid response wins
       const result = await Promise.any([
-        pollinationsModel('openai', 15000),
-        pollinationsModel('mistral', 14000),
-        pollinationsModel('deepseek', 15000),
-        pollinationsModel('qwen', 14000),
-        pollinationsModel('llama', 14000),
+        pollinationsModel('openai', 18000),
+        pollinationsModel('mistral', 16000),
+        pollinationsModel('deepseek', 18000),
+        pollinationsModel('qwen', 16000),
+        pollinationsModel('llama', 16000),
+        pollinationsText(18000),
       ]).catch(() => null);
 
       if (result) {
-        // Truncate if too long
         return result.length > AI_MAX_RESPONSE_LENGTH
           ? result.substring(0, AI_MAX_RESPONSE_LENGTH) + '...'
           : result;
       }
+
+      // Round 2: Retry with longer timeouts
+      console.log('[AI-BOT] Round 1 failed, retrying...');
+      console.log('[AI-BOT] Errors:', errors.join(' | '));
+      await new Promise(r => setTimeout(r, 1500));
+
+      const retry = await Promise.any([
+        pollinationsModel('openai', 25000),
+        pollinationsModel('mistral', 25000),
+        pollinationsModel('deepseek', 25000),
+        pollinationsText(25000),
+      ]).catch(() => null);
+
+      if (retry) {
+        return retry.length > AI_MAX_RESPONSE_LENGTH
+          ? retry.substring(0, AI_MAX_RESPONSE_LENGTH) + '...'
+          : retry;
+      }
+
+      console.error('[AI-BOT] All providers failed after retry. Errors:', errors.join(' | '));
     } catch (err: any) {
-      console.error('[AI-BOT] All providers failed:', err.message);
+      console.error('[AI-BOT] generateAiResponse error:', err.message);
     }
     return null;
   }
 
   /**
-   * Handle bot name mention — generate AI response with rate limiting
+   * Check if a message is directed at the bot:
+   * 1) @mention of the bot
+   * 2) Name pattern (luminary/lumi/etc)
+   * 3) Reply to a bot message
    */
-  async function handleBotMention(message: any): Promise<boolean> {
-    if (!BOT_NAME_PATTERNS.test(message.content)) return false;
+  function isMessageForBot(message: any): boolean {
+    // 1) Actual @mention of the bot
+    if (message.mentions?.has(client.user?.id)) return true;
+
+    // 2) Name pattern in text
+    if (message.content && BOT_NAME_PATTERNS.test(message.content)) return true;
+
+    // 3) Reply to the bot's own message
+    if (message.reference?.messageId && message.channel) {
+      try {
+        // Check cached messages first (avoids API call)
+        const replied = (message.channel as any).messages?.cache?.get(message.reference.messageId);
+        if (replied && replied.author?.id === client.user?.id) return true;
+      } catch {}
+    }
+
+    return false;
+  }
+
+  /**
+   * Handle messages directed at the bot — generate AI response with rate limiting
+   */
+  async function handleBotChat(message: any): Promise<boolean> {
+    if (!isMessageForBot(message)) return false;
 
     const now = Date.now();
 
     // Global cooldown
-    if (now - lastAiResponseTime < AI_GLOBAL_COOLDOWN_MS) return false;
+    if (now - lastAiResponseTime < AI_GLOBAL_COOLDOWN_MS) {
+      console.log(`[AI-BOT] Skipped — global cooldown (${Math.round((AI_GLOBAL_COOLDOWN_MS - (now - lastAiResponseTime)) / 1000)}s left)`);
+      return false;
+    }
 
     // Per-user cooldown
     const userLast = aiUserCooldowns.get(message.author.id) || 0;
-    if (now - userLast < AI_USER_COOLDOWN_MS) return false;
+    if (now - userLast < AI_USER_COOLDOWN_MS) {
+      console.log(`[AI-BOT] Skipped — user cooldown for ${message.author.username} (${Math.round((AI_USER_COOLDOWN_MS - (now - userLast)) / 1000)}s left)`);
+      return false;
+    }
 
     // Mark cooldowns BEFORE async work to prevent concurrent triggers
     lastAiResponseTime = now;
     aiUserCooldowns.set(message.author.id, now);
+
+    console.log(`[AI-BOT] Processing message from ${message.author.username}: "${message.content.substring(0, 80)}"`);
 
     // Show typing indicator
     try {
@@ -1116,18 +1235,28 @@ export async function setupDiscordBot() {
     } catch {}
 
     const aiReply = await generateAiResponse(message.content);
-    if (aiReply) {
+
+    // Determine language for fallback
+    const hasRussian = /[\u0400-\u04FF]/.test(message.content);
+
+    const finalReply = aiReply
+      || (hasRussian
+        ? AI_FALLBACK_RU[Math.floor(Math.random() * AI_FALLBACK_RU.length)]
+        : AI_FALLBACK_EN[Math.floor(Math.random() * AI_FALLBACK_EN.length)]);
+
+    try {
+      // Reply to the message (thread-style) so it's clear who the bot responds to
+      await message.reply({ content: finalReply });
+      console.log(`[AI-BOT] ${aiReply ? 'AI' : 'FALLBACK'} replied to ${message.author.username}: ${finalReply.substring(0, 60)}...`);
+    } catch (err: any) {
+      // Fallback: plain send if reply fails
       try {
-        await (message.channel as any).send({
-          content: `<@${message.author.id}> ${aiReply}`,
-        });
-        console.log(`[AI-BOT] Replied to ${message.author.username}: ${aiReply.substring(0, 60)}...`);
-      } catch (err: any) {
-        console.error('[AI-BOT] Send error:', err.message);
+        await (message.channel as any).send({ content: `<@${message.author.id}> ${finalReply}` });
+      } catch (err2: any) {
+        console.error('[AI-BOT] Send failed:', err2.message);
       }
-      return true;
     }
-    return false;
+    return true;
   }
 
   // Отслеживание сообщений + ADVANCED модерация с антиспамом
@@ -1171,9 +1300,11 @@ export async function setupDiscordBot() {
       }
 
       // ── BOT NAME MENTION → AI RESPONSE ──
-      if (message.content && message.content.length >= 3) {
+      if (message.content && message.content.length >= 2) {
         // Non-blocking: fire AI response without blocking moderation
-        handleBotMention(message).catch(() => {});
+        handleBotChat(message).catch((err) => {
+          console.error('[AI-BOT] handleBotChat error:', err.message);
+        });
       }
 
       // Skip very short messages for content moderation
