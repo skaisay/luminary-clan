@@ -731,6 +731,161 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     }
   });
 
+  // === AI Provider Health Check (for admin monitoring) ===
+  app.get("/api/admin/ai-health", async (req, res) => {
+    try {
+      const testMessage = 'Say "OK" in one word.';
+      const results: Record<string, { status: string; latencyMs: number; error?: string; chars?: number }> = {};
+
+      async function testProvider(name: string, fn: () => Promise<string>): Promise<void> {
+        const start = Date.now();
+        try {
+          const text = await fn();
+          results[name] = {
+            status: text && text.length > 0 ? 'online' : 'error',
+            latencyMs: Date.now() - start,
+            chars: text?.length || 0,
+          };
+        } catch (err: any) {
+          results[name] = {
+            status: 'offline',
+            latencyMs: Date.now() - start,
+            error: err.message?.substring(0, 100) || 'unknown',
+          };
+        }
+      }
+
+      // Test all providers in parallel (with short timeouts for quick check)
+      await Promise.allSettled([
+        testProvider('pollinations-openai', async () => {
+          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'openai', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }),
+        testProvider('pollinations-mistral', async () => {
+          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'mistral', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }),
+        testProvider('pollinations-deepseek', async () => {
+          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'deepseek', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }),
+        testProvider('pollinations-qwen', async () => {
+          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'qwen', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }),
+        testProvider('pollinations-llama', async () => {
+          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'llama', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }),
+        testProvider('pollinations-text', async () => {
+          const r = await fetch(`https://text.pollinations.ai/${encodeURIComponent(testMessage)}?model=openai&noCache=true`, {
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return (await r.text())?.trim() || '';
+        }),
+        testProvider('blackbox', async () => {
+          const r = await fetch('https://api.blackbox.ai/api/chat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: [{ role: 'user', content: testMessage }], model: 'gpt-4o-mini', max_tokens: 10 }),
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return (await r.text())?.trim() || '';
+        }),
+        testProvider('huggingface', async () => {
+          const r = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ inputs: `<|user|>\n${testMessage}</s>\n<|assistant|>\n`, parameters: { max_new_tokens: 10 } }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return (Array.isArray(d) ? d[0]?.generated_text : d?.generated_text)?.split('<|assistant|>').pop()?.trim() || '';
+        }),
+        testProvider('duckduckgo', async () => {
+          const statusResp = await fetch('https://duckduckgo.com/duckchat/v1/status', {
+            headers: { 'x-vqd-accept': '1' },
+            signal: AbortSignal.timeout(5000),
+          });
+          const vqd = statusResp.headers.get('x-vqd-4');
+          if (!vqd) throw new Error('no vqd token');
+          const r = await fetch('https://duckduckgo.com/duckchat/v1/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-vqd-4': vqd },
+            body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: testMessage }] }),
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const body = await r.text();
+          let text = '';
+          for (const line of body.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            const p = line.slice(6).trim();
+            if (p === '[DONE]') break;
+            try { const j = JSON.parse(p); if (j.message) text += j.message; } catch {}
+          }
+          return text.trim();
+        }),
+        testProvider('openrouter-free', async () => {
+          const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'HTTP-Referer': 'https://luminary-clan.onrender.com' },
+            body: JSON.stringify({ model: 'mistralai/mistral-7b-instruct:free', messages: [{ role: 'user', content: testMessage }], max_tokens: 10 }),
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }),
+      ]);
+
+      const online = Object.values(results).filter(r => r.status === 'online').length;
+      const total = Object.keys(results).length;
+
+      res.json({
+        summary: `${online}/${total} providers online`,
+        onlineCount: online,
+        totalCount: total,
+        checkedAt: new Date().toISOString(),
+        providers: results,
+      });
+    } catch (err: any) {
+      console.error('[AI-Health] Error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // === Roblox Tracker API ===
   const robloxApi = await import('./roblox-api');
 

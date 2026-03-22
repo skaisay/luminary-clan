@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Send, Hash, Users as UsersIcon, UserX, Ban, Shield, Plus, Trash2, Search, CheckCircle, XCircle, AlertTriangle, RefreshCw, Volume2, MessageSquare, Eye, Loader2, Zap, Bot, Edit, Power } from "lucide-react";
+import { Send, Hash, Users as UsersIcon, UserX, Ban, Shield, Plus, Trash2, Search, CheckCircle, XCircle, AlertTriangle, RefreshCw, Volume2, MessageSquare, Eye, Loader2, Zap, Bot, Edit, Power, Activity, Wifi, WifiOff } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -175,6 +175,40 @@ export default function AdminDiscordTab() {
       } catch { return []; }
     },
   });
+
+  // ── AI Health Check ──
+  interface AiProviderStatus {
+    status: string;
+    latencyMs: number;
+    error?: string;
+    chars?: number;
+  }
+  interface AiHealthData {
+    summary: string;
+    onlineCount: number;
+    totalCount: number;
+    checkedAt: string;
+    providers: Record<string, AiProviderStatus>;
+  }
+
+  const [aiHealthLoading, setAiHealthLoading] = useState(false);
+  const [aiHealth, setAiHealth] = useState<AiHealthData | null>(null);
+
+  const runAiHealthCheck = async () => {
+    setAiHealthLoading(true);
+    try {
+      const res = await fetch("/api/admin/ai-health", { credentials: "include" });
+      if (res.ok) {
+        setAiHealth(await res.json());
+      } else {
+        toast({ title: "Ошибка проверки AI", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Не удалось проверить AI", variant: "destructive" });
+    } finally {
+      setAiHealthLoading(false);
+    }
+  };
 
   const createTriggerMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -528,6 +562,10 @@ export default function AdminDiscordTab() {
           <TabsTrigger value="triggers" className="gap-1.5">
             <Zap className="w-4 h-4" />
             Триггеры
+          </TabsTrigger>
+          <TabsTrigger value="ai-monitor" className="gap-1.5">
+            <Activity className="w-4 h-4" />
+            AI
           </TabsTrigger>
         </TabsList>
 
@@ -1247,6 +1285,122 @@ export default function AdminDiscordTab() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ============ AI MONITORING TAB ============ */}
+        <TabsContent value="ai-monitor" className="mt-6 space-y-4">
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="w-5 h-5" />
+                Мониторинг AI-провайдеров
+              </CardTitle>
+              <CardDescription>
+                Проверка доступности всех нейросетей, подключённых к боту. Нажмите чтобы протестировать каждый провайдер в реальном времени.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Button onClick={runAiHealthCheck} disabled={aiHealthLoading}>
+                  {aiHealthLoading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
+                  {aiHealthLoading ? "Тестирование..." : "Запустить проверку"}
+                </Button>
+                {aiHealth && (
+                  <span className="text-sm text-muted-foreground">
+                    Последняя проверка: {new Date(aiHealth.checkedAt).toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
+
+              {aiHealth && (
+                <>
+                  {/* Summary */}
+                  <div className={`p-4 rounded-lg border ${
+                    aiHealth.onlineCount >= 3 ? 'border-green-500/50 bg-green-500/10' :
+                    aiHealth.onlineCount >= 1 ? 'border-yellow-500/50 bg-yellow-500/10' :
+                    'border-red-500/50 bg-red-500/10'
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      {aiHealth.onlineCount >= 3 ? (
+                        <CheckCircle className="w-5 h-5 text-green-500" />
+                      ) : aiHealth.onlineCount >= 1 ? (
+                        <AlertTriangle className="w-5 h-5 text-yellow-500" />
+                      ) : (
+                        <XCircle className="w-5 h-5 text-red-500" />
+                      )}
+                      <span className="text-lg font-bold">
+                        {aiHealth.summary}
+                      </span>
+                    </div>
+                    <p className="text-sm mt-1 text-muted-foreground">
+                      {aiHealth.onlineCount >= 3
+                        ? "Бот работает стабильно. Достаточно провайдеров для надёжной работы."
+                        : aiHealth.onlineCount >= 1
+                        ? "Работает, но мало доступных провайдеров. Возможны задержки."
+                        : "Все провайдеры недоступны! Бот будет отвечать заготовленными фразами."
+                      }
+                    </p>
+                  </div>
+
+                  {/* Provider list */}
+                  <div className="grid gap-2">
+                    {Object.entries(aiHealth.providers).map(([name, info]) => (
+                      <div
+                        key={name}
+                        className={`flex items-center justify-between p-3 rounded-lg glass glass-border ${
+                          info.status === 'online' ? '' : 'opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {info.status === 'online' ? (
+                            <Wifi className="w-4 h-4 text-green-500" />
+                          ) : (
+                            <WifiOff className="w-4 h-4 text-red-500" />
+                          )}
+                          <div>
+                            <p className="font-medium text-sm">{name}</p>
+                            {info.error && (
+                              <p className="text-xs text-red-400 max-w-md truncate">{info.error}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge variant={info.status === 'online' ? 'default' : 'destructive'} className="text-xs">
+                            {info.status === 'online' ? '✅ Online' : '❌ Offline'}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground w-16 text-right">
+                            {info.latencyMs}ms
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Explanation */}
+                  <div className="text-xs text-muted-foreground space-y-1 pt-2 border-t border-white/10">
+                    <p>🤖 <strong>Pollinations</strong> (openai, mistral, deepseek, qwen, llama, text) — бесплатный, без ключа, несколько моделей</p>
+                    <p>⬛ <strong>Blackbox</strong> — бесплатный, GPT-4o-mini</p>
+                    <p>🤗 <strong>HuggingFace</strong> — бесплатный, Zephyr-7b</p>
+                    <p>🦆 <strong>DuckDuckGo</strong> — бесплатный, GPT-4o-mini через DDG</p>
+                    <p>🔗 <strong>OpenRouter</strong> — бесплатные модели (Mistral-7b)</p>
+                    <p className="pt-1">Бот гонит все провайдеры одновременно — кто первый ответит, тот и выигрывает. Если все упадут — бот ответит заготовленной фразой.</p>
+                  </div>
+                </>
+              )}
+
+              {!aiHealth && !aiHealthLoading && (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Bot className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>Нажмите «Запустить проверку» чтобы протестировать все AI-провайдеры</p>
+                  <p className="text-xs mt-1">Проверка занимает ~10-15 секунд</p>
                 </div>
               )}
             </CardContent>

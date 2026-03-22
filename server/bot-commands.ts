@@ -1062,7 +1062,8 @@ export async function setupDiscordBot() {
   ];
 
   /**
-   * Generate AI response using Pollinations API (free, multiple models racing)
+   * Generate AI response using MULTIPLE free providers (race pattern)
+   * Providers: Pollinations (6 models), Blackbox, HuggingFace, DuckDuckGo
    * With detailed logging for debugging
    */
   async function generateAiResponse(userMessage: string): Promise<string | null> {
@@ -1073,9 +1074,10 @@ export async function setupDiscordBot() {
 
     const errors: string[] = [];
 
+    // ── Provider 1: Pollinations OpenAI-compatible endpoint ──
     async function pollinationsModel(model: string, timeout: number): Promise<string> {
       try {
-        console.log(`[AI-BOT] Trying ${model}...`);
+        console.log(`[AI-BOT] Trying poll-${model}...`);
         const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1089,61 +1091,193 @@ export async function setupDiscordBot() {
         });
         if (!resp.ok) {
           const errText = await resp.text().catch(() => 'no body');
-          const msg = `${model}: HTTP ${resp.status} — ${errText.substring(0, 100)}`;
+          const msg = `poll-${model}: HTTP ${resp.status} — ${errText.substring(0, 80)}`;
           errors.push(msg);
           throw new Error(msg);
         }
         const data = await resp.json();
         const text = data.choices?.[0]?.message?.content?.trim();
-        if (!text || text.length < 3) {
-          const msg = `${model}: empty response`;
-          errors.push(msg);
-          throw new Error(msg);
-        }
-        if (text.includes('<!DOCTYPE') || text.includes('$@$')) {
-          const msg = `${model}: garbage response`;
-          errors.push(msg);
-          throw new Error(msg);
-        }
-        console.log(`[AI-BOT] ✅ ${model} success (${text.length} chars)`);
+        if (!text || text.length < 3) throw new Error(`poll-${model}: empty`);
+        if (text.includes('<!DOCTYPE') || text.includes('$@$')) throw new Error(`poll-${model}: garbage`);
+        console.log(`[AI-BOT] ✅ poll-${model} success (${text.length} chars)`);
         return text;
       } catch (err: any) {
-        if (!errors.find(e => e.startsWith(model))) {
-          errors.push(`${model}: ${err.message?.substring(0, 80)}`);
+        if (!errors.find(e => e.startsWith(`poll-${model}`))) {
+          errors.push(`poll-${model}: ${err.message?.substring(0, 80)}`);
         }
         throw err;
       }
     }
 
-    // Also try the text endpoint (simpler, sometimes more reliable)
+    // ── Provider 2: Pollinations simple text GET endpoint ──
     async function pollinationsText(timeout: number): Promise<string> {
       try {
         console.log('[AI-BOT] Trying pollinations-text...');
-        const prompt = `${LUMINARY_SYSTEM_PROMPT}\n\nUser: ${userMessage.substring(0, 500)}\n\nОтвечай коротко (1-3 предложения):`;
-        const resp = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai&noCache=true`, {
+        const shortPrompt = `${LUMINARY_SYSTEM_PROMPT.substring(0, 300)}\n\nUser: ${userMessage.substring(0, 300)}\nОтвечай коротко:`;
+        const resp = await fetch(`https://text.pollinations.ai/${encodeURIComponent(shortPrompt)}?model=openai&noCache=true`, {
           signal: AbortSignal.timeout(timeout),
         });
-        if (!resp.ok) throw new Error(`text-api: ${resp.status}`);
-        const text = await resp.text();
-        const clean = text?.trim();
-        if (!clean || clean.length < 3 || clean.includes('<!DOCTYPE')) throw new Error('text-api: empty');
-        console.log(`[AI-BOT] ✅ pollinations-text success (${clean.length} chars)`);
-        return clean;
+        if (!resp.ok) throw new Error(`pollinations-text: ${resp.status}`);
+        const text = (await resp.text())?.trim();
+        if (!text || text.length < 3 || text.includes('<!DOCTYPE')) throw new Error('pollinations-text: empty');
+        console.log(`[AI-BOT] ✅ pollinations-text success (${text.length} chars)`);
+        return text;
       } catch (err: any) {
-        errors.push(`text-api: ${err.message?.substring(0, 80)}`);
+        errors.push(`pollinations-text: ${err.message?.substring(0, 80)}`);
+        throw err;
+      }
+    }
+
+    // ── Provider 3: Blackbox AI (free, no key, used on website) ──
+    async function blackboxProvider(timeout: number): Promise<string> {
+      try {
+        console.log('[AI-BOT] Trying blackbox...');
+        const resp = await fetch('https://api.blackbox.ai/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: chatMessages,
+            model: 'gpt-4o-mini',
+            max_tokens: 500,
+          }),
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (!resp.ok) throw new Error(`blackbox: ${resp.status}`);
+        const text = (await resp.text())?.trim();
+        if (!text || text.length < 3 || text.includes('<!DOCTYPE') || text.includes('$@$')) throw new Error('blackbox: empty');
+        console.log(`[AI-BOT] ✅ blackbox success (${text.length} chars)`);
+        return text;
+      } catch (err: any) {
+        errors.push(`blackbox: ${err.message?.substring(0, 80)}`);
+        throw err;
+      }
+    }
+
+    // ── Provider 4: HuggingFace Inference (free, no key) ──
+    async function huggingfaceProvider(timeout: number): Promise<string> {
+      try {
+        console.log('[AI-BOT] Trying huggingface...');
+        const prompt = `<|system|>\n${LUMINARY_SYSTEM_PROMPT}</s>\n<|user|>\n${userMessage.substring(0, 400)}</s>\n<|assistant|>\n`;
+        const resp = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inputs: prompt,
+            parameters: { max_new_tokens: 400, temperature: 0.7 },
+          }),
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (!resp.ok) throw new Error(`hf: ${resp.status}`);
+        const data = await resp.json();
+        const raw = Array.isArray(data) ? data[0]?.generated_text : data?.generated_text;
+        if (!raw) throw new Error('hf: no text');
+        const text = raw.split('<|assistant|>').pop()?.replace('</s>', '').trim() || '';
+        if (text.length < 3) throw new Error('hf: empty');
+        console.log(`[AI-BOT] ✅ huggingface success (${text.length} chars)`);
+        return text;
+      } catch (err: any) {
+        errors.push(`huggingface: ${err.message?.substring(0, 80)}`);
+        throw err;
+      }
+    }
+
+    // ── Provider 5: DuckDuckGo AI Chat (free, no key, very reliable) ──
+    async function duckduckgoProvider(timeout: number): Promise<string> {
+      try {
+        console.log('[AI-BOT] Trying duckduckgo...');
+        // Step 1: Get a vqd token
+        const statusResp = await fetch('https://duckduckgo.com/duckchat/v1/status', {
+          headers: { 'x-vqd-accept': '1' },
+          signal: AbortSignal.timeout(5000),
+        });
+        const vqd = statusResp.headers.get('x-vqd-4');
+        if (!vqd) throw new Error('ddg: no vqd token');
+
+        // Step 2: Send chat request
+        const chatResp = await fetch('https://duckduckgo.com/duckchat/v1/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-vqd-4': vqd,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'user', content: `${LUMINARY_SYSTEM_PROMPT}\n\nUser message: ${userMessage.substring(0, 400)}\n\nОтветь коротко (1-3 предложения), в стиле Luminary:` },
+            ],
+          }),
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (!chatResp.ok) throw new Error(`ddg: ${chatResp.status}`);
+
+        // Parse SSE stream
+        const body = await chatResp.text();
+        let fullText = '';
+        for (const line of body.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.message) fullText += parsed.message;
+          } catch {}
+        }
+        const text = fullText.trim();
+        if (text.length < 3) throw new Error('ddg: empty');
+        console.log(`[AI-BOT] ✅ duckduckgo success (${text.length} chars)`);
+        return text;
+      } catch (err: any) {
+        errors.push(`duckduckgo: ${err.message?.substring(0, 80)}`);
+        throw err;
+      }
+    }
+
+    // ── Provider 6: OpenRouter free models (no key needed for some) ──
+    async function openrouterFree(timeout: number): Promise<string> {
+      try {
+        console.log('[AI-BOT] Trying openrouter-free...');
+        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://luminary-clan.onrender.com',
+          },
+          body: JSON.stringify({
+            model: 'mistralai/mistral-7b-instruct:free',
+            messages: chatMessages,
+            max_tokens: 400,
+            temperature: 0.8,
+          }),
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (!resp.ok) throw new Error(`openrouter: ${resp.status}`);
+        const data = await resp.json();
+        const text = data.choices?.[0]?.message?.content?.trim();
+        if (!text || text.length < 3) throw new Error('openrouter: empty');
+        console.log(`[AI-BOT] ✅ openrouter success (${text.length} chars)`);
+        return text;
+      } catch (err: any) {
+        errors.push(`openrouter: ${err.message?.substring(0, 80)}`);
         throw err;
       }
     }
 
     try {
-      // Round 1: Race multiple free models — first valid response wins
+      // ═══ ROUND 1: Race ALL providers simultaneously ═══
+      console.log(`[AI-BOT] Starting AI race for: "${userMessage.substring(0, 50)}..."`);
       const result = await Promise.any([
+        // Pollinations (6 models)
         pollinationsModel('openai', 18000),
         pollinationsModel('mistral', 16000),
         pollinationsModel('deepseek', 18000),
         pollinationsModel('qwen', 16000),
         pollinationsModel('llama', 16000),
         pollinationsText(18000),
+        // Other providers
+        blackboxProvider(16000),
+        huggingfaceProvider(18000),
+        duckduckgoProvider(16000),
+        openrouterFree(16000),
       ]).catch(() => null);
 
       if (result) {
@@ -1152,16 +1286,17 @@ export async function setupDiscordBot() {
           : result;
       }
 
-      // Round 2: Retry with longer timeouts
-      console.log('[AI-BOT] Round 1 failed, retrying...');
-      console.log('[AI-BOT] Errors:', errors.join(' | '));
-      await new Promise(r => setTimeout(r, 1500));
+      // ═══ ROUND 2: Retry key providers with longer timeouts ═══
+      console.log('[AI-BOT] Round 1 ALL FAILED. Errors:', errors.join(' | '));
+      console.log('[AI-BOT] Retrying (round 2)...');
+      await new Promise(r => setTimeout(r, 2000));
 
       const retry = await Promise.any([
-        pollinationsModel('openai', 25000),
-        pollinationsModel('mistral', 25000),
-        pollinationsModel('deepseek', 25000),
-        pollinationsText(25000),
+        pollinationsModel('openai', 30000),
+        pollinationsModel('mistral', 30000),
+        blackboxProvider(25000),
+        duckduckgoProvider(25000),
+        huggingfaceProvider(25000),
       ]).catch(() => null);
 
       if (retry) {
@@ -1170,7 +1305,7 @@ export async function setupDiscordBot() {
           : retry;
       }
 
-      console.error('[AI-BOT] All providers failed after retry. Errors:', errors.join(' | '));
+      console.error('[AI-BOT] ALL providers failed after 2 rounds. Errors:', errors.join(' | '));
     } catch (err: any) {
       console.error('[AI-BOT] generateAiResponse error:', err.message);
     }
