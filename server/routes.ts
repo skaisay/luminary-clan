@@ -50,6 +50,7 @@ import {
   adSpots,
   discordChannelRules,
   flaggedMessages,
+  botAutoResponses,
 } from "@shared/schema";
 import { videoUpload } from "./upload";
 import {
@@ -1815,6 +1816,69 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         .where(inArray(flaggedMessages.id, messageIds));
 
       res.json({ approved: messageIds.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== BOT AUTO-RESPONSES ====================
+
+  // Get all auto-responses
+  app.get("/api/admin/discord/auto-responses", requireAdmin, async (req, res) => {
+    try {
+      const responses = await db.select().from(botAutoResponses).orderBy(botAutoResponses.createdAt);
+      res.json(responses);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create auto-response
+  app.post("/api/admin/discord/auto-responses", requireAdmin, async (req, res) => {
+    try {
+      const { triggerWords, response, responseType, description, cooldownMs } = req.body;
+      if (!triggerWords || !response) {
+        return res.status(400).json({ error: "triggerWords и response обязательны" });
+      }
+      const [item] = await db.insert(botAutoResponses).values({
+        triggerWords,
+        response,
+        responseType: responseType || 'text',
+        description: description || null,
+        cooldownMs: cooldownMs || 30000,
+      }).returning();
+      res.json(item);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Update auto-response
+  app.put("/api/admin/discord/auto-responses/:id", requireAdmin, async (req, res) => {
+    try {
+      const { triggerWords, response, responseType, description, isActive, cooldownMs } = req.body;
+      await db.update(botAutoResponses)
+        .set({
+          ...(triggerWords !== undefined && { triggerWords }),
+          ...(response !== undefined && { response }),
+          ...(responseType !== undefined && { responseType }),
+          ...(description !== undefined && { description }),
+          ...(isActive !== undefined && { isActive }),
+          ...(cooldownMs !== undefined && { cooldownMs }),
+          updatedAt: new Date(),
+        })
+        .where(eq(botAutoResponses.id, req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete auto-response
+  app.delete("/api/admin/discord/auto-responses/:id", requireAdmin, async (req, res) => {
+    try {
+      await db.delete(botAutoResponses).where(eq(botAutoResponses.id, req.params.id));
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

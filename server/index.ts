@@ -224,8 +224,38 @@ app.use((req, res, next) => {
         END IF;
       END
       $$;
+
+      CREATE TABLE IF NOT EXISTS bot_auto_responses (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        trigger_words TEXT NOT NULL,
+        response TEXT NOT NULL,
+        response_type TEXT NOT NULL DEFAULT 'text',
+        description TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        cooldown_ms INTEGER NOT NULL DEFAULT 30000,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
     `);
     console.log('[DB] Ensured all custom tables exist');
+
+    // Seed default "arena" auto-response trigger if table is empty
+    const { rows: triggerRows } = await dbPool.query('SELECT COUNT(*) FROM bot_auto_responses');
+    if (parseInt(triggerRows[0].count) === 0) {
+      await dbPool.query(`
+        INSERT INTO bot_auto_responses (id, trigger_words, response, response_type, description, is_active, cooldown_ms)
+        VALUES (
+          gen_random_uuid(),
+          'arena,арена',
+          'https://www.roblox.com/games/15887744763/Arena-MWT',
+          'link',
+          'Ссылка на арену MWT для игроков',
+          true,
+          30000
+        )
+      `);
+      console.log('[DB] Seeded default arena auto-response trigger');
+    }
 
     // Seed page_availability if empty
     const { rows: pageRows } = await dbPool.query('SELECT COUNT(*) FROM page_availability');

@@ -888,3 +888,25 @@ export type InsertDiscordChannelRule = z.infer<typeof insertDiscordChannelRuleSc
 export type FlaggedMessage = typeof flaggedMessages.$inferSelect;
 export type InsertFlaggedMessage = z.infer<typeof insertFlaggedMessageSchema>;
 
+// Bot auto-responses (keyword triggers → automatic bot replies)
+export const botAutoResponses = pgTable("bot_auto_responses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  triggerWords: text("trigger_words").notNull(), // comma-separated keywords: "arena,арена,Arena"
+  response: text("response").notNull(), // response text or link
+  responseType: text("response_type").notNull().default("text"), // text | link | embed
+  description: text("description"), // admin note about this trigger
+  isActive: boolean("is_active").default(true).notNull(),
+  cooldownMs: integer("cooldown_ms").default(30000).notNull(), // per-channel cooldown in ms
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertBotAutoResponseSchema = createInsertSchema(botAutoResponses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type BotAutoResponse = typeof botAutoResponses.$inferSelect;
+export type InsertBotAutoResponse = z.infer<typeof insertBotAutoResponseSchema>;
+

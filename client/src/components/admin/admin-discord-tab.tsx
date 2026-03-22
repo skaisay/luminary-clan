@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Send, Hash, Users as UsersIcon, UserX, Ban, Shield, Plus, Trash2, Search, CheckCircle, XCircle, AlertTriangle, RefreshCw, Volume2, MessageSquare, Eye, Loader2 } from "lucide-react";
+import { Send, Hash, Users as UsersIcon, UserX, Ban, Shield, Plus, Trash2, Search, CheckCircle, XCircle, AlertTriangle, RefreshCw, Volume2, MessageSquare, Eye, Loader2, Zap, Bot, Edit, Power } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +78,14 @@ export default function AdminDiscordTab() {
   // Flagged message selection
   const [selectedFlagged, setSelectedFlagged] = useState<Set<string>>(new Set());
 
+  // Auto-response trigger state
+  const [triggerWords, setTriggerWords] = useState("");
+  const [triggerResponse, setTriggerResponse] = useState("");
+  const [triggerType, setTriggerType] = useState<string>("link");
+  const [triggerDescription, setTriggerDescription] = useState("");
+  const [triggerCooldown, setTriggerCooldown] = useState("30");
+  const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null);
+
   const { data: channels, isLoading: channelsLoading, error: channelsError } = useQuery<DiscordChannel[]>({
     queryKey: ["/api/admin/discord/channels"],
     retry: false,
@@ -142,6 +150,117 @@ export default function AdminDiscordTab() {
       } catch { return []; }
     },
   });
+
+  // ── Auto-response triggers ──
+  interface AutoResponse {
+    id: string;
+    triggerWords: string;
+    response: string;
+    responseType: string;
+    description: string | null;
+    isActive: boolean;
+    cooldownMs: number;
+    createdAt: string;
+  }
+
+  const { data: autoResponses, isLoading: autoResponsesLoading } = useQuery<AutoResponse[]>({
+    queryKey: ["/api/admin/discord/auto-responses"],
+    retry: false,
+    staleTime: 30_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/auto-responses", { credentials: "include" });
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    },
+  });
+
+  const createTriggerMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/admin/discord/auto-responses", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Триггер создан!" });
+      setTriggerWords(""); setTriggerResponse(""); setTriggerDescription("");
+      setTriggerType("link"); setTriggerCooldown("30"); setEditingTriggerId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/auto-responses"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Ошибка создания триггера", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateTriggerMutation = useMutation({
+    mutationFn: async ({ id, ...data }: any) => {
+      const res = await fetch(`/api/admin/discord/auto-responses/${id}`, {
+        method: "PUT", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Триггер обновлён" });
+      setTriggerWords(""); setTriggerResponse(""); setTriggerDescription("");
+      setTriggerType("link"); setTriggerCooldown("30"); setEditingTriggerId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/auto-responses"] });
+    },
+  });
+
+  const deleteTriggerMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admin/discord/auto-responses/${id}`, { method: "DELETE", credentials: "include" });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Триггер удалён" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/auto-responses"] });
+    },
+  });
+
+  const toggleTriggerMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      const res = await fetch(`/api/admin/discord/auto-responses/${id}`, {
+        method: "PUT", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive }),
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/auto-responses"] });
+    },
+  });
+
+  const handleSaveTrigger = () => {
+    if (!triggerWords.trim() || !triggerResponse.trim()) {
+      toast({ title: "Заполните ключевые слова и ответ", variant: "destructive" });
+      return;
+    }
+    const payload = {
+      triggerWords: triggerWords.trim(),
+      response: triggerResponse.trim(),
+      responseType: triggerType,
+      description: triggerDescription.trim() || null,
+      cooldownMs: Math.max(5000, parseInt(triggerCooldown) * 1000),
+    };
+    if (editingTriggerId) {
+      updateTriggerMutation.mutate({ id: editingTriggerId, ...payload });
+    } else {
+      createTriggerMutation.mutate(payload);
+    }
+  };
+
+  const startEditTrigger = (t: AutoResponse) => {
+    setEditingTriggerId(t.id);
+    setTriggerWords(t.triggerWords);
+    setTriggerResponse(t.response);
+    setTriggerType(t.responseType);
+    setTriggerDescription(t.description || "");
+    setTriggerCooldown(String(Math.round(t.cooldownMs / 1000)));
+  };
 
   const sendMessageMutation = useMutation({
     mutationFn: async (data: { channelId: string; message: string }) => {
@@ -405,6 +524,10 @@ export default function AdminDiscordTab() {
           <TabsTrigger value="members" className="gap-1.5">
             <UsersIcon className="w-4 h-4" />
             Участники
+          </TabsTrigger>
+          <TabsTrigger value="triggers" className="gap-1.5">
+            <Zap className="w-4 h-4" />
+            Триггеры
           </TabsTrigger>
         </TabsList>
 
@@ -965,6 +1088,162 @@ export default function AdminDiscordTab() {
                         >
                           <Ban className="w-4 h-4" />
                         </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ============ TRIGGERS TAB ============ */}
+        <TabsContent value="triggers" className="mt-6 space-y-4">
+          {/* Create / Edit trigger form */}
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bot className="w-5 h-5" />
+                {editingTriggerId ? "Редактировать триггер" : "Новый авто-ответ"}
+              </CardTitle>
+              <CardDescription>
+                Бот автоматически ответит, когда пользователь напишет одно из ключевых слов. Поддерживает ссылки, текст, изображения (Discord автоматически покажет превью).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>Ключевые слова (через запятую)</Label>
+                <Input
+                  placeholder="arena,арена,Arena,Арена"
+                  value={triggerWords}
+                  onChange={(e) => setTriggerWords(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground mt-1">Регистр не важен. Каждое слово — отдельный триггер.</p>
+              </div>
+              <div>
+                <Label>Ответ бота</Label>
+                <Textarea
+                  placeholder="https://www.roblox.com/games/15887744763/Arena-MWT"
+                  value={triggerResponse}
+                  onChange={(e) => setTriggerResponse(e.target.value)}
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground mt-1">Ссылки на Roblox/YouTube/картинки автоматически покажут превью в Discord.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Тип ответа</Label>
+                  <Select value={triggerType} onValueChange={setTriggerType}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="link">Ссылка</SelectItem>
+                      <SelectItem value="text">Текст</SelectItem>
+                      <SelectItem value="embed">Embed-карточка</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Кулдаун (сек)</Label>
+                  <Input
+                    type="number"
+                    min={5}
+                    value={triggerCooldown}
+                    onChange={(e) => setTriggerCooldown(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Минимум 5 сек между ответами в одном канале</p>
+                </div>
+              </div>
+              <div>
+                <Label>Заметка (необязательно)</Label>
+                <Input
+                  placeholder="Ссылка на арену для игроков"
+                  value={triggerDescription}
+                  onChange={(e) => setTriggerDescription(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleSaveTrigger} disabled={createTriggerMutation.isPending || updateTriggerMutation.isPending}>
+                  {(createTriggerMutation.isPending || updateTriggerMutation.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  {editingTriggerId ? "Сохранить изменения" : "Создать триггер"}
+                </Button>
+                {editingTriggerId && (
+                  <Button variant="outline" onClick={() => {
+                    setEditingTriggerId(null);
+                    setTriggerWords(""); setTriggerResponse(""); setTriggerDescription("");
+                    setTriggerType("link"); setTriggerCooldown("30");
+                  }}>
+                    Отмена
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* List of triggers */}
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle>Активные триггеры</CardTitle>
+              <CardDescription>
+                {autoResponses?.length || 0} авто-ответов настроено
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {autoResponsesLoading ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 w-full" />)}
+                </div>
+              ) : !autoResponses?.length ? (
+                <p className="text-muted-foreground text-center py-8">
+                  Нет триггеров. Создайте первый авто-ответ выше.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {autoResponses.map((t) => (
+                    <div
+                      key={t.id}
+                      className={`p-4 rounded-lg glass glass-border ${!t.isActive ? 'opacity-50' : ''}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            {t.triggerWords.split(',').map((word, i) => (
+                              <Badge key={i} variant="secondary" className="text-xs">
+                                {word.trim()}
+                              </Badge>
+                            ))}
+                            <Badge variant={t.responseType === 'link' ? 'default' : 'outline'} className="text-xs">
+                              {t.responseType === 'link' ? '🔗 Ссылка' : t.responseType === 'embed' ? '📋 Embed' : '💬 Текст'}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground truncate">{t.response}</p>
+                          {t.description && (
+                            <p className="text-xs text-muted-foreground mt-1">📝 {t.description}</p>
+                          )}
+                          <p className="text-xs text-muted-foreground mt-1">
+                            ⏱ Кулдаун: {Math.round(t.cooldownMs / 1000)}с
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Switch
+                            checked={t.isActive}
+                            onCheckedChange={(checked) => toggleTriggerMutation.mutate({ id: t.id, isActive: checked })}
+                          />
+                          <Button size="sm" variant="ghost" onClick={() => startEditTrigger(t)}>
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-400 hover:text-red-300"
+                            onClick={() => {
+                              if (confirm(`Удалить триггер "${t.triggerWords}"?`)) {
+                                deleteTriggerMutation.mutate(t.id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}

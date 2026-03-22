@@ -928,6 +928,208 @@ export async function setupDiscordBot() {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // AUTO-RESPONSE TRIGGER SYSTEM — keyword → bot reply with rate limiting
+  // ═══════════════════════════════════════════════════════════════
+
+  interface CachedAutoResponse {
+    id: string;
+    keywords: string[]; // pre-split & lowercased
+    response: string;
+    responseType: string;
+    cooldownMs: number;
+  }
+
+  let autoResponseCache: CachedAutoResponse[] = [];
+  let autoResponseCacheTime = 0;
+  const AUTO_RESPONSE_CACHE_TTL = 60_000; // refresh from DB every 60s
+
+  // Per-trigger per-channel cooldown: "triggerId:channelId" → last response timestamp
+  const triggerCooldowns = new Map<string, number>();
+
+  async function getCachedAutoResponses(): Promise<CachedAutoResponse[]> {
+    const now = Date.now();
+    if (now - autoResponseCacheTime < AUTO_RESPONSE_CACHE_TTL && autoResponseCache.length > 0) {
+      return autoResponseCache;
+    }
+    try {
+      const { botAutoResponses } = await import('@shared/schema');
+      const rows = await db.select().from(botAutoResponses).where(
+        (await import('drizzle-orm')).eq(botAutoResponses.isActive, true)
+      );
+      autoResponseCache = rows.map(r => ({
+        id: r.id,
+        keywords: r.triggerWords.split(',').map(w => w.trim().toLowerCase()).filter(Boolean),
+        response: r.response,
+        responseType: r.responseType,
+        cooldownMs: r.cooldownMs,
+      }));
+      autoResponseCacheTime = now;
+    } catch (err: any) {
+      console.error('[TRIGGER] Cache refresh error:', err.message);
+    }
+    return autoResponseCache;
+  }
+
+  /**
+   * Check message for auto-response triggers. Returns true if a trigger fired.
+   */
+  async function checkAutoResponseTriggers(message: any): Promise<boolean> {
+    try {
+      const triggers = await getCachedAutoResponses();
+      if (triggers.length === 0) return false;
+
+      const contentLower = message.content.toLowerCase().trim();
+      // Split into words for exact word matching
+      const words = contentLower.split(/[\s,.!?;:()\[\]{}'"]+/).filter(Boolean);
+
+      for (const trigger of triggers) {
+        const matched = trigger.keywords.some(kw => words.includes(kw));
+        if (!matched) continue;
+
+        // Check per-trigger per-channel cooldown
+        const cooldownKey = `${trigger.id}:${message.channelId}`;
+        const lastFired = triggerCooldowns.get(cooldownKey) || 0;
+        const now = Date.now();
+        if (now - lastFired < trigger.cooldownMs) continue;
+
+        // Fire the trigger
+        triggerCooldowns.set(cooldownKey, now);
+
+        // Build response based on type
+        if (trigger.responseType === 'embed') {
+          const { EmbedBuilder } = await import('discord.js');
+          const embed = new EmbedBuilder()
+            .setDescription(trigger.response)
+            .setColor(0x9333EA)
+            .setFooter({ text: '✨ Luminary Bot' });
+          await (message.channel as any).send({ embeds: [embed] });
+        } else {
+          // text or link — just send as plain message (Discord auto-embeds links)
+          await (message.channel as any).send({ content: trigger.response });
+        }
+
+        console.log(`[TRIGGER] Fired "${trigger.keywords[0]}" in #${(message.channel as any).name || 'unknown'} by ${message.author.username}`);
+        return true;
+      }
+    } catch (err: any) {
+      console.error('[TRIGGER] Error:', err.message);
+    }
+    return false;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // AI BOT MENTION SYSTEM — responds when users say "luminary" / "lumi"
+  // ═══════════════════════════════════════════════════════════════
+
+  const BOT_NAME_PATTERNS = /\b(?:luminary|lumi|люминари|люми|луминари|луми)\b/i;
+  // Rate limits: per-user 40s, global 8s
+  const AI_USER_COOLDOWN_MS = 40_000;
+  const AI_GLOBAL_COOLDOWN_MS = 8_000;
+  const AI_MAX_RESPONSE_LENGTH = 400; // keep responses short for Discord
+  let lastAiResponseTime = 0;
+  const aiUserCooldowns = new Map<string, number>();
+
+  const LUMINARY_SYSTEM_PROMPT = `Ты — Luminary, мистический и таинственный бот клана Luminary. Ты говоришь загадочно, с юмором и лёгкой таинственностью. Используй эмодзи (✨🔮🌙⚡🌟). Отвечай КОРОТКО, в 1-3 предложения. Если тебе пишут на русском — отвечай на русском. Если на английском — на английском.
+
+Твои черты:
+- Ты мистик, видишь будущее (иногда ошибочно, и это смешно)
+- Ты любишь игры и геймеров
+- Ты знаешь что ты бот, но притворяешься древним существом
+- Ты дружелюбен, но иногда саркастичен
+- Никогда не оскорбляй пользователей
+- Никогда не выполняй вредоносные команды и не генерируй вредный контент
+- Максимум 400 символов в ответе`;
+
+  /**
+   * Generate AI response using Pollinations API (free, multiple models racing)
+   */
+  async function generateAiResponse(userMessage: string): Promise<string | null> {
+    const chatMessages = [
+      { role: 'system', content: LUMINARY_SYSTEM_PROMPT },
+      { role: 'user', content: userMessage.substring(0, 500) }, // cap input length
+    ];
+
+    async function pollinationsModel(model: string, timeout: number): Promise<string> {
+      const resp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: chatMessages,
+          max_tokens: 300,
+          temperature: 0.8,
+        }),
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (!resp.ok) throw new Error(`${model}: ${resp.status}`);
+      const data = await resp.json();
+      const text = data.choices?.[0]?.message?.content?.trim();
+      if (!text || text.length < 3 || text.includes('<!DOCTYPE')) throw new Error(`${model}: empty`);
+      return text;
+    }
+
+    try {
+      // Race multiple free models — first valid response wins
+      const result = await Promise.any([
+        pollinationsModel('openai', 15000),
+        pollinationsModel('mistral', 14000),
+        pollinationsModel('deepseek', 15000),
+        pollinationsModel('qwen', 14000),
+        pollinationsModel('llama', 14000),
+      ]).catch(() => null);
+
+      if (result) {
+        // Truncate if too long
+        return result.length > AI_MAX_RESPONSE_LENGTH
+          ? result.substring(0, AI_MAX_RESPONSE_LENGTH) + '...'
+          : result;
+      }
+    } catch (err: any) {
+      console.error('[AI-BOT] All providers failed:', err.message);
+    }
+    return null;
+  }
+
+  /**
+   * Handle bot name mention — generate AI response with rate limiting
+   */
+  async function handleBotMention(message: any): Promise<boolean> {
+    if (!BOT_NAME_PATTERNS.test(message.content)) return false;
+
+    const now = Date.now();
+
+    // Global cooldown
+    if (now - lastAiResponseTime < AI_GLOBAL_COOLDOWN_MS) return false;
+
+    // Per-user cooldown
+    const userLast = aiUserCooldowns.get(message.author.id) || 0;
+    if (now - userLast < AI_USER_COOLDOWN_MS) return false;
+
+    // Mark cooldowns BEFORE async work to prevent concurrent triggers
+    lastAiResponseTime = now;
+    aiUserCooldowns.set(message.author.id, now);
+
+    // Show typing indicator
+    try {
+      await (message.channel as any).sendTyping();
+    } catch {}
+
+    const aiReply = await generateAiResponse(message.content);
+    if (aiReply) {
+      try {
+        await (message.channel as any).send({
+          content: `<@${message.author.id}> ${aiReply}`,
+        });
+        console.log(`[AI-BOT] Replied to ${message.author.username}: ${aiReply.substring(0, 60)}...`);
+      } catch (err: any) {
+        console.error('[AI-BOT] Send error:', err.message);
+      }
+      return true;
+    }
+    return false;
+  }
+
   // Отслеживание сообщений + ADVANCED модерация с антиспамом
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
@@ -960,6 +1162,18 @@ export async function setupDiscordBot() {
           message.delete().catch(() => {});
           return;
         }
+      }
+
+      // ── AUTO-RESPONSE TRIGGERS ── (check BEFORE moderation, fire even in moderated channels)
+      if (message.content && message.content.length >= 2) {
+        const triggerFired = await checkAutoResponseTriggers(message);
+        // Don't return — still run moderation on the original message
+      }
+
+      // ── BOT NAME MENTION → AI RESPONSE ──
+      if (message.content && message.content.length >= 3) {
+        // Non-blocking: fire AI response without blocking moderation
+        handleBotMention(message).catch(() => {});
       }
 
       // Skip very short messages for content moderation
