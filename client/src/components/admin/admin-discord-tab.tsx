@@ -182,11 +182,15 @@ export default function AdminDiscordTab() {
     latencyMs: number;
     error?: string;
     chars?: number;
+    tier?: string;
   }
   interface AiHealthData {
     summary: string;
     onlineCount: number;
     totalCount: number;
+    keyedOnline?: number;
+    hasGeminiKey?: boolean;
+    hasGroqKey?: boolean;
     checkedAt: string;
     providers: Record<string, AiProviderStatus>;
   }
@@ -1350,6 +1354,20 @@ export default function AdminDiscordTab() {
                     </p>
                   </div>
 
+                  {/* API Key Status */}
+                  {(!aiHealth.hasGeminiKey || !aiHealth.hasGroqKey) && (
+                    <div className="p-3 rounded-lg border border-blue-500/30 bg-blue-500/10 text-sm">
+                      <p className="font-semibold mb-1">💡 Рекомендация: добавьте бесплатные ключи для стабильной работы</p>
+                      {!aiHealth.hasGeminiKey && (
+                        <p className="text-xs text-blue-300">• <strong>GEMINI_API_KEY</strong> — бесплатно на <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline">aistudio.google.com/apikey</a> (15 запросов/мин)</p>
+                      )}
+                      {!aiHealth.hasGroqKey && (
+                        <p className="text-xs text-blue-300">• <strong>GROQ_API_KEY</strong> — бесплатно на <a href="https://console.groq.com" target="_blank" rel="noreferrer" className="underline">console.groq.com</a> (30 запросов/мин)</p>
+                      )}
+                      <p className="text-xs text-muted-foreground mt-1">Добавьте в Environment Variables на Render Dashboard → перезапустите сервис.</p>
+                    </div>
+                  )}
+
                   {/* Provider list */}
                   <div className="grid gap-2">
                     {Object.entries(aiHealth.providers).map(([name, info]) => (
@@ -1366,7 +1384,12 @@ export default function AdminDiscordTab() {
                             <WifiOff className="w-4 h-4 text-red-500" />
                           )}
                           <div>
-                            <p className="font-medium text-sm">{name}</p>
+                            <p className="font-medium text-sm">
+                              {name}
+                              {info.tier === 'keyed' && (
+                                <span className="ml-2 text-xs text-yellow-400">🔑 КЛЮЧ</span>
+                              )}
+                            </p>
                             {info.error && (
                               <p className="text-xs text-red-400 max-w-md truncate">{info.error}</p>
                             )}
@@ -1386,12 +1409,15 @@ export default function AdminDiscordTab() {
 
                   {/* Explanation */}
                   <div className="text-xs text-muted-foreground space-y-1 pt-2 border-t border-white/10">
-                    <p>🤖 <strong>Pollinations</strong> (openai, mistral, deepseek, qwen, llama, text) — бесплатный, без ключа, несколько моделей</p>
-                    <p>⬛ <strong>Blackbox</strong> — бесплатный, GPT-4o-mini</p>
-                    <p>🤗 <strong>HuggingFace</strong> — бесплатный, Zephyr-7b</p>
-                    <p>🦆 <strong>DuckDuckGo</strong> — бесплатный, GPT-4o-mini через DDG</p>
-                    <p>🔗 <strong>OpenRouter</strong> — бесплатные модели (Mistral-7b)</p>
-                    <p className="pt-1">Бот гонит все провайдеры одновременно — кто первый ответит, тот и выигрывает. Если все упадут — бот ответит заготовленной фразой.</p>
+                    <p className="font-semibold text-yellow-400">🔑 Приоритетные (с API-ключом, самые надёжные):</p>
+                    <p>🟣 <strong>Gemini</strong> — Google Gemini 2.0 Flash, бесплатный ключ, 15 запросов/мин</p>
+                    <p>⚡ <strong>Groq</strong> — Llama 3.1 8B, бесплатный ключ, 30 запросов/мин</p>
+                    <p className="font-semibold text-blue-400 pt-1">🌐 Бесплатные (без ключа, запасные):</p>
+                    <p>🦆 <strong>DuckDuckGo</strong> — GPT-4o-mini через DDG, бесплатный</p>
+                    <p>🤖 <strong>Pollinations</strong> — openai/mistral модели, бесплатный</p>
+                    <p>🤗 <strong>HuggingFace</strong> — Mistral-7B-Instruct, бесплатный</p>
+                    <p>🧠 <strong>Cerebras</strong> — Llama 3.1 8B, бесплатный</p>
+                    <p className="pt-1">Бот сначала пробует провайдеры с ключом (если есть), затем бесплатные <strong>по очереди</strong> (не одновременно, чтобы не получить IP-бан). Если все упадут — ответит заготовленной фразой.</p>
                   </div>
                 </>
               )}

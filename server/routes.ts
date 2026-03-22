@@ -735,9 +735,11 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
   app.get("/api/admin/ai-health", async (req, res) => {
     try {
       const testMessage = 'Say "OK" in one word.';
-      const results: Record<string, { status: string; latencyMs: number; error?: string; chars?: number }> = {};
+      const results: Record<string, { status: string; latencyMs: number; error?: string; chars?: number; tier: string }> = {};
+      const geminiKey = process.env.GEMINI_API_KEY;
+      const groqKey = process.env.GROQ_API_KEY;
 
-      async function testProvider(name: string, fn: () => Promise<string>): Promise<void> {
+      async function testProvider(name: string, tier: string, fn: () => Promise<string>): Promise<void> {
         const start = Date.now();
         try {
           const text = await fn();
@@ -745,106 +747,68 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
             status: text && text.length > 0 ? 'online' : 'error',
             latencyMs: Date.now() - start,
             chars: text?.length || 0,
+            tier,
           };
         } catch (err: any) {
           results[name] = {
             status: 'offline',
             latencyMs: Date.now() - start,
-            error: err.message?.substring(0, 100) || 'unknown',
+            error: err.message?.substring(0, 120) || 'unknown',
+            tier,
           };
         }
       }
 
-      // Test all providers in parallel (with short timeouts for quick check)
-      await Promise.allSettled([
-        testProvider('pollinations-openai', async () => {
-          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+      // Test providers SEQUENTIALLY to avoid rate limits (the whole reason they were failing!)
+      const tests: [string, string, () => Promise<string>][] = [
+        // TIER 1: Keyed providers
+        ['gemini', 'keyed', async () => {
+          if (!geminiKey) throw new Error('Ключ не настроен (GEMINI_API_KEY)');
+          const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'openai', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: testMessage }] }],
+              generationConfig: { maxOutputTokens: 10 },
+            }),
             signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+        }],
+        ['groq', 'keyed', async () => {
+          if (!groqKey) throw new Error('Ключ не настроен (GROQ_API_KEY)');
+          const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
+            body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: [{ role: 'user', content: testMessage }], max_tokens: 10 }),
+            signal: AbortSignal.timeout(10000),
           });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const d = await r.json();
           return d.choices?.[0]?.message?.content?.trim() || '';
-        }),
-        testProvider('pollinations-mistral', async () => {
-          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'mistral', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
-            signal: AbortSignal.timeout(12000),
-          });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const d = await r.json();
-          return d.choices?.[0]?.message?.content?.trim() || '';
-        }),
-        testProvider('pollinations-deepseek', async () => {
-          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'deepseek', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
-            signal: AbortSignal.timeout(12000),
-          });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const d = await r.json();
-          return d.choices?.[0]?.message?.content?.trim() || '';
-        }),
-        testProvider('pollinations-qwen', async () => {
-          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'qwen', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
-            signal: AbortSignal.timeout(12000),
-          });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const d = await r.json();
-          return d.choices?.[0]?.message?.content?.trim() || '';
-        }),
-        testProvider('pollinations-llama', async () => {
-          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'llama', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
-            signal: AbortSignal.timeout(12000),
-          });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const d = await r.json();
-          return d.choices?.[0]?.message?.content?.trim() || '';
-        }),
-        testProvider('pollinations-text', async () => {
-          const r = await fetch(`https://text.pollinations.ai/${encodeURIComponent(testMessage)}?model=openai&noCache=true`, {
-            signal: AbortSignal.timeout(12000),
-          });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return (await r.text())?.trim() || '';
-        }),
-        testProvider('blackbox', async () => {
-          const r = await fetch('https://api.blackbox.ai/api/chat', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: [{ role: 'user', content: testMessage }], model: 'gpt-4o-mini', max_tokens: 10 }),
-            signal: AbortSignal.timeout(12000),
-          });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return (await r.text())?.trim() || '';
-        }),
-        testProvider('huggingface', async () => {
-          const r = await fetch('https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ inputs: `<|user|>\n${testMessage}</s>\n<|assistant|>\n`, parameters: { max_new_tokens: 10 } }),
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const d = await r.json();
-          return (Array.isArray(d) ? d[0]?.generated_text : d?.generated_text)?.split('<|assistant|>').pop()?.trim() || '';
-        }),
-        testProvider('duckduckgo', async () => {
+        }],
+        // TIER 2: Free providers (tested sequentially with delays)
+        ['duckduckgo', 'free', async () => {
           const statusResp = await fetch('https://duckduckgo.com/duckchat/v1/status', {
-            headers: { 'x-vqd-accept': '1' },
-            signal: AbortSignal.timeout(5000),
+            headers: {
+              'x-vqd-accept': '1',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': 'https://duckduckgo.com/',
+            },
+            signal: AbortSignal.timeout(8000),
           });
           const vqd = statusResp.headers.get('x-vqd-4');
           if (!vqd) throw new Error('no vqd token');
           const r = await fetch('https://duckduckgo.com/duckchat/v1/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-vqd-4': vqd },
+            headers: {
+              'Content-Type': 'application/json', 'x-vqd-4': vqd,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'text/event-stream', 'Referer': 'https://duckduckgo.com/',
+            },
             body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: testMessage }] }),
-            signal: AbortSignal.timeout(12000),
+            signal: AbortSignal.timeout(15000),
           });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const body = await r.text();
@@ -856,27 +820,66 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
             try { const j = JSON.parse(p); if (j.message) text += j.message; } catch {}
           }
           return text.trim();
-        }),
-        testProvider('openrouter-free', async () => {
-          const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'HTTP-Referer': 'https://luminary-clan.onrender.com' },
-            body: JSON.stringify({ model: 'mistralai/mistral-7b-instruct:free', messages: [{ role: 'user', content: testMessage }], max_tokens: 10 }),
+        }],
+        ['pollinations-openai', 'free', async () => {
+          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'openai', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }],
+        ['huggingface', 'free', async () => {
+          const r = await fetch('https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ inputs: `<s>[INST] ${testMessage} [/INST]`, parameters: { max_new_tokens: 10, return_full_text: false } }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return (Array.isArray(d) ? d[0]?.generated_text : d?.generated_text)?.trim() || '';
+        }],
+        ['cerebras', 'free', async () => {
+          const r = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'llama3.1-8b', messages: [{ role: 'user', content: testMessage }], max_tokens: 10 }),
             signal: AbortSignal.timeout(12000),
           });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const d = await r.json();
           return d.choices?.[0]?.message?.content?.trim() || '';
-        }),
-      ]);
+        }],
+        ['pollinations-mistral', 'free', async () => {
+          const r = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'mistral', messages: [{ role: 'user', content: testMessage }], max_tokens: 10, temperature: 0 }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }],
+      ];
+
+      // Run SEQUENTIALLY with 500ms gaps to avoid triggering rate limits
+      for (const [name, tier, fn] of tests) {
+        await testProvider(name, tier, fn);
+        await new Promise(r => setTimeout(r, 500));
+      }
 
       const online = Object.values(results).filter(r => r.status === 'online').length;
       const total = Object.keys(results).length;
+      const keyedOnline = Object.values(results).filter(r => r.status === 'online' && r.tier === 'keyed').length;
 
       res.json({
         summary: `${online}/${total} providers online`,
         onlineCount: online,
         totalCount: total,
+        keyedOnline,
+        hasGeminiKey: !!geminiKey,
+        hasGroqKey: !!groqKey,
         checkedAt: new Date().toISOString(),
         providers: results,
       });
