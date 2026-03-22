@@ -1078,6 +1078,7 @@ export async function setupDiscordBot() {
     const errors: string[] = [];
     const geminiKey = process.env.GEMINI_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
 
     // ══════════════════════════════════════════════════
     // TIER 1: Keyed providers (free API keys, very reliable)
@@ -1134,6 +1135,37 @@ export async function setupDiscordBot() {
       const text = data.choices?.[0]?.message?.content?.trim();
       if (!text || text.length < 3) throw new Error('groq: empty');
       console.log(`[AI-BOT] ✅ Groq success (${text.length} chars)`);
+      return text;
+    }
+
+    // OpenRouter (free: https://openrouter.ai — free models, works from all regions)
+    async function openrouterProvider(): Promise<string> {
+      if (!openrouterKey) throw new Error('openrouter: no key');
+      console.log('[AI-BOT] Trying OpenRouter...');
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openrouterKey}`,
+          'HTTP-Referer': 'https://luminary-clan.onrender.com',
+          'X-Title': 'Luminary Clan Bot',
+        },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-3.1-8b-instruct:free',
+          messages: chatMessages,
+          max_tokens: 400,
+          temperature: 0.8,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        const errBody = await resp.text().catch(() => '');
+        throw new Error(`openrouter: HTTP ${resp.status} — ${errBody.substring(0, 80)}`);
+      }
+      const data = await resp.json();
+      const text = data.choices?.[0]?.message?.content?.trim();
+      if (!text || text.length < 3) throw new Error('openrouter: empty');
+      console.log(`[AI-BOT] ✅ OpenRouter success (${text.length} chars)`);
       return text;
     }
 
@@ -1262,12 +1294,13 @@ export async function setupDiscordBot() {
 
     try {
       console.log(`[AI-BOT] === Starting AI for: "${userMessage.substring(0, 50)}..." ===`);
-      console.log(`[AI-BOT] Keys: Gemini=${!!geminiKey}, Groq=${!!groqKey}`);
+      console.log(`[AI-BOT] Keys: Gemini=${!!geminiKey}, Groq=${!!groqKey}, OpenRouter=${!!openrouterKey}`);
 
       // ═══ TIER 1: Race keyed providers (if available) ═══
       const tier1: Promise<string>[] = [];
       if (geminiKey) tier1.push(geminiProvider());
       if (groqKey) tier1.push(groqProvider());
+      if (openrouterKey) tier1.push(openrouterProvider());
 
       if (tier1.length > 0) {
         console.log(`[AI-BOT] Tier 1: racing ${tier1.length} keyed providers...`);

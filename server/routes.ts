@@ -738,6 +738,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       const results: Record<string, { status: string; latencyMs: number; error?: string; chars?: number; tier: string }> = {};
       const geminiKey = process.env.GEMINI_API_KEY;
       const groqKey = process.env.GROQ_API_KEY;
+      const openrouterKey = process.env.OPENROUTER_API_KEY;
 
       async function testProvider(name: string, tier: string, fn: () => Promise<string>): Promise<void> {
         const start = Date.now();
@@ -783,6 +784,22 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
             body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: [{ role: 'user', content: testMessage }], max_tokens: 10 }),
             signal: AbortSignal.timeout(10000),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content?.trim() || '';
+        }],
+        ['openrouter', 'keyed', async () => {
+          if (!openrouterKey) throw new Error('Ключ не настроен (OPENROUTER_API_KEY)');
+          const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openrouterKey}`,
+              'HTTP-Referer': 'https://luminary-clan.onrender.com',
+            },
+            body: JSON.stringify({ model: 'meta-llama/llama-3.1-8b-instruct:free', messages: [{ role: 'user', content: testMessage }], max_tokens: 10 }),
+            signal: AbortSignal.timeout(12000),
           });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const d = await r.json();
@@ -880,6 +897,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         keyedOnline,
         hasGeminiKey: !!geminiKey,
         hasGroqKey: !!groqKey,
+        hasOpenRouterKey: !!openrouterKey,
         checkedAt: new Date().toISOString(),
         providers: results,
       });

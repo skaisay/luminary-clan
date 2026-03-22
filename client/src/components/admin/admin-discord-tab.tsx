@@ -191,6 +191,7 @@ export default function AdminDiscordTab() {
     keyedOnline?: number;
     hasGeminiKey?: boolean;
     hasGroqKey?: boolean;
+    hasOpenRouterKey?: boolean;
     checkedAt: string;
     providers: Record<string, AiProviderStatus>;
   }
@@ -1355,14 +1356,17 @@ export default function AdminDiscordTab() {
                   </div>
 
                   {/* API Key Status */}
-                  {(!aiHealth.hasGeminiKey || !aiHealth.hasGroqKey) && (
+                  {(!aiHealth.hasGeminiKey || !aiHealth.hasGroqKey || !aiHealth.hasOpenRouterKey) && (
                     <div className="p-3 rounded-lg border border-blue-500/30 bg-blue-500/10 text-sm">
                       <p className="font-semibold mb-1">💡 Рекомендация: добавьте бесплатные ключи для стабильной работы</p>
-                      {!aiHealth.hasGeminiKey && (
-                        <p className="text-xs text-blue-300">• <strong>GEMINI_API_KEY</strong> — бесплатно на <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline">aistudio.google.com/apikey</a> (15 запросов/мин)</p>
+                      {!aiHealth.hasOpenRouterKey && (
+                        <p className="text-xs text-blue-300">• <strong>OPENROUTER_API_KEY</strong> — бесплатно на <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" className="underline">openrouter.ai/keys</a> (работает из РФ, бесплатные модели)</p>
                       )}
                       {!aiHealth.hasGroqKey && (
                         <p className="text-xs text-blue-300">• <strong>GROQ_API_KEY</strong> — бесплатно на <a href="https://console.groq.com" target="_blank" rel="noreferrer" className="underline">console.groq.com</a> (30 запросов/мин)</p>
+                      )}
+                      {!aiHealth.hasGeminiKey && (
+                        <p className="text-xs text-blue-300">• <strong>GEMINI_API_KEY</strong> — бесплатно на <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline">aistudio.google.com/apikey</a> (может не работать из РФ)</p>
                       )}
                       <p className="text-xs text-muted-foreground mt-1">Добавьте в Environment Variables на Render Dashboard → перезапустите сервис.</p>
                     </div>
@@ -1410,8 +1414,9 @@ export default function AdminDiscordTab() {
                   {/* Explanation */}
                   <div className="text-xs text-muted-foreground space-y-1 pt-2 border-t border-white/10">
                     <p className="font-semibold text-yellow-400">🔑 Приоритетные (с API-ключом, самые надёжные):</p>
-                    <p>🟣 <strong>Gemini</strong> — Google Gemini 2.0 Flash, бесплатный ключ, 15 запросов/мин</p>
+                    <p>� <strong>OpenRouter</strong> — Llama 3.1 8B, бесплатный ключ, работает из РФ ✅</p>
                     <p>⚡ <strong>Groq</strong> — Llama 3.1 8B, бесплатный ключ, 30 запросов/мин</p>
+                    <p>🟣 <strong>Gemini</strong> — Google Gemini 2.0 Flash (может не работать из РФ)</p>
                     <p className="font-semibold text-blue-400 pt-1">🌐 Бесплатные (без ключа, запасные):</p>
                     <p>🦆 <strong>DuckDuckGo</strong> — GPT-4o-mini через DDG, бесплатный</p>
                     <p>🤖 <strong>Pollinations</strong> — openai/mistral модели, бесплатный</p>
