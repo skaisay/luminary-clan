@@ -318,13 +318,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let avatarDataUri = "";
       if (avatarUrl) {
         try {
-          const resp = await fetch(avatarUrl);
+          // Add size param and User-Agent to avoid Discord CDN rejections
+          const fetchUrl = avatarUrl.includes('?') ? avatarUrl : `${avatarUrl}?size=256`;
+          console.log(`[OG-IMAGE] Fetching avatar: ${fetchUrl}`);
+          const resp = await fetch(fetchUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; LuminaryClanBot/1.0)',
+              'Accept': 'image/*',
+            },
+            signal: AbortSignal.timeout(8000),
+          });
           if (resp.ok) {
             const buf = Buffer.from(await resp.arrayBuffer());
             const ct = resp.headers.get("content-type") || "image/png";
             avatarDataUri = `data:${ct};base64,${buf.toString("base64")}`;
+            console.log(`[OG-IMAGE] Avatar fetched OK: ${buf.length} bytes, type=${ct}`);
+          } else {
+            console.error(`[OG-IMAGE] Avatar fetch failed: HTTP ${resp.status} for ${fetchUrl}`);
           }
-        } catch (_) { /* use fallback */ }
+        } catch (avatarErr: any) {
+          console.error(`[OG-IMAGE] Avatar fetch error: ${avatarErr.message}`);
+        }
+      } else {
+        console.log(`[OG-IMAGE] No avatar URL for user ${m.username}`);
       }
 
       // Get equipped name_color + badges
@@ -352,7 +368,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (_) {}
 
       const avatarCircle = avatarDataUri
-        ? `<image x="50" y="285" width="120" height="120" href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
+        ? `<image x="50" y="285" width="120" height="120" xlink:href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
         : `<rect x="50" y="285" width="120" height="120" rx="60" fill="#4c1d95"/>
            <text x="110" y="358" font-family="Arial,sans-serif" font-size="40" fill="white" text-anchor="middle" font-weight="bold">${(m.username || "?").substring(0, 2).toUpperCase()}</text>`;
 
@@ -366,7 +382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const joinDate = m.joinedAt ? new Date(m.joinedAt).toLocaleDateString('ru-RU') : '—';
 
       // Generate SVG that mirrors the actual profile card layout (1200×630)
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>
     <clipPath id="avatar-clip"><circle cx="110" cy="345" r="58"/></clipPath>
     <linearGradient id="bg" x1="0" y1="0" x2="0.3" y2="1">

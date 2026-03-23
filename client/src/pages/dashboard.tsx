@@ -74,9 +74,10 @@ export default function Dashboard() {
     <div className="min-h-screen -mt-20">
       <div 
         className="relative h-[450px] md:h-[500px] lg:h-[550px] bg-cover bg-center mb-4 pt-20"
-        style={{ backgroundImage: `url(${settings?.heroImageUrl || heroBackground})` }}
+        style={{ backgroundImage: `url(${settings?.heroImageUrl || heroBackground})`, backgroundSize: 'cover' }}
       >
-        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/70 to-background"></div>
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-background" style={{ backdropFilter: 'blur(0px)' }}></div>
+        <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-background via-background/90 to-transparent" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', maskImage: 'linear-gradient(to top, black 40%, transparent)', WebkitMaskImage: 'linear-gradient(to top, black 40%, transparent)' }}></div>
         <div className="relative h-full flex flex-col items-center justify-center text-center px-4">
           {settingsLoading ? (
             <Skeleton className="h-16 w-96 mb-4" />
@@ -106,7 +107,7 @@ export default function Dashboard() {
       </div>
 
       <div className="container mx-auto px-4 pb-12 -mt-12">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           <Card className="glass glass-border border-0 shadow-lg">
             <CardHeader>
               <CardTitle className="text-xl font-bold flex items-center gap-2">
