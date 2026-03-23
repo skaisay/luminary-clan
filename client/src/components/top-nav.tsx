@@ -35,11 +35,6 @@ const menuItemsConfig = [
     icon: Home,
   },
   {
-    key: "nav.statistics",
-    url: "/statistics",
-    icon: BarChart3,
-  },
-  {
     key: "nav.leaderboard",
     url: "/leaderboard",
     icon: Trophy,
@@ -63,11 +58,6 @@ const menuItemsConfig = [
     key: "nav.decorations",
     url: "/decorations",
     icon: Sparkles,
-  },
-  {
-    key: "nav.inventory",
-    url: "/inventory",
-    icon: Package,
   },
   {
     key: "nav.convert",
@@ -119,11 +109,6 @@ const menuItemsConfig = [
     key: "nav.miniGames",
     url: "/mini-games",
     icon: Gamepad2,
-  },
-  {
-    key: "nav.clanWars",
-    url: "/clan-wars",
-    icon: Swords,
   },
 ];
 

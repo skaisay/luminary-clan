@@ -61,13 +61,11 @@ function MainRouter() {
     <Switch>
       <Route path="/login" component={LoginPage} />
       <Route path="/"><MaintenanceGate pageId="dashboard"><Dashboard /></MaintenanceGate></Route>
-      <Route path="/statistics"><MaintenanceGate pageId="statistics"><Statistics /></MaintenanceGate></Route>
       <Route path="/leaderboard"><MaintenanceGate pageId="leaderboard"><Leaderboard /></MaintenanceGate></Route>
       <Route path="/members"><MaintenanceGate pageId="members"><Members /></MaintenanceGate></Route>
       <Route path="/news"><MaintenanceGate pageId="news"><NewsPage /></MaintenanceGate></Route>
       <Route path="/shop"><MaintenanceGate pageId="shop"><Shop /></MaintenanceGate></Route>
       <Route path="/decorations"><DecorationShop /></Route>
-      <Route path="/inventory"><MaintenanceGate pageId="inventory"><Inventory /></MaintenanceGate></Route>
       <Route path="/convert"><MaintenanceGate pageId="convert"><ConvertPage /></MaintenanceGate></Route>
 
       <Route path="/about"><MaintenanceGate pageId="about"><About /></MaintenanceGate></Route>
@@ -80,7 +78,6 @@ function MainRouter() {
       <Route path="/daily-rewards"><MaintenanceGate pageId="daily-rewards"><DailyRewardsPage /></MaintenanceGate></Route>
       <Route path="/profile/:discordId?"><MaintenanceGate pageId="profile"><ProfilePage /></MaintenanceGate></Route>
       <Route path="/mini-games"><MaintenanceGate pageId="mini-games"><MiniGamesPage /></MaintenanceGate></Route>
-      <Route path="/clan-wars"><MaintenanceGate pageId="clan-wars"><ClanWarsPage /></MaintenanceGate></Route>
       <Route component={NotFound} />
     </Switch>
   );
@@ -220,7 +217,6 @@ export default function App() {
                   <MainLayout />
                 </BanGate>
               )}
-              <AiAssistant />
               <Toaster />
             </TooltipProvider>
           </AuthProvider>

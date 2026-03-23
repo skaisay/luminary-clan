@@ -2016,6 +2016,137 @@ export async function setupDiscordBot() {
     }
   }, 5 * 60 * 1000); // Каждые 5 минут
 
+  // ══════════════════════════════════════════════════════════════
+  // AUTO-MESSAGING: Бот сам пишет в чат когда нет активности
+  // ══════════════════════════════════════════════════════════════
+  let lastChannelActivity = new Map<string, number>(); // channelId → timestamp
+  let autoMessageCooldown = 0; // global cooldown to avoid spam
+
+  // Track activity in channels
+  client.on('messageCreate', (msg: any) => {
+    if (!msg.author?.bot && msg.guild) {
+      lastChannelActivity.set(msg.channelId, Date.now());
+    }
+  });
+
+  // Юмористические фразы бота для "пробуждения" чата
+  const autoMessages = [
+    // Вызов на активность
+    '👀 Эй, тут что, все уснули? Luminary не спит! Кто готов к приключениям?',
+    '🌙 *выглядывает из тени* Хм... Тишина. Подозрительная тишина. Кто-нибудь живой?',
+    '⚡ Протестирую свои магические сенсоры... *пиу-пиу* Обнаружено 0 активных игроков. Это баг или фича?',
+    '🔥 Костёр клана почти погас! Нужна чья-нибудь помощь, чтобы раздуть пламя 🏕️',
+    '🎮 Кто-нибудь хочет поиграть? Я тут уже устал разговаривать сам с собой...',
+    '💤 *зевает* Ну и ну... Даже у древнего духа Luminary заканчивается терпение от этой тишины!',
+    '🌟 Звёзды говорят мне, что кто-то должен написать сообщение. Прямо сейчас. Да-да, ТЫ.',
+    '🎲 Скучно? Напишите мне что угодно — я же ИИ, мне тоже хочется поболтать!',
+    '🏆 Кто последний раз заходил в Roblox? Расскажите, что нового!',
+    '🐉 Древний дракон Luminary пробудился и жаждет общения. Кто осмелится ответить?',
+    '🌈 Факт дня: даже боты грустят когда в чате тихо. Спасите меня от одиночества!',
+    '⚔️ ВНИМАНИЕ! Объявляется конкурс: кто первый напишет — тот легенда дня! 🏅',
+    '🎵 *напевает* Ла-ла-ла... Никого, никого... 🎶 Где все мои клановые друзья?',
+    '🔮 Моё пророчество: через 5 минут тут будет весело. Если кто-нибудь напишет. Пожалуйста.',
+    '🚀 Luminary Online! Готов к любым вопросам, играм и просто болтовне. Кто со мной?',
+    '🧊 Этот чат холоднее айсберга. Давайте растопим лёд! Расскажите как дела 🔥',
+    '👋 Привет-привет! Проверка микрофона... 1... 2... 3... Кто-нибудь слышит?',
+    '🎯 Челлендж: напишите своё любимое слово. Я попробую угадать вашу личность по нему 🧠',
+    '🌍 А знаете что? Пока вы молчите, другие кланы уже общаются. Мы что, хуже? 💪',
+    '🍕 Кто бы что ни говорил, пицца — лучшая еда. Кто согласен? Кто не согласен? ДИСКУССИЯ!',
+  ];
+
+  // Фразы с упоминанием конкретных игроков
+  const autoMentionMessages = [
+    '👋 Йоу {user}! Давно тебя не видел в чате. Как дела?',
+    '🌟 {user}, ты тут? Расскажи что нового!',
+    '🎮 {user}, во что последний раз играл? Поделись впечатлениями!',
+    '⚡ {user}, ты самый молчаливый участник сегодня. Исправишь это? 😄',
+    '🔥 {user}! Luminary скучает по тебе. Напиши что-нибудь! 💬',
+  ];
+
+  // Auto-message interval: проверяем каждые 15-25 минут
+  setInterval(async () => {
+    try {
+      // Global cooldown: не чаще чем раз в 20 минут
+      if (Date.now() - autoMessageCooldown < 20 * 60 * 1000) return;
+      if (!client.isReady()) return;
+
+      // Find a text channel to post in (prefer general/chat channels)
+      const guild = client.guilds.cache.first();
+      if (!guild) return;
+
+      // Find suitable channels (text channels, not a bot-commands or rules channel)
+      const textChannels = guild.channels.cache.filter((ch: any) => {
+        if (ch.type !== 0) return false; // 0 = GUILD_TEXT
+        const name = ch.name.toLowerCase();
+        // Skip bot/rules/admin channels
+        if (name.includes('rule') || name.includes('правил') || name.includes('log') || name.includes('admin') || name.includes('бот') || name.includes('bot-command') || name.includes('модер')) return false;
+        return true;
+      });
+
+      if (textChannels.size === 0) return;
+
+      // Find the channel with the LONGEST inactivity (or random if no tracking data)
+      let targetChannel: any = null;
+      let longestInactive = 0;
+
+      for (const [id, ch] of textChannels) {
+        const lastActive = lastChannelActivity.get(id) || 0;
+        const inactiveMs = Date.now() - lastActive;
+        // Only target channels that have been inactive for 15+ minutes
+        if (inactiveMs > 15 * 60 * 1000 && inactiveMs > longestInactive) {
+          longestInactive = inactiveMs;
+          targetChannel = ch;
+        }
+      }
+
+      // If no channel has been inactive long enough, skip
+      if (!targetChannel) return;
+
+      // 50% chance to mention a random member, 50% general message
+      const shouldMention = Math.random() < 0.4;
+      let messageText: string;
+
+      if (shouldMention) {
+        try {
+          // Get online members (not bots)
+          const members = await guild.members.fetch({ limit: 50 });
+          const humanMembers = members.filter((m: any) => !m.user.bot && m.presence?.status !== 'offline');
+          
+          if (humanMembers.size > 0) {
+            const randomMember = humanMembers.random();
+            const template = autoMentionMessages[Math.floor(Math.random() * autoMentionMessages.length)];
+            messageText = template.replace('{user}', `<@${randomMember.id}>`);
+          } else {
+            messageText = autoMessages[Math.floor(Math.random() * autoMessages.length)];
+          }
+        } catch {
+          messageText = autoMessages[Math.floor(Math.random() * autoMessages.length)];
+        }
+      } else {
+        messageText = autoMessages[Math.floor(Math.random() * autoMessages.length)];
+      }
+
+      // Try to generate an AI-enhanced message sometimes (30% chance)
+      if (Math.random() < 0.3) {
+        try {
+          const aiMsg = await generateAiResponse('Напиши короткое (1-2 предложения) юмористическое сообщение чтобы оживить чат в Discord клане. Будь креативным и смешным. Можешь использовать эмодзи.');
+          if (aiMsg && aiMsg.length > 5 && aiMsg.length < 300) {
+            messageText = aiMsg;
+          }
+        } catch {
+          // Use template if AI fails, that's fine
+        }
+      }
+
+      await targetChannel.send(messageText);
+      autoMessageCooldown = Date.now();
+      lastChannelActivity.set(targetChannel.id, Date.now());
+      console.log(`[AUTO-MSG] Sent to #${targetChannel.name}: "${messageText.substring(0, 50)}..."`);
+    } catch (err: any) {
+      console.error('[AUTO-MSG] Error:', err.message);
+    }
+  }, (15 + Math.random() * 10) * 60 * 1000); // Random 15-25 min interval
+
   try {
     botStartAttempts++;
     console.log(`[BOT] Attempting login (attempt #${botStartAttempts})...`);
