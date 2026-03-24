@@ -623,7 +623,7 @@ export default function AdminDiscordTab() {
                     <SelectTrigger>
                       <SelectValue placeholder="Без категории" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-[300px] overflow-y-auto">
                       <SelectItem value="__none__">Без категории</SelectItem>
                       {channelsDetailed?.categories?.map((cat) => (
                         <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
@@ -682,7 +682,7 @@ export default function AdminDiscordTab() {
                     <SelectTrigger data-testid="select-rule-channel">
                       <SelectValue placeholder="Выберите канал" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-[300px] overflow-y-auto">
                       {(channelsDetailed?.channels || channels)?.map((channel) => (
                         <SelectItem key={channel.id} value={channel.id}>
                           {(typeof channel.type === 'number' ? channel.type === 2 : channel.type === 'voice')
@@ -981,7 +981,7 @@ export default function AdminDiscordTab() {
                     <SelectTrigger data-testid="select-channel">
                       <SelectValue placeholder="Выберите канал" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-[300px] overflow-y-auto">
                       {channels?.filter(c => c.type === 0 || c.type === 'text').map((channel) => (
                         <SelectItem key={channel.id} value={channel.id}>
                           #{channel.name}
