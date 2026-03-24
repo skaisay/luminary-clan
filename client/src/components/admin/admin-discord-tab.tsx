@@ -1036,7 +1036,10 @@ export default function AdminDiscordTab() {
                       <SelectValue placeholder="Выберите канал" />
                     </SelectTrigger>
                     <SelectContent className="max-h-[300px] overflow-y-auto">
-                      {channels?.filter(c => c.type === 0 || c.type === 'text').map((channel) => (
+                      {(channelsDetailed?.channels || channels)?.filter(c => {
+                        const t = typeof c.type === 'number' ? c.type : (c.type === 'text' ? 0 : 2);
+                        return t === 0; // only text channels
+                      }).map((channel) => (
                         <SelectItem key={channel.id} value={channel.id}>
                           #{channel.name}
                         </SelectItem>
@@ -1500,12 +1503,13 @@ export default function AdminDiscordTab() {
                 Ограничить участника
               </CardTitle>
               <CardDescription>
-                Мягкий бан — участник остаётся на сервере, видит каналы, но не может писать сообщения и подключаться к голосовым каналам. Мгновенно и безопасно.
+                Мягкий бан — участник остаётся на сервере, видит каналы, но не может писать и подключаться к голосу. Можно ограничить по имени или по Discord ID (даже если игрок ещё не на сервере).
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label>Найти участника</Label>
+              {/* Способ 1: Поиск по имени + выбор из списка */}
+              <div className="space-y-2">
+                <Label>🔍 Найти по имени или выбрать из списка</Label>
                 <Input
                   placeholder="Введите имя или часть имени..."
                   value={softBanSearch}
@@ -1518,8 +1522,9 @@ export default function AdminDiscordTab() {
               ) : (
                 <div className="max-h-[250px] overflow-y-auto space-y-1">
                   {members?.filter(m => {
-                    if (!softBanSearch.trim()) return false;
-                    return m.username.toLowerCase().includes(softBanSearch.toLowerCase());
+                    if (!softBanSearch.trim()) return true; // показываем всех если поиск пустой
+                    return m.username.toLowerCase().includes(softBanSearch.toLowerCase())
+                      || m.id.includes(softBanSearch);
                   }).map((member) => (
                     <div
                       key={member.id}
@@ -1528,7 +1533,10 @@ export default function AdminDiscordTab() {
                           ? 'bg-red-500/20 border border-red-500/50'
                           : 'hover:bg-white/5 glass glass-border'
                       }`}
-                      onClick={() => setSoftBanUserId(member.id)}
+                      onClick={() => {
+                        setSoftBanUserId(member.id);
+                        setSoftBanSearch(member.username);
+                      }}
                     >
                       <div className="flex items-center gap-2">
                         <img
@@ -1536,7 +1544,10 @@ export default function AdminDiscordTab() {
                           alt={member.username}
                           className="w-8 h-8 rounded-full"
                         />
-                        <span className="text-sm font-medium">{member.username}</span>
+                        <div>
+                          <span className="text-sm font-medium">{member.username}</span>
+                          <p className="text-xs text-muted-foreground">{member.id}</p>
+                        </div>
                       </div>
                       {softBanUserId === member.id && (
                         <CheckCircle className="w-4 h-4 text-red-400" />
@@ -1545,14 +1556,38 @@ export default function AdminDiscordTab() {
                   ))}
                   {softBanSearch.trim() && members?.filter(m =>
                     m.username.toLowerCase().includes(softBanSearch.toLowerCase())
+                    || m.id.includes(softBanSearch)
                   ).length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-4">Никого не найдено</p>
+                    <p className="text-sm text-muted-foreground text-center py-4">Никого не найдено на сервере</p>
                   )}
                 </div>
               )}
 
+              {/* Способ 2: Прямой ввод Discord ID */}
+              <div className="pt-2 border-t border-white/10">
+                <Label>🆔 Или введите Discord ID напрямую</Label>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    placeholder="123456789012345678"
+                    value={softBanUserId}
+                    onChange={(e) => {
+                      // Очистить поиск при ручном вводе ID
+                      setSoftBanUserId(e.target.value.trim());
+                    }}
+                    className="font-mono text-sm"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Работает даже если игрок ещё не на сервере — ограничения применятся автоматически при входе
+                </p>
+              </div>
+
               {softBanUserId && (
                 <div className="space-y-3 pt-2 border-t border-white/10">
+                  <div className="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/30">
+                    <Ban className="w-4 h-4 text-red-400" />
+                    <span className="text-sm font-mono">{softBanUserId}</span>
+                  </div>
                   <div>
                     <Label>Причина (необязательно)</Label>
                     <Input
@@ -1595,10 +1630,21 @@ export default function AdminDiscordTab() {
                   {softBanned.map((user: any) => (
                     <div key={user.id} className="flex items-center justify-between p-3 rounded-lg glass glass-border">
                       <div className="flex items-center gap-3">
-                        <img src={user.avatar} alt={user.username} className="w-8 h-8 rounded-full" />
+                        {user.avatar ? (
+                          <img src={user.avatar} alt={user.username} className="w-8 h-8 rounded-full" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center">
+                            <Ban className="w-4 h-4 text-red-400" />
+                          </div>
+                        )}
                         <div>
                           <p className="font-medium text-sm">{user.username}</p>
-                          <p className="text-xs text-muted-foreground">ID: {user.id}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-muted-foreground font-mono">{user.id}</p>
+                            {user.isPreBan && (
+                              <span className="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">Пре-бан</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <Button

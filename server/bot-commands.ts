@@ -843,6 +843,26 @@ export async function setupDiscordBot() {
     if (member.user.bot) return;
     
     try {
+      // ── CHECK PRE-BAN LIST ──
+      // If this user was pre-restricted (soft-banned before joining), auto-restrict them
+      try {
+        const { checkPreBan, getOrCreateRestrictedRole, RESTRICTED_ROLE_NAME } = await import('./discord');
+        const isPreBanned = await checkPreBan(member.user.id);
+        if (isPreBanned) {
+          const restrictRole = await getOrCreateRestrictedRole(member.guild);
+          await member.roles.add(restrictRole, 'Auto-restrict: пользователь в списке ограничений (pre-ban)');
+          console.log(`🔇 Auto-restricted ${member.user.username} (${member.user.id}) — was in pre-ban list`);
+          // DM them
+          try {
+            await member.send({
+              content: `🔇 **Luminary Moderation**\n\nВы были автоматически ограничены на сервере. Вы можете просматривать каналы, но не можете писать сообщения или подключаться к голосовым каналам.`,
+            });
+          } catch {}
+        }
+      } catch (preBanErr: any) {
+        console.error('[RESTRICT] Pre-ban check error:', preBanErr.message);
+      }
+
       // Автоматически назначаем роль Luminary_Member
       const roleName = 'Luminary_Member';
       const role = member.guild.roles.cache.find(r => r.name === roleName);

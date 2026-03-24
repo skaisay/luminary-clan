@@ -1,5 +1,8 @@
 import { Client, ChannelType, TextChannel, PermissionFlagsBits } from 'discord.js';
 import { botClient } from './bot-commands';
+import { db } from './db';
+import { discordRestrictedUsers } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 // ─── Helper: get the shared bot client (from bot-commands.ts) ──────────
 // NEVER create new Discord clients — the shared botClient is the only one.
@@ -957,13 +960,13 @@ export async function deleteDiscordMessages(messageIds: Array<{ channelId: strin
 // in ALL channels. User can still VIEW content but cannot interact.
 // ═══════════════════════════════════════════════════════════════
 
-const RESTRICTED_ROLE_NAME = '🔇 Restricted';
+export const RESTRICTED_ROLE_NAME = '🔇 Restricted';
 
 /**
  * Get or create the "Restricted" role that blocks all messaging/voice.
  * Sets channel-level permission overwrites for ALL channels.
  */
-async function getOrCreateRestrictedRole(guild: any) {
+export async function getOrCreateRestrictedRole(guild: any) {
   let role = guild.roles.cache.find((r: any) => r.name === RESTRICTED_ROLE_NAME);
 
   if (!role) {
@@ -1009,7 +1012,8 @@ async function getOrCreateRestrictedRole(guild: any) {
 
 /**
  * Soft-ban a user: assign Restricted role.
- * User can still see channels but cannot send messages or join voice.
+ * If user is on the server — restrict immediately.
+ * If user is NOT on the server — save to DB pre-ban list (auto-restrict on join).
  */
 export async function softBanUser(discordId: string, reason?: string): Promise<{
   success: boolean;
@@ -1023,7 +1027,28 @@ export async function softBanUser(discordId: string, reason?: string): Promise<{
   if (!guild) throw new Error('Сервер Discord не найден');
 
   const member = guild.members.cache.get(discordId) || await guild.members.fetch(discordId).catch(() => null);
-  if (!member) throw new Error('Участник не найден на сервере');
+
+  // Always save to DB pre-ban list (so it persists across restarts and covers non-members)
+  try {
+    await db.insert(discordRestrictedUsers)
+      .values({ discordId, reason: reason || null })
+      .onConflictDoUpdate({
+        target: discordRestrictedUsers.discordId,
+        set: { isActive: true, reason: reason || null },
+      });
+  } catch (dbErr: any) {
+    console.error('[RESTRICT] DB save error:', dbErr.message);
+  }
+
+  // If user is NOT on the server — pre-ban saved, will apply on join
+  if (!member) {
+    console.log(`[RESTRICT] Pre-banned ID ${discordId} (not on server). Will restrict on join.`);
+    return {
+      success: true,
+      username: discordId,
+      message: `ID ${discordId} добавлен в список ограничений. Ограничения применятся автоматически при входе на сервер.`,
+    };
+  }
 
   if (!member.manageable) {
     throw new Error('Недостаточно прав для ограничения этого участника (роль бота ниже)');
@@ -1072,6 +1097,15 @@ export async function softUnbanUser(discordId: string): Promise<{
   username: string;
   message: string;
 }> {
+  // Always remove from DB pre-ban list
+  try {
+    await db.update(discordRestrictedUsers)
+      .set({ isActive: false })
+      .where(eq(discordRestrictedUsers.discordId, discordId));
+  } catch (dbErr: any) {
+    console.error('[RESTRICT] DB remove error:', dbErr.message);
+  }
+
   const client = getSharedBot();
   if (!client) throw new Error('Бот не подключён');
 
@@ -1079,7 +1113,16 @@ export async function softUnbanUser(discordId: string): Promise<{
   if (!guild) throw new Error('Сервер Discord не найден');
 
   const member = guild.members.cache.get(discordId) || await guild.members.fetch(discordId).catch(() => null);
-  if (!member) throw new Error('Участник не найден на сервере');
+
+  // If user is not on server, just remove from DB (already done above)
+  if (!member) {
+    console.log(`[RESTRICT] Removed pre-ban for ID ${discordId} (not on server)`);
+    return {
+      success: true,
+      username: discordId,
+      message: `ID ${discordId} убран из списка ограничений`,
+    };
+  }
 
   const role = guild.roles.cache.find((r: any) => r.name === RESTRICTED_ROLE_NAME);
   if (!role || !member.roles.cache.has(role.id)) {
@@ -1110,28 +1153,76 @@ export async function softUnbanUser(discordId: string): Promise<{
 
 /**
  * Get list of currently soft-banned (restricted) users.
+ * Merges Discord role members + DB pre-ban list.
  */
 export async function getSoftBannedUsers(): Promise<Array<{
   id: string;
   username: string;
   avatar: string;
   restrictedSince: string;
+  isPreBan: boolean;
 }>> {
+  const results: Array<{ id: string; username: string; avatar: string; restrictedSince: string; isPreBan: boolean }> = [];
+  const seenIds = new Set<string>();
+
+  // 1) Get members with restricted role from Discord
   const client = getSharedBot();
-  if (!client) return [];
+  if (client) {
+    const guild = getGuild(client);
+    if (guild) {
+      const role = guild.roles.cache.find((r: any) => r.name === RESTRICTED_ROLE_NAME);
+      if (role) {
+        const members = role.members;
+        members.forEach((m: any) => {
+          seenIds.add(m.user.id);
+          results.push({
+            id: m.user.id,
+            username: m.user.username,
+            avatar: m.user.displayAvatarURL({ size: 64 }),
+            restrictedSince: m.roles.cache.get(role.id)?.createdAt?.toISOString() || new Date().toISOString(),
+            isPreBan: false,
+          });
+        });
+      }
+    }
+  }
 
-  const guild = getGuild(client);
-  if (!guild) return [];
+  // 2) Get pre-banned users from DB (not yet on server, or role not yet applied)
+  try {
+    const dbRestricted = await db.select().from(discordRestrictedUsers)
+      .where(eq(discordRestrictedUsers.isActive, true));
+    for (const entry of dbRestricted) {
+      if (!seenIds.has(entry.discordId)) {
+        seenIds.add(entry.discordId);
+        results.push({
+          id: entry.discordId,
+          username: `ID: ${entry.discordId}`,
+          avatar: '',
+          restrictedSince: entry.createdAt?.toISOString() || new Date().toISOString(),
+          isPreBan: true,
+        });
+      }
+    }
+  } catch (dbErr: any) {
+    if (!dbErr.message?.includes('does not exist')) {
+      console.error('[RESTRICT] DB fetch error:', dbErr.message);
+    }
+  }
 
-  const role = guild.roles.cache.find((r: any) => r.name === RESTRICTED_ROLE_NAME);
-  if (!role) return [];
+  return results;
+}
 
-  // Get all members with restricted role
-  const members = role.members;
-  return members.map((m: any) => ({
-    id: m.user.id,
-    username: m.user.username,
-    avatar: m.user.displayAvatarURL({ size: 64 }),
-    restrictedSince: m.roles.cache.get(role.id)?.createdAt?.toISOString() || new Date().toISOString(),
-  }));
+/**
+ * Check if a Discord user ID is in the pre-ban list.
+ * Called from guildMemberAdd to auto-restrict on join.
+ */
+export async function checkPreBan(discordId: string): Promise<boolean> {
+  try {
+    const entry = await db.select().from(discordRestrictedUsers)
+      .where(eq(discordRestrictedUsers.discordId, discordId))
+      .limit(1);
+    return entry.length > 0 && entry[0].isActive;
+  } catch {
+    return false;
+  }
 }

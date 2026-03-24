@@ -910,3 +910,13 @@ export const insertBotAutoResponseSchema = createInsertSchema(botAutoResponses).
 export type BotAutoResponse = typeof botAutoResponses.$inferSelect;
 export type InsertBotAutoResponse = z.infer<typeof insertBotAutoResponseSchema>;
 
+// Pre-restricted users (soft-ban queue for users not yet on the server)
+export const discordRestrictedUsers = pgTable("discord_restricted_users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  discordId: text("discord_id").notNull().unique(), // Discord user ID
+  reason: text("reason"),
+  restrictedBy: text("restricted_by"), // admin username who restricted
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
