@@ -86,6 +86,11 @@ export default function AdminDiscordTab() {
   const [triggerCooldown, setTriggerCooldown] = useState("30");
   const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null);
 
+  // Soft-ban state
+  const [softBanUserId, setSoftBanUserId] = useState("");
+  const [softBanReason, setSoftBanReason] = useState("");
+  const [softBanSearch, setSoftBanSearch] = useState("");
+
   const { data: channels, isLoading: channelsLoading, error: channelsError } = useQuery<DiscordChannel[]>({
     queryKey: ["/api/admin/discord/channels"],
     retry: false,
@@ -343,6 +348,51 @@ export default function AdminDiscordTab() {
     },
   });
 
+  // ── Soft-ban (restrict) system ──
+  const { data: softBanned, isLoading: softBannedLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/discord/soft-banned"],
+    retry: false,
+    staleTime: 30_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/soft-banned", { credentials: "include" });
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    },
+  });
+
+  const softBanMutation = useMutation({
+    mutationFn: async (data: { userId: string; reason?: string }) => {
+      const res = await apiRequest("POST", "/api/admin/discord/soft-ban", data);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({ title: "Участник ограничен", description: data.message });
+      setSoftBanUserId("");
+      setSoftBanReason("");
+      setSoftBanSearch("");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/soft-banned"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Ошибка ограничения", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const softUnbanMutation = useMutation({
+    mutationFn: async (data: { userId: string }) => {
+      const res = await apiRequest("POST", "/api/admin/discord/soft-unban", data);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({ title: "Ограничение снято", description: data.message });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/soft-banned"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Ошибка снятия", description: error.message, variant: "destructive" });
+    },
+  });
+
   // Channel creation
   const createChannelMutation = useMutation({
     mutationFn: async (data: { name: string; type: string; category?: string; topic?: string }) => {
@@ -571,6 +621,10 @@ export default function AdminDiscordTab() {
           <TabsTrigger value="ai-monitor" className="gap-1.5">
             <Activity className="w-4 h-4" />
             AI
+          </TabsTrigger>
+          <TabsTrigger value="soft-ban" className="gap-1.5">
+            <Ban className="w-4 h-4" />
+            Ограничения
           </TabsTrigger>
         </TabsList>
 
@@ -1432,6 +1486,140 @@ export default function AdminDiscordTab() {
                   <Bot className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>Нажмите «Запустить проверку» чтобы протестировать все AI-провайдеры</p>
                   <p className="text-xs mt-1">Проверка занимает ~10-15 секунд</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        {/* ============ SOFT-BAN TAB ============ */}
+        <TabsContent value="soft-ban" className="mt-6 space-y-4">
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Ban className="w-5 h-5 text-red-400" />
+                Ограничить участника
+              </CardTitle>
+              <CardDescription>
+                Мягкий бан — участник остаётся на сервере, видит каналы, но не может писать сообщения и подключаться к голосовым каналам. Мгновенно и безопасно.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>Найти участника</Label>
+                <Input
+                  placeholder="Введите имя или часть имени..."
+                  value={softBanSearch}
+                  onChange={(e) => setSoftBanSearch(e.target.value)}
+                />
+              </div>
+
+              {membersLoading ? (
+                <Skeleton className="h-32 w-full" />
+              ) : (
+                <div className="max-h-[250px] overflow-y-auto space-y-1">
+                  {members?.filter(m => {
+                    if (!softBanSearch.trim()) return false;
+                    return m.username.toLowerCase().includes(softBanSearch.toLowerCase());
+                  }).map((member) => (
+                    <div
+                      key={member.id}
+                      className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
+                        softBanUserId === member.id
+                          ? 'bg-red-500/20 border border-red-500/50'
+                          : 'hover:bg-white/5 glass glass-border'
+                      }`}
+                      onClick={() => setSoftBanUserId(member.id)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={member.avatar}
+                          alt={member.username}
+                          className="w-8 h-8 rounded-full"
+                        />
+                        <span className="text-sm font-medium">{member.username}</span>
+                      </div>
+                      {softBanUserId === member.id && (
+                        <CheckCircle className="w-4 h-4 text-red-400" />
+                      )}
+                    </div>
+                  ))}
+                  {softBanSearch.trim() && members?.filter(m =>
+                    m.username.toLowerCase().includes(softBanSearch.toLowerCase())
+                  ).length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">Никого не найдено</p>
+                  )}
+                </div>
+              )}
+
+              {softBanUserId && (
+                <div className="space-y-3 pt-2 border-t border-white/10">
+                  <div>
+                    <Label>Причина (необязательно)</Label>
+                    <Input
+                      placeholder="Нарушение правил, спам..."
+                      value={softBanReason}
+                      onChange={(e) => setSoftBanReason(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    disabled={softBanMutation.isPending}
+                    onClick={() => softBanMutation.mutate({ userId: softBanUserId, reason: softBanReason })}
+                  >
+                    {softBanMutation.isPending ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Ограничение...</>
+                    ) : (
+                      <><Ban className="w-4 h-4 mr-2" /> Ограничить участника</>
+                    )}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* List of currently restricted users */}
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <UserX className="w-5 h-5 text-orange-400" />
+                Ограниченные участники
+              </CardTitle>
+              <CardDescription>Участники, которые не могут писать и подключаться к голосу</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {softBannedLoading ? (
+                <Skeleton className="h-20 w-full" />
+              ) : (softBanned && softBanned.length > 0) ? (
+                <div className="space-y-2">
+                  {softBanned.map((user: any) => (
+                    <div key={user.id} className="flex items-center justify-between p-3 rounded-lg glass glass-border">
+                      <div className="flex items-center gap-3">
+                        <img src={user.avatar} alt={user.username} className="w-8 h-8 rounded-full" />
+                        <div>
+                          <p className="font-medium text-sm">{user.username}</p>
+                          <p className="text-xs text-muted-foreground">ID: {user.id}</p>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={softUnbanMutation.isPending}
+                        onClick={() => softUnbanMutation.mutate({ userId: user.id })}
+                      >
+                        {softUnbanMutation.isPending ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <>✅ Снять</>  
+                        )}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">Нет ограниченных участников</p>
                 </div>
               )}
             </CardContent>

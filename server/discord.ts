@@ -564,6 +564,19 @@ const RU_PROFANITY_STEMS = [
   'хер ', 'херов', 'сучк', 'сучар', 'пидр', 'ахуе', 'охуе', 'отъеб', 'отьеб',
 ];
 
+// Russian profanity written in Latin letters (transliteration bypass)
+const RU_TRANSLIT_PROFANITY = [
+  'suka', 'cyka', 'blyat', 'blya', 'blyad', 'bliad', 'bliat', 'nahui', 'nahuy',
+  'naher', 'pidar', 'pidor', 'pidoras', 'pidr', 'mudak', 'mudila', 'ebat',
+  'ebal', 'eban', 'eblan', 'ebaniy', 'ebanyj', 'huy', 'hui', 'huya', 'huye',
+  'huynya', 'pizda', 'pizdec', 'pizdet', 'pizdez', 'pizdato', 'zalupa',
+  'shlya', 'shlyuha', 'suchka', 'suchar', 'ueban', 'uebok', 'debil',
+  'yoban', 'yob', 'yobany', 'gandon', 'dolboeb', 'dolboyob', 'zalupа',
+  'ohuel', 'ohuet', 'ahuet', 'ahuel', 'nahren', 'blet', 'bled',
+  'syka', 'suca', 'bl9d', 'bl9t', 'p1zda', 'p1zd', 'xu9', 'xyu', 'xyй',
+  'pzdc', 'pzd', 'huyesos', 'pidorас', 'ped1k', 'pederast',
+];
+
 // Common English profanity stems
 const EN_PROFANITY_STEMS = [
   'fuck', 'shit', 'bitch', 'asshole', 'dick', 'cunt', 'bastard', 'damn',
@@ -658,7 +671,10 @@ export function checkMessageViolations(
   content: string,
   rules: { languageRestriction?: string | null; blockProfanity?: boolean; blockDiscrimination?: boolean }
 ): { reason: string; reasonDetail: string } | null {
-  if (!content || content.trim().length < 2) return null;
+  if (!content || content.trim().length === 0) return null;
+
+  // For very short messages (1 char), only check language restriction, skip profanity
+  const isVeryShort = content.trim().length < 2;
 
   // Full normalization pipeline
   const normalized = normalizeForModeration(content);
@@ -671,7 +687,7 @@ export function checkMessageViolations(
   const strippedLat = stripJunk(asLatin);
 
   // 1) Discrimination check (highest priority) — check all normalized versions
-  if (rules.blockDiscrimination) {
+  if (rules.blockDiscrimination && !isVeryShort) {
     for (const kw of DISCRIMINATION_KEYWORDS) {
       if (normalized.includes(kw) || asCyrillic.includes(kw) || asLatin.includes(kw)
           || stripped.includes(kw.replace(/\s/g, ''))
@@ -683,7 +699,7 @@ export function checkMessageViolations(
   }
 
   // 2) Profanity check — check normalized + homoglyph versions + stripped
-  if (rules.blockProfanity) {
+  if (rules.blockProfanity && !isVeryShort) {
     for (const stem of RU_PROFANITY_STEMS) {
       const stemClean = stem.trim();
       if (normalized.includes(stemClean) || asCyrillic.includes(stemClean)
@@ -698,10 +714,30 @@ export function checkMessageViolations(
         return { reason: 'profanity', reasonDetail: `Нецензурная лексика (EN)` };
       }
     }
+    // 2b) Russian profanity in Latin transliteration (suka, blyat, nahui etc.)
+    for (const stem of RU_TRANSLIT_PROFANITY) {
+      if (normalized.includes(stem) || asLatin.includes(stem)
+          || stripped.includes(stem) || strippedLat.includes(stem)) {
+        return { reason: 'profanity', reasonDetail: `Нецензурная лексика (транслит RU→EN)` };
+      }
+    }
   }
 
   // 3) Language restriction check — per-word analysis with anti-evasion
   if (rules.languageRestriction) {
+    // For very short messages (1-2 chars), do direct character check
+    const cleanContent = stripJunk(content);
+    if (cleanContent.length > 0 && cleanContent.length <= 2) {
+      const hasCyrillic = /[\u0400-\u04FF]/.test(cleanContent);
+      const hasLatin = /[a-zA-Z]/.test(cleanContent);
+      if (rules.languageRestriction === 'en' && hasCyrillic && !hasLatin) {
+        return { reason: 'wrong_language', reasonDetail: 'Кириллические символы в English-only канале' };
+      }
+      if (rules.languageRestriction === 'ru' && hasLatin && !hasCyrillic) {
+        return { reason: 'wrong_language', reasonDetail: 'Латинские символы в Russian-only канале' };
+      }
+    }
+
     const analysis = detectLanguageAdvanced(content);
 
     // Any mixed-script word is an evasion attempt → violation
@@ -913,4 +949,189 @@ export async function deleteDiscordMessages(messageIds: Array<{ channelId: strin
   }
 
   return { deleted, failed, errors };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SOFT-BAN (RESTRICT) SYSTEM
+// Uses a "🔇 Restricted" role that removes Send Messages + Connect
+// in ALL channels. User can still VIEW content but cannot interact.
+// ═══════════════════════════════════════════════════════════════
+
+const RESTRICTED_ROLE_NAME = '🔇 Restricted';
+
+/**
+ * Get or create the "Restricted" role that blocks all messaging/voice.
+ * Sets channel-level permission overwrites for ALL channels.
+ */
+async function getOrCreateRestrictedRole(guild: any) {
+  let role = guild.roles.cache.find((r: any) => r.name === RESTRICTED_ROLE_NAME);
+
+  if (!role) {
+    // Create the role with no permissions (all denied at channel level)
+    role = await guild.roles.create({
+      name: RESTRICTED_ROLE_NAME,
+      color: 0x808080, // grey
+      reason: 'Luminary soft-ban system — restricts user from messaging/voice',
+      permissions: [], // no server-level permissions
+      mentionable: false,
+      hoist: false,
+    });
+    console.log(`[RESTRICT] Created role: ${RESTRICTED_ROLE_NAME} (${role.id})`);
+  }
+
+  // Ensure all channels have the deny overwrite for this role
+  const channels = guild.channels.cache.values();
+  for (const channel of channels) {
+    if (channel.type === ChannelType.GuildCategory) continue; // skip categories
+    try {
+      // Check if overwrite already exists
+      const existing = channel.permissionOverwrites?.cache?.get(role.id);
+      if (!existing) {
+        await channel.permissionOverwrites.create(role, {
+          SendMessages: false,
+          SendMessagesInThreads: false,
+          CreatePublicThreads: false,
+          CreatePrivateThreads: false,
+          AddReactions: false,
+          Connect: false,   // blocks voice
+          Speak: false,     // blocks voice speak
+        });
+        // Small delay to avoid rate limits
+        await new Promise(r => setTimeout(r, 100));
+      }
+    } catch (err: any) {
+      console.error(`[RESTRICT] Failed to set overwrites for #${channel.name}: ${err.message}`);
+    }
+  }
+
+  return role;
+}
+
+/**
+ * Soft-ban a user: assign Restricted role.
+ * User can still see channels but cannot send messages or join voice.
+ */
+export async function softBanUser(discordId: string, reason?: string): Promise<{
+  success: boolean;
+  username: string;
+  message: string;
+}> {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер Discord не найден');
+
+  const member = guild.members.cache.get(discordId) || await guild.members.fetch(discordId).catch(() => null);
+  if (!member) throw new Error('Участник не найден на сервере');
+
+  if (!member.manageable) {
+    throw new Error('Недостаточно прав для ограничения этого участника (роль бота ниже)');
+  }
+
+  // Check if already restricted
+  if (member.roles.cache.some((r: any) => r.name === RESTRICTED_ROLE_NAME)) {
+    return {
+      success: true,
+      username: member.user.username,
+      message: `${member.user.username} уже ограничен`,
+    };
+  }
+
+  const role = await getOrCreateRestrictedRole(guild);
+  await member.roles.add(role, reason || 'Soft-ban через админ-панель Luminary');
+
+  // Disconnect from voice if currently connected
+  if (member.voice?.channel) {
+    try {
+      await member.voice.disconnect('Soft-ban: ограничение доступа');
+    } catch {}
+  }
+
+  // Send DM notification
+  try {
+    await member.send({
+      content: `🔇 **Luminary Moderation**\n\nВы были ограничены на сервере. Вы можете просматривать каналы, но не можете писать сообщения или подключаться к голосовым каналам.\n${reason ? `Причина: ${reason}` : ''}`,
+    });
+  } catch {} // DMs might be disabled
+
+  console.log(`[RESTRICT] Soft-banned ${member.user.username} (${discordId}). Reason: ${reason || 'N/A'}`);
+
+  return {
+    success: true,
+    username: member.user.username,
+    message: `${member.user.username} ограничен — не может писать и подключаться к голосу`,
+  };
+}
+
+/**
+ * Remove soft-ban: remove Restricted role.
+ */
+export async function softUnbanUser(discordId: string): Promise<{
+  success: boolean;
+  username: string;
+  message: string;
+}> {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер Discord не найден');
+
+  const member = guild.members.cache.get(discordId) || await guild.members.fetch(discordId).catch(() => null);
+  if (!member) throw new Error('Участник не найден на сервере');
+
+  const role = guild.roles.cache.find((r: any) => r.name === RESTRICTED_ROLE_NAME);
+  if (!role || !member.roles.cache.has(role.id)) {
+    return {
+      success: true,
+      username: member.user.username,
+      message: `${member.user.username} не был ограничен`,
+    };
+  }
+
+  await member.roles.remove(role, 'Soft-ban снят через админ-панель Luminary');
+
+  // Send DM notification
+  try {
+    await member.send({
+      content: `✅ **Luminary Moderation**\n\nОграничения сняты! Вы снова можете писать сообщения и подключаться к голосовым каналам.`,
+    });
+  } catch {}
+
+  console.log(`[RESTRICT] Soft-unbanned ${member.user.username} (${discordId})`);
+
+  return {
+    success: true,
+    username: member.user.username,
+    message: `${member.user.username} разбанен — ограничения сняты`,
+  };
+}
+
+/**
+ * Get list of currently soft-banned (restricted) users.
+ */
+export async function getSoftBannedUsers(): Promise<Array<{
+  id: string;
+  username: string;
+  avatar: string;
+  restrictedSince: string;
+}>> {
+  const client = getSharedBot();
+  if (!client) return [];
+
+  const guild = getGuild(client);
+  if (!guild) return [];
+
+  const role = guild.roles.cache.find((r: any) => r.name === RESTRICTED_ROLE_NAME);
+  if (!role) return [];
+
+  // Get all members with restricted role
+  const members = role.members;
+  return members.map((m: any) => ({
+    id: m.user.id,
+    username: m.user.username,
+    avatar: m.user.displayAvatarURL({ size: 64 }),
+    restrictedSince: m.roles.cache.get(role.id)?.createdAt?.toISOString() || new Date().toISOString(),
+  }));
 }

@@ -911,6 +911,8 @@ export async function setupDiscordBot() {
   /**
    * Send a private warning to user via DM.
    * Falls back to a self-deleting channel message if DMs are blocked.
+   * Warning in channel auto-deletes in 4 seconds so bot's own message
+   * doesn't violate the channel's language restriction.
    */
   async function sendPrivateWarning(message: any, text: string) {
     try {
@@ -919,12 +921,13 @@ export async function setupDiscordBot() {
         content: `⚠️ **Luminary Moderation** — #${message.channel && 'name' in message.channel ? (message.channel as any).name : 'канал'}\n\n${text}`,
       });
     } catch {
-      // DMs blocked — send ephemeral-like message that auto-deletes in 5s
+      // DMs blocked — send ephemeral-like message that auto-deletes in 4s
       try {
         const warnMsg = await (message.channel as any).send({
           content: `⚠️ <@${message.author.id}> ${text}`,
         });
-        setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
+        // Auto-delete quickly so bot's own message doesn't stay in restricted channels
+        setTimeout(() => warnMsg.delete().catch(() => {}), 4000);
       } catch {}
     }
   }
@@ -1477,9 +1480,9 @@ export async function setupDiscordBot() {
         });
       }
 
-      // Skip very short messages for content moderation
-      if (!message.content || message.content.length < 2) {
-        // Still do joke check even for short messages in non-moderated channels
+      // Skip empty messages — but still check even single-char messages
+      // for language violations (e.g. Cyrillic letter in English-only channel)
+      if (!message.content || message.content.trim().length === 0) {
         if (!rules) {
           maybeJoke(message);
         }
@@ -1488,7 +1491,10 @@ export async function setupDiscordBot() {
 
       // No rules for this channel — just maybe joke
       if (!rules) {
-        maybeJoke(message);
+        // Still skip very short non-moderated messages
+        if (message.content.length >= 2) {
+          maybeJoke(message);
+        }
         return;
       }
 

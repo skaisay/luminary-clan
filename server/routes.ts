@@ -24,6 +24,9 @@ import {
   getDiscordChannelsDetailed,
   scanChannelMessages,
   deleteDiscordMessages,
+  softBanUser,
+  softUnbanUser,
+  getSoftBannedUsers,
 } from "./discord";
 import { requireAdmin, requireDiscordAuth } from "./auth";
 import { 
@@ -1748,6 +1751,42 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
         return res.status(400).json({ error: "userId обязателен" });
       }
       const result = await banDiscordMember(userId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── Soft-ban (restrict) system ──
+  app.get("/api/admin/discord/soft-banned", requireAdmin, async (req, res) => {
+    try {
+      const users = await getSoftBannedUsers();
+      res.json(users);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/discord/soft-ban", requireAdmin, async (req, res) => {
+    try {
+      const { userId, reason } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "userId обязателен" });
+      }
+      const result = await softBanUser(userId, reason);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/discord/soft-unban", requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "userId обязателен" });
+      }
+      const result = await softUnbanUser(userId);
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
