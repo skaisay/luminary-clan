@@ -1036,12 +1036,11 @@ export default function AdminDiscordTab() {
                       <SelectValue placeholder="Выберите канал" />
                     </SelectTrigger>
                     <SelectContent className="max-h-[300px] overflow-y-auto">
-                      {(channelsDetailed?.channels || channels)?.filter(c => {
-                        const t = typeof c.type === 'number' ? c.type : (c.type === 'text' ? 0 : 2);
-                        return t === 0; // only text channels
-                      }).map((channel) => (
+                      {(channelsDetailed?.channels || channels)?.map((channel) => (
                         <SelectItem key={channel.id} value={channel.id}>
-                          #{channel.name}
+                          {(typeof channel.type === 'number' ? channel.type === 2 : channel.type === 'voice')
+                            ? `🔊 ${channel.name}`
+                            : `# ${channel.name}`}
                         </SelectItem>
                       ))}
                     </SelectContent>

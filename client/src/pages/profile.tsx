@@ -928,35 +928,33 @@ export default function ProfilePage() {
                   className="glass glass-border"
                   data-ai="profile-avatar"
                 />
+                <a
+                  href="https://postimages.org/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 mt-0.5"
+                >
+                  📎 {language === 'ru' ? 'Загрузить изображение и получить ссылку → postimages.org' : 'Upload image & get link → postimages.org'}
+                </a>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">{t('profile.bannerImage')}</label>
-                <div className="flex gap-2">
-                  <Input
-                    value={editData.bannerImage}
-                    onChange={e => setEditData(d => ({ ...d, bannerImage: e.target.value }))}
-                    placeholder={t('profile.bannerImagePlaceholder')}
-                    className="glass glass-border flex-1"
-                    data-ai="profile-banner"
-                  />
-                  <input
-                    ref={bannerFileRef}
-                    type="file"
-                    accept="image/*,.gif"
-                    className="hidden"
-                    onChange={handleBannerUpload}
-                  />
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    className="h-9 w-9 shrink-0"
-                    onClick={() => bannerFileRef.current?.click()}
-                    title={language === 'ru' ? 'Загрузить файл' : 'Upload file'}
-                  >
-                    <Upload className="h-4 w-4" />
-                  </Button>
-                </div>
+                <Input
+                  value={editData.bannerImage}
+                  onChange={e => setEditData(d => ({ ...d, bannerImage: e.target.value }))}
+                  placeholder={t('profile.bannerImagePlaceholder')}
+                  className="glass glass-border"
+                  data-ai="profile-banner"
+                />
                 <p className="text-[10px] text-muted-foreground mt-1">{t('profile.bannerImageHint')}</p>
+                <a
+                  href="https://postimages.org/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 mt-0.5"
+                >
+                  📎 {language === 'ru' ? 'Загрузить изображение и получить ссылку → postimages.org' : 'Upload image & get link → postimages.org'}
+                </a>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">🎮 Roblox никнейм</label>
