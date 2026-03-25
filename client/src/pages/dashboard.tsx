@@ -72,12 +72,19 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen -mt-20">
-      <div 
-        className="relative h-[450px] md:h-[500px] lg:h-[550px] bg-cover bg-center mb-4 pt-20"
-        style={{ backgroundImage: `url(${settings?.heroImageUrl || heroBackground})`, backgroundSize: 'cover' }}
-      >
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-background" style={{ backdropFilter: 'blur(0px)' }}></div>
-        <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-background via-background/90 to-transparent" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', maskImage: 'linear-gradient(to top, black 40%, transparent)', WebkitMaskImage: 'linear-gradient(to top, black 40%, transparent)' }}></div>
+      {/* Fixed fullscreen background */}
+      <div
+        className="fixed inset-0 w-full h-full bg-cover bg-center bg-no-repeat z-0"
+        style={{
+          backgroundImage: `url(${settings?.heroImageUrl || heroBackground})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
+      />
+      <div className="fixed inset-0 w-full h-full bg-gradient-to-b from-black/40 via-black/50 to-background/90 z-0" />
+
+      {/* Hero content section */}
+      <div className="relative h-[450px] md:h-[500px] lg:h-[550px] mb-4 pt-20 z-10">
         <div className="relative h-full flex flex-col items-center justify-center text-center px-4">
           {settingsLoading ? (
             <Skeleton className="h-16 w-96 mb-4" />
@@ -106,7 +113,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="container mx-auto px-4 pb-12 -mt-12">
+      <div className="relative z-10 container mx-auto px-4 pb-12 -mt-12">
         <div className="max-w-4xl mx-auto">
           <Card className="glass glass-border border-0 shadow-lg">
             <CardHeader>
