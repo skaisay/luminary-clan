@@ -70,27 +70,19 @@ export default function Dashboard() {
     },
   ];
 
+  const bgUrl = settings?.heroImageUrl || heroBackground;
+
   return (
     <div className="min-h-screen -mt-20">
-      {/* Fixed fullscreen background — desktop/tablet only */}
+      {/* Fullscreen background — fixed on md+, absolute on mobile */}
       <div
-        className="hidden md:block fixed inset-0 w-full h-full bg-cover bg-center bg-no-repeat z-0"
-        style={{
-          backgroundImage: `url(${settings?.heroImageUrl || heroBackground})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
+        className="absolute md:fixed inset-0 w-full h-full bg-cover bg-center bg-no-repeat z-0"
+        style={{ backgroundImage: `url(${bgUrl})` }}
       />
-      <div className="hidden md:block fixed inset-0 w-full h-full bg-gradient-to-b from-black/40 via-black/50 to-background/90 z-0" />
+      <div className="absolute md:fixed inset-0 w-full h-full z-0 bg-gradient-to-b from-black/40 via-black/50 to-background" />
 
       {/* Hero content section */}
       <div className="relative h-[450px] md:h-[500px] lg:h-[550px] mb-4 pt-20 z-10">
-        {/* Mobile-only scrolling background */}
-        <div
-          className="absolute inset-0 bg-cover bg-center md:hidden"
-          style={{ backgroundImage: `url(${settings?.heroImageUrl || heroBackground})` }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-background md:hidden" />
         <div className="relative h-full flex flex-col items-center justify-center text-center px-4">
           {settingsLoading ? (
             <Skeleton className="h-16 w-96 mb-4" />
@@ -119,7 +111,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="relative z-10 container mx-auto px-4 pb-12 -mt-12">
+      <div className="relative z-10 container mx-auto px-4 pb-12 -mt-12 bg-background rounded-t-xl">
         <div className="max-w-4xl mx-auto">
           <Card className="glass glass-border border-0 shadow-lg">
             <CardHeader>
