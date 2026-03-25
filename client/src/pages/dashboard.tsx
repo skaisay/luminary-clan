@@ -111,7 +111,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="relative z-10 container mx-auto px-4 pb-12 -mt-12 bg-background rounded-t-xl">
+      <div className="relative z-10 container mx-auto px-4 pb-12 -mt-12">
         <div className="max-w-4xl mx-auto">
           <Card className="glass glass-border border-0 shadow-lg">
             <CardHeader>
