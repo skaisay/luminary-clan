@@ -54,6 +54,7 @@ import {
   discordChannelRules,
   flaggedMessages,
   botAutoResponses,
+  botChannelPermissions,
 } from "@shared/schema";
 import { videoUpload } from "./upload";
 import {
@@ -1797,6 +1798,49 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     try {
       const roles = await getDiscordRoles();
       res.json(roles);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── Bot auto-message channel permissions ──
+  app.get("/api/admin/discord/bot-channels", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const rows = await db.select().from(botChannelPermissions);
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/discord/bot-channels", requireAdmin, async (req, res) => {
+    try {
+      const { channels } = req.body; // [{ channelId, channelName, allowAutoMessages }]
+      if (!Array.isArray(channels)) {
+        return res.status(400).json({ error: "channels must be an array" });
+      }
+      const { db } = await import("./db");
+      // Upsert each channel
+      for (const ch of channels) {
+        if (!ch.channelId || typeof ch.channelName !== 'string') continue;
+        await db.insert(botChannelPermissions)
+          .values({
+            channelId: ch.channelId,
+            channelName: ch.channelName,
+            allowAutoMessages: !!ch.allowAutoMessages,
+          })
+          .onConflictDoUpdate({
+            target: botChannelPermissions.channelId,
+            set: {
+              channelName: ch.channelName,
+              allowAutoMessages: !!ch.allowAutoMessages,
+              updatedAt: new Date(),
+            },
+          });
+      }
+      const updated = await db.select().from(botChannelPermissions);
+      res.json({ success: true, channels: updated });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

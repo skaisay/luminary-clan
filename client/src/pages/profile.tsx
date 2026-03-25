@@ -957,18 +957,6 @@ export default function ProfilePage() {
                 </a>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">🎮 Roblox никнейм</label>
-                <Input
-                  value={editData.robloxUsername}
-                  onChange={e => setEditData(d => ({ ...d, robloxUsername: e.target.value }))}
-                  placeholder="Ваш ник в Roblox"
-                  className="glass glass-border"
-                  maxLength={30}
-                  data-ai="profile-roblox"
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">Для отображения 3D аватара на главной</p>
-              </div>
-              <div>
                 <label className="text-xs text-muted-foreground mb-2 block">{t('profile.showSections')}</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(['stats', 'achievements', 'info', 'inventory', 'xpLevel'] as const).map(section => (

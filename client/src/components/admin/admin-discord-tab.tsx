@@ -393,6 +393,54 @@ export default function AdminDiscordTab() {
     },
   });
 
+  // ── Bot channel permissions ──
+  interface BotChannelPerm {
+    id: string;
+    channelId: string;
+    channelName: string;
+    allowAutoMessages: boolean;
+  }
+
+  const { data: botChannels } = useQuery<BotChannelPerm[]>({
+    queryKey: ["/api/admin/discord/bot-channels"],
+    retry: false,
+    staleTime: 30_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/bot-channels", { credentials: "include" });
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    },
+  });
+
+  const [botChannelToggles, setBotChannelToggles] = useState<Record<string, boolean>>({});
+  const [botChannelsInitialized, setBotChannelsInitialized] = useState(false);
+
+  // Initialize toggles from DB data
+  if (botChannels && !botChannelsInitialized) {
+    const toggles: Record<string, boolean> = {};
+    for (const ch of botChannels) {
+      toggles[ch.channelId] = ch.allowAutoMessages;
+    }
+    setBotChannelToggles(toggles);
+    setBotChannelsInitialized(true);
+  }
+
+  const saveBotChannelsMutation = useMutation({
+    mutationFn: async (channelList: Array<{ channelId: string; channelName: string; allowAutoMessages: boolean }>) => {
+      const res = await apiRequest("POST", "/api/admin/discord/bot-channels", { channels: channelList });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Настройки каналов бота сохранены!" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/bot-channels"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Ошибка сохранения", description: error.message, variant: "destructive" });
+    },
+  });
+
   // Channel creation
   const createChannelMutation = useMutation({
     mutationFn: async (data: { name: string; type: string; category?: string; topic?: string }) => {
@@ -1489,6 +1537,75 @@ export default function AdminDiscordTab() {
                   <p>Нажмите «Запустить проверку» чтобы протестировать все AI-провайдеры</p>
                   <p className="text-xs mt-1">Проверка занимает ~10-15 секунд</p>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Bot Channel Permissions */}
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-cyan-400" />
+                Каналы автосообщений бота
+              </CardTitle>
+              <CardDescription>
+                Выберите каналы, в которых бот может сам писать сообщения для активации чата. Если ни один канал не выбран — бот использует авто-фильтр (пишет везде кроме правил/логов/админки).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {channelsLoading ? (
+                <Skeleton className="h-32 w-full" />
+              ) : (
+                <>
+                  <div className="max-h-[350px] overflow-y-auto space-y-1">
+                    {(channelsDetailed?.channels || channels)?.filter(c => {
+                      const t = typeof c.type === 'number' ? c.type : (c.type === 'text' ? 0 : 2);
+                      return t === 0; // only text channels for auto-messaging
+                    }).map((channel) => (
+                      <div
+                        key={channel.id}
+                        className="flex items-center justify-between p-2 rounded-lg glass glass-border"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Hash className="w-4 h-4 text-muted-foreground" />
+                          <span className="text-sm">{channel.name}</span>
+                        </div>
+                        <Switch
+                          checked={botChannelToggles[channel.id] ?? false}
+                          onCheckedChange={(checked) => {
+                            setBotChannelToggles(prev => ({ ...prev, [channel.id]: checked }));
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    className="w-full"
+                    disabled={saveBotChannelsMutation.isPending}
+                    onClick={() => {
+                      const allChannels = (channelsDetailed?.channels || channels) || [];
+                      const textChannels = allChannels.filter(c => {
+                        const t = typeof c.type === 'number' ? c.type : (c.type === 'text' ? 0 : 2);
+                        return t === 0;
+                      });
+                      const payload = textChannels.map(ch => ({
+                        channelId: ch.id,
+                        channelName: ch.name,
+                        allowAutoMessages: botChannelToggles[ch.id] ?? false,
+                      }));
+                      saveBotChannelsMutation.mutate(payload);
+                    }}
+                  >
+                    {saveBotChannelsMutation.isPending ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Сохранение...</>
+                    ) : (
+                      <><CheckCircle className="w-4 h-4 mr-2" /> Сохранить настройки каналов</>
+                    )}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    ✨ Бот также умеет: отвечать на вопросы, искать игроков в Roblox (напишите "найди [ник] в Roblox"), вести диалоги при ответе на его сообщения.
+                  </p>
+                </>
               )}
             </CardContent>
           </Card>

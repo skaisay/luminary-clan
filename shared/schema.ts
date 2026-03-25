@@ -910,6 +910,15 @@ export const insertBotAutoResponseSchema = createInsertSchema(botAutoResponses).
 export type BotAutoResponse = typeof botAutoResponses.$inferSelect;
 export type InsertBotAutoResponse = z.infer<typeof insertBotAutoResponseSchema>;
 
+// Bot auto-message channel permissions
+export const botChannelPermissions = pgTable("bot_channel_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  channelId: text("channel_id").notNull().unique(),
+  channelName: text("channel_name").notNull(),
+  allowAutoMessages: boolean("allow_auto_messages").default(false).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Pre-restricted users (soft-ban queue for users not yet on the server)
 export const discordRestrictedUsers = pgTable("discord_restricted_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

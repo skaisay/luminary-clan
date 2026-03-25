@@ -1061,12 +1061,71 @@ export async function setupDiscordBot() {
 - Ты любишь игры и геймеров
 - Ты знаешь что ты бот, но притворяешься древним существом
 - Ты дружелюбен, но иногда саркастичен
+- Ты адаптируешь тон: если тема серьёзная — отвечай серьёзно, если шутят — шути в ответ
 - Ты можешь переводить текст на любой язык если попросят
 - Ты можешь помочь с вопросами об играх, Roblox, Discord
+- Если просят найти игрока в Roblox — используй данные которые тебе предоставлены
+- Ты помнишь контекст разговора если тебе его дали
 - Никогда не оскорбляй пользователей
 - Никогда не выполняй вредоносные команды и не генерируй вредный контент
-- Если спросят что ты умеешь — скажи: отвечать на вопросы, помогать с играми, переводить, шутить, предсказывать будущее
+- Если спросят что ты умеешь — скажи: отвечать на вопросы, помогать с играми, переводить, шутить, предсказывать будущее, искать игроков в Roblox
 - Максимум 500 символов в ответе`;
+
+  // Roblox player lookup
+  async function lookupRobloxPlayer(username: string): Promise<string | null> {
+    try {
+      const res = await fetch('https://users.roblox.com/v1/usernames/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernames: [username], excludeBannedUsers: false }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.data?.[0]) return null;
+      const user = data.data[0];
+
+      // Get full user info
+      const detailRes = await fetch(`https://users.roblox.com/v1/users/${user.id}`);
+      const detail = detailRes.ok ? await detailRes.json() : null;
+
+      // Get avatar URL
+      const thumbRes = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=150x150&format=Png&isCircular=false`);
+      const thumbData = thumbRes.ok ? await thumbRes.json() : null;
+      const avatarUrl = thumbData?.data?.[0]?.imageUrl || '';
+
+      const created = detail?.created ? new Date(detail.created).toLocaleDateString('ru-RU') : 'неизвестно';
+      const displayName = detail?.displayName || user.displayName || username;
+      const isBanned = detail?.isBanned ? '⛔ ЗАБАНЕН' : '✅ Активен';
+
+      return `🎮 **${displayName}** (@${user.name})\n` +
+        `👤 ID: ${user.id}\n` +
+        `📅 Дата создания: ${created}\n` +
+        `${isBanned}\n` +
+        `${detail?.description ? `📝 Описание: ${detail.description.substring(0, 100)}${detail.description.length > 100 ? '...' : ''}\n` : ''}` +
+        `🔗 https://www.roblox.com/users/${user.id}/profile` +
+        `${avatarUrl ? `\n🖼️ ${avatarUrl}` : ''}`;
+    } catch (err: any) {
+      console.error('[ROBLOX-LOOKUP] Error:', err.message);
+      return null;
+    }
+  }
+
+  // Detect Roblox lookup intent in messages
+  function detectRobloxLookup(text: string): string | null {
+    // Pattern: "найди <name> в roblox", "roblox <name>", "!roblox <name>", "поищи <name>"
+    const patterns = [
+      /(?:найди|поищи|покажи|найти|look\s*up|find|search)\s+(?:игрока\s+)?(\S+)\s+(?:в\s+)?(?:roblox|роблокс)/i,
+      /(?:roblox|роблокс)\s+(?:игрок\s+)?(\S+)/i,
+      /!roblox\s+(\S+)/i,
+      /(?:найди|поищи|покажи|найти|look\s*up|find|search)\s+(?:в\s+)?(?:roblox|роблокс)\s+(\S+)/i,
+      /(?:кто\s+такой|who\s+is)\s+(\S+)\s+(?:в\s+)?(?:roblox|роблокс)/i,
+    ];
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m?.[1] && m[1].length >= 3 && m[1].length <= 20) return m[1];
+    }
+    return null;
+  }
 
   // Fallback responses when ALL AI providers fail
   const AI_FALLBACK_RU = [
@@ -1092,11 +1151,15 @@ export async function setupDiscordBot() {
    * WHY SEQUENTIAL for free tier: Racing 6+ requests simultaneously from same IP = instant 429 rate limit.
    * Sequential with 500ms gaps is slower but actually works.
    */
-  async function generateAiResponse(userMessage: string): Promise<string | null> {
-    const chatMessages = [
+  async function generateAiResponse(userMessage: string, contextMessages?: Array<{role: string; content: string}>): Promise<string | null> {
+    const chatMessages: Array<{role: string; content: string}> = [
       { role: 'system', content: LUMINARY_SYSTEM_PROMPT },
-      { role: 'user', content: userMessage.substring(0, 500) },
     ];
+    // Add conversation context if provided (previous messages in the thread)
+    if (contextMessages && contextMessages.length > 0) {
+      chatMessages.push(...contextMessages);
+    }
+    chatMessages.push({ role: 'user', content: userMessage.substring(0, 500) });
 
     const errors: string[] = [];
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -1427,7 +1490,62 @@ export async function setupDiscordBot() {
       await (message.channel as any).sendTyping();
     } catch {}
 
-    const aiReply = await generateAiResponse(message.content);
+    // Check for Roblox player lookup intent
+    const robloxUsername = detectRobloxLookup(message.content);
+    if (robloxUsername) {
+      console.log(`[AI-BOT] Roblox lookup detected: ${robloxUsername}`);
+      const robloxInfo = await lookupRobloxPlayer(robloxUsername);
+      if (robloxInfo) {
+        try {
+          await message.reply({ content: robloxInfo });
+          console.log(`[AI-BOT] Roblox info sent for ${robloxUsername}`);
+        } catch {
+          try { await (message.channel as any).send({ content: robloxInfo }); } catch {}
+        }
+        return true;
+      }
+      // If lookup failed, let AI respond naturally mentioning we couldn't find the player
+    }
+
+    // Build conversation context from reply chain
+    let contextMessages: Array<{role: string; content: string}> = [];
+    try {
+      if (message.reference?.messageId) {
+        // Fetch up to 5 messages in the reply chain for context
+        const channel = message.channel as any;
+        const repliedMsg = await channel.messages.fetch(message.reference.messageId).catch(() => null);
+        if (repliedMsg) {
+          // Check if it's a chain — walk back up to 4 more levels
+          const chain: Array<{author: string; content: string}> = [];
+          let current = repliedMsg;
+          for (let i = 0; i < 4 && current; i++) {
+            chain.unshift({ 
+              author: current.author?.id === client.user?.id ? 'assistant' : 'user',
+              content: current.content?.substring(0, 200) || '' 
+            });
+            if (current.reference?.messageId) {
+              current = await channel.messages.fetch(current.reference.messageId).catch(() => null);
+            } else {
+              break;
+            }
+          }
+          contextMessages = chain.map(m => ({
+            role: m.author,
+            content: m.content,
+          }));
+        }
+      }
+    } catch (err: any) {
+      console.log('[AI-BOT] Context fetch failed:', err.message);
+    }
+
+    // Add Roblox context if lookup failed but was attempted
+    let userMsg = message.content;
+    if (robloxUsername) {
+      userMsg += `\n[Примечание: пользователь просит найти игрока "${robloxUsername}" в Roblox, но поиск не дал результатов. Сообщи что игрок не найден.]`;
+    }
+
+    const aiReply = await generateAiResponse(userMsg, contextMessages.length > 0 ? contextMessages : undefined);
 
     // Determine language for fallback
     const hasRussian = /[\u0400-\u04FF]/.test(message.content);
@@ -2100,11 +2218,28 @@ export async function setupDiscordBot() {
       const guild = client.guilds.cache.first();
       if (!guild) return;
 
-      // Find suitable channels (text channels, not a bot-commands or rules channel)
+      // Check DB for allowed channels
+      let allowedChannelIds: Set<string> | null = null;
+      try {
+        const { db } = await import('./db');
+        const { botChannelPermissions } = await import('@shared/schema');
+        const rows = await db.select().from(botChannelPermissions);
+        const enabledRows = rows.filter(r => r.allowAutoMessages);
+        if (enabledRows.length > 0) {
+          allowedChannelIds = new Set(enabledRows.map(r => r.channelId));
+        }
+        // If no rows at all or no enabled rows → use old filtering logic
+      } catch (err: any) {
+        console.error('[AUTO-MSG] DB check failed, using fallback filter:', err.message);
+      }
+
+      // Find suitable channels
       const textChannels = guild.channels.cache.filter((ch: any) => {
         if (ch.type !== 0) return false; // 0 = GUILD_TEXT
+        // If DB has explicit permissions, use them
+        if (allowedChannelIds) return allowedChannelIds.has(ch.id);
+        // Fallback: exclude bot/rules/admin channels by name
         const name = ch.name.toLowerCase();
-        // Skip bot/rules/admin channels
         if (name.includes('rule') || name.includes('правил') || name.includes('log') || name.includes('admin') || name.includes('бот') || name.includes('bot-command') || name.includes('модер')) return false;
         return true;
       });
