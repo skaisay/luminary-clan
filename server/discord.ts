@@ -102,6 +102,9 @@ export async function getDiscordChannels() {
     const guild = getGuild(client);
     if (!guild) throw new Error('Сервер не найден');
 
+    // Fetch fresh channel list from Discord API (cache may be incomplete)
+    await guild.channels.fetch();
+
     const channels = guild.channels.cache
       .filter(channel => channel.type === 0 || channel.type === 2)
       .map(channel => ({
@@ -474,6 +477,9 @@ export async function getDiscordChannelsDetailed() {
 
   const guild = getGuild(client);
   if (!guild) throw new Error('Сервер не найден');
+
+  // Fetch fresh channel list from Discord API (cache may be incomplete)
+  await guild.channels.fetch();
 
   // Get categories
   const categories = guild.channels.cache

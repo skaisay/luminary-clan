@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Send, Hash, Users as UsersIcon, UserX, Ban, Shield, Plus, Trash2, Search, CheckCircle, XCircle, AlertTriangle, RefreshCw, Volume2, MessageSquare, Eye, Loader2, Zap, Bot, Edit, Power, Activity, Wifi, WifiOff } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -415,17 +415,17 @@ export default function AdminDiscordTab() {
   });
 
   const [botChannelToggles, setBotChannelToggles] = useState<Record<string, boolean>>({});
-  const [botChannelsInitialized, setBotChannelsInitialized] = useState(false);
 
   // Initialize toggles from DB data
-  if (botChannels && !botChannelsInitialized) {
-    const toggles: Record<string, boolean> = {};
-    for (const ch of botChannels) {
-      toggles[ch.channelId] = ch.allowAutoMessages;
+  useEffect(() => {
+    if (botChannels && botChannels.length > 0) {
+      const toggles: Record<string, boolean> = {};
+      for (const ch of botChannels) {
+        toggles[ch.channelId] = ch.allowAutoMessages;
+      }
+      setBotChannelToggles(toggles);
     }
-    setBotChannelToggles(toggles);
-    setBotChannelsInitialized(true);
-  }
+  }, [botChannels]);
 
   const saveBotChannelsMutation = useMutation({
     mutationFn: async (channelList: Array<{ channelId: string; channelName: string; allowAutoMessages: boolean }>) => {

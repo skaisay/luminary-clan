@@ -2224,11 +2224,13 @@ export async function setupDiscordBot() {
         const { db } = await import('./db');
         const { botChannelPermissions } = await import('@shared/schema');
         const rows = await db.select().from(botChannelPermissions);
-        const enabledRows = rows.filter(r => r.allowAutoMessages);
-        if (enabledRows.length > 0) {
+        if (rows.length > 0) {
+          // DB has channel permission rows — use them strictly
+          const enabledRows = rows.filter(r => r.allowAutoMessages);
           allowedChannelIds = new Set(enabledRows.map(r => r.channelId));
+          // If all channels disabled → empty set → bot won't auto-message anywhere
         }
-        // If no rows at all or no enabled rows → use old filtering logic
+        // If no rows at all → allowedChannelIds stays null → use fallback
       } catch (err: any) {
         console.error('[AUTO-MSG] DB check failed, using fallback filter:', err.message);
       }
