@@ -1560,7 +1560,7 @@ export default function AdminDiscordTab() {
                   <div className="max-h-[350px] overflow-y-auto space-y-1">
                     {(channelsDetailed?.channels || channels)?.filter(c => {
                       const t = typeof c.type === 'number' ? c.type : (c.type === 'text' ? 0 : 2);
-                      return t === 0; // only text channels for auto-messaging
+                      return t !== 2 && t !== 13; // all text-like channels (text, announcement, forum)
                     }).map((channel) => (
                       <div
                         key={channel.id}

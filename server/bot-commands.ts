@@ -1097,12 +1097,38 @@ export async function setupDiscordBot() {
       const displayName = detail?.displayName || user.displayName || username;
       const isBanned = detail?.isBanned ? '⛔ ЗАБАНЕН' : '✅ Активен';
 
+      // Try to find linked Discord account on the server
+      let discordInfo = '';
+      try {
+        const guild = client.guilds.cache.first();
+        if (guild) {
+          const members = await guild.members.fetch();
+          // Search by Roblox username in nickname, displayName, or presence activities
+          const robloxLower = user.name.toLowerCase();
+          const displayLower = displayName.toLowerCase();
+          const found = members.find((m: any) => {
+            if (m.user.bot) return false;
+            const nick = (m.nickname || '').toLowerCase();
+            const dname = (m.displayName || '').toLowerCase();
+            // Check if nickname or display name contains the Roblox username
+            return nick.includes(robloxLower) || dname.includes(robloxLower)
+              || nick.includes(displayLower) || dname.includes(displayLower);
+          });
+          if (found) {
+            discordInfo = `\n🔗 Discord: <@${found.id}> (${found.user.tag})`;
+          }
+        }
+      } catch (err: any) {
+        console.log('[ROBLOX-LOOKUP] Discord cross-ref failed:', err.message);
+      }
+
       return `🎮 **${displayName}** (@${user.name})\n` +
         `👤 ID: ${user.id}\n` +
         `📅 Дата создания: ${created}\n` +
         `${isBanned}\n` +
         `${detail?.description ? `📝 Описание: ${detail.description.substring(0, 100)}${detail.description.length > 100 ? '...' : ''}\n` : ''}` +
         `🔗 https://www.roblox.com/users/${user.id}/profile` +
+        `${discordInfo}` +
         `${avatarUrl ? `\n🖼️ ${avatarUrl}` : ''}`;
     } catch (err: any) {
       console.error('[ROBLOX-LOOKUP] Error:', err.message);
@@ -1463,6 +1489,22 @@ export async function setupDiscordBot() {
    */
   async function handleBotChat(message: any): Promise<boolean> {
     if (!isMessageForBot(message)) return false;
+
+    // Check channel permissions — if DB has rows, only respond in allowed channels
+    try {
+      const { db } = await import('./db');
+      const { botChannelPermissions } = await import('@shared/schema');
+      const rows = await db.select().from(botChannelPermissions);
+      if (rows.length > 0) {
+        const allowed = rows.find(r => r.channelId === message.channelId && r.allowAutoMessages);
+        if (!allowed) {
+          console.log(`[AI-BOT] Channel ${message.channel?.name || message.channelId} is not allowed — skipping`);
+          return false;
+        }
+      }
+    } catch (err: any) {
+      console.error('[AI-BOT] Channel permission check failed:', err.message);
+    }
 
     const now = Date.now();
 
@@ -2228,7 +2270,10 @@ export async function setupDiscordBot() {
           // DB has channel permission rows — use them strictly
           const enabledRows = rows.filter(r => r.allowAutoMessages);
           allowedChannelIds = new Set(enabledRows.map(r => r.channelId));
+          console.log(`[AUTO-MSG] DB: ${rows.length} rows, ${enabledRows.length} enabled channels`);
           // If all channels disabled → empty set → bot won't auto-message anywhere
+        } else {
+          console.log('[AUTO-MSG] No DB rows, using name-based fallback filter');
         }
         // If no rows at all → allowedChannelIds stays null → use fallback
       } catch (err: any) {

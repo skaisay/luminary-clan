@@ -105,8 +105,9 @@ export async function getDiscordChannels() {
     // Fetch fresh channel list from Discord API (cache may be incomplete)
     await guild.channels.fetch();
 
+    // Include text (0), voice (2), announcement (5), forum (15), stage (13)
     const channels = guild.channels.cache
-      .filter(channel => channel.type === 0 || channel.type === 2)
+      .filter(channel => [0, 2, 5, 13, 15].includes(channel.type))
       .map(channel => ({
         id: channel.id,
         name: channel.name,
@@ -486,12 +487,16 @@ export async function getDiscordChannelsDetailed() {
     .filter(c => c.type === ChannelType.GuildCategory)
     .map(c => ({ id: c.id, name: c.name }));
 
-  const channels = guild.channels.cache
-    .filter(c => c.type === ChannelType.GuildText || c.type === ChannelType.GuildVoice)
+// Include text, voice, announcement (5), forum (15), stage (13) channels
+    const TEXT_LIKE = new Set([ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum]);
+    const VOICE_LIKE = new Set([ChannelType.GuildVoice, ChannelType.GuildStageVoice]);
+
+    const channels = guild.channels.cache
+    .filter(c => TEXT_LIKE.has(c.type) || VOICE_LIKE.has(c.type))
     .map(c => ({
       id: c.id,
       name: c.name,
-      type: c.type === ChannelType.GuildVoice ? 'voice' : 'text',
+      type: VOICE_LIKE.has(c.type) ? 'voice' : 'text',
       parentId: (c as any).parentId || null,
       parentName: (c as any).parent?.name || null,
     }));
