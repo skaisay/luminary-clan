@@ -286,34 +286,6 @@ export async function assignDiscordRole(discordId: string, roleData: { roleName:
   }
 }
 
-export async function getDiscordRoles() {
-  try {
-    const client = getSharedBot();
-    if (!client) throw new Error('Бот не подключён');
-
-    const guild = getGuild(client);
-    if (!guild) throw new Error('Сервер не найден');
-
-    const roles = guild.roles.cache
-      .filter(role => role.name !== '@everyone' && !role.managed)
-      .map(role => ({
-        id: role.id,
-        name: role.name,
-        color: role.color ? `#${role.color.toString(16).padStart(6, '0')}` : null,
-        position: role.position,
-        permissions: role.permissions.toArray(),
-        mentionable: role.mentionable,
-        hoist: role.hoist,
-      }))
-      .sort((a, b) => b.position - a.position);
-
-    return roles;
-  } catch (error: any) {
-    console.error("Discord roles fetch error:", error);
-    throw error;
-  }
-}
-
 export async function createBeautifulTestRoles() {
   try {
     const client = getSharedBot();
@@ -499,6 +471,134 @@ export async function getDiscordRoles() {
     }));
 
   return roles;
+}
+
+/**
+ * Create a new Discord role.
+ */
+export async function createDiscordRole(data: { name: string; color?: string; hoist?: boolean; mentionable?: boolean }) {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  const color = data.color ? parseInt(data.color.replace('#', ''), 16) : undefined;
+  const role = await guild.roles.create({
+    name: data.name,
+    color,
+    hoist: data.hoist ?? false,
+    mentionable: data.mentionable ?? false,
+    reason: 'Создано через админ-панель',
+  });
+
+  return { id: role.id, name: role.name, color: role.hexColor, position: role.position };
+}
+
+/**
+ * Edit an existing Discord role.
+ */
+export async function editDiscordRole(roleId: string, data: { name?: string; color?: string; hoist?: boolean; mentionable?: boolean }) {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  const role = guild.roles.cache.get(roleId);
+  if (!role) throw new Error('Роль не найдена');
+  if (role.managed) throw new Error('Эта роль управляется интеграцией и не может быть изменена');
+
+  const updates: any = {};
+  if (data.name !== undefined) updates.name = data.name;
+  if (data.color !== undefined) updates.color = parseInt(data.color.replace('#', ''), 16);
+  if (data.hoist !== undefined) updates.hoist = data.hoist;
+  if (data.mentionable !== undefined) updates.mentionable = data.mentionable;
+  updates.reason = 'Изменено через админ-панель';
+
+  await role.edit(updates);
+  return { id: role.id, name: role.name, color: role.hexColor };
+}
+
+/**
+ * Delete a Discord role.
+ */
+export async function deleteDiscordRole(roleId: string) {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  const role = guild.roles.cache.get(roleId);
+  if (!role) throw new Error('Роль не найдена');
+  if (role.managed) throw new Error('Эта роль управляется интеграцией и не может быть удалена');
+
+  await role.delete('Удалена через админ-панель');
+  return { success: true };
+}
+
+/**
+ * Assign a role to a member.
+ */
+export async function addRoleToMember(discordId: string, roleId: string) {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  const member = guild.members.cache.get(discordId) || await guild.members.fetch(discordId);
+  if (!member) throw new Error('Участник не найден');
+  const role = guild.roles.cache.get(roleId);
+  if (!role) throw new Error('Роль не найдена');
+
+  await member.roles.add(role, 'Назначено через админ-панель');
+  return { success: true, memberName: member.user.username, roleName: role.name };
+}
+
+/**
+ * Remove a role from a member.
+ */
+export async function removeRoleFromMember(discordId: string, roleId: string) {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  const member = guild.members.cache.get(discordId) || await guild.members.fetch(discordId);
+  if (!member) throw new Error('Участник не найден');
+  const role = guild.roles.cache.get(roleId);
+  if (!role) throw new Error('Роль не найдена');
+
+  await member.roles.remove(role, 'Снято через админ-панель');
+  return { success: true, memberName: member.user.username, roleName: role.name };
+}
+
+/**
+ * Get server activity statistics from DB.
+ */
+export async function getServerActivityStats() {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  const totalMembers = guild.memberCount;
+  const onlineMembers = guild.members.cache.filter(m => m.presence?.status !== 'offline' && m.presence?.status !== undefined).size;
+  const textChannels = guild.channels.cache.filter(c => c.type === ChannelType.GuildText).size;
+  const voiceChannels = guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice).size;
+  const rolesCount = guild.roles.cache.size - 1; // exclude @everyone
+  const boostLevel = guild.premiumTier;
+  const boostCount = guild.premiumSubscriptionCount || 0;
+
+  return {
+    totalMembers,
+    onlineMembers,
+    textChannels,
+    voiceChannels,
+    rolesCount,
+    boostLevel,
+    boostCount,
+    createdAt: guild.createdAt.toISOString(),
+    guildName: guild.name,
+  };
 }
 
 /**

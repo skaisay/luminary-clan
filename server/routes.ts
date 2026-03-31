@@ -27,6 +27,12 @@ import {
   softBanUser,
   softUnbanUser,
   getSoftBannedUsers,
+  createDiscordRole,
+  editDiscordRole,
+  deleteDiscordRole,
+  addRoleToMember,
+  removeRoleFromMember,
+  getServerActivityStats,
 } from "./discord";
 import { requireAdmin, requireDiscordAuth } from "./auth";
 import { 
@@ -6444,6 +6450,295 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     } catch (e: any) {
       console.error('ad-spots buy error:', e.message);
       res.status(500).json({ error: "Failed to purchase ad spot" });
+    }
+  });
+
+  // ============ ROLE MANAGEMENT ============
+  app.post("/api/admin/discord/roles", requireAdmin, async (req, res) => {
+    try {
+      const { name, color, hoist, mentionable } = req.body;
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: "Укажите название роли" });
+      }
+      const role = await createDiscordRole({ name: name.trim(), color, hoist, mentionable });
+      res.json(role);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/admin/discord/roles/:roleId", requireAdmin, async (req, res) => {
+    try {
+      const { roleId } = req.params;
+      const { name, color, hoist, mentionable } = req.body;
+      const role = await editDiscordRole(roleId, { name, color, hoist, mentionable });
+      res.json(role);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/admin/discord/roles/:roleId", requireAdmin, async (req, res) => {
+    try {
+      const { roleId } = req.params;
+      const result = await deleteDiscordRole(roleId);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/discord/roles/assign", requireAdmin, async (req, res) => {
+    try {
+      const { discordId, roleId } = req.body;
+      if (!discordId || !roleId) return res.status(400).json({ error: "discordId и roleId обязательны" });
+      const result = await addRoleToMember(discordId, roleId);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/discord/roles/remove", requireAdmin, async (req, res) => {
+    try {
+      const { discordId, roleId } = req.body;
+      if (!discordId || !roleId) return res.status(400).json({ error: "discordId и roleId обязательны" });
+      const result = await removeRoleFromMember(discordId, roleId);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============ ACTIVITY STATISTICS ============
+  app.get("/api/admin/discord/activity-stats", requireAdmin, async (req, res) => {
+    try {
+      const { discordActivity, clanMembers } = await import("@shared/schema");
+      const { desc, sql } = await import("drizzle-orm");
+
+      const serverStats = await getServerActivityStats();
+
+      // Top active members
+      const topActive = await db.select({
+        discordId: discordActivity.discordId,
+        messageCount: discordActivity.messageCount,
+        voiceMinutes: discordActivity.voiceMinutes,
+        reactionCount: discordActivity.reactionCount,
+        lastActivity: discordActivity.lastActivity,
+      }).from(discordActivity).orderBy(desc(discordActivity.messageCount)).limit(20);
+
+      // Enrich with member names
+      const allMembers = await db.select({
+        discordId: clanMembers.discordId,
+        username: clanMembers.username,
+        avatar: clanMembers.avatar,
+        lumiCoins: clanMembers.lumiCoins,
+        level: clanMembers.level,
+      }).from(clanMembers);
+
+      const memberMap = new Map(allMembers.map(m => [m.discordId, m]));
+
+      const enrichedTop = topActive.map(a => {
+        const member = memberMap.get(a.discordId);
+        return {
+          ...a,
+          username: member?.username || 'Unknown',
+          avatar: member?.avatar || '',
+          lumiCoins: member?.lumiCoins || 0,
+          level: member?.level || 0,
+        };
+      });
+
+      // Aggregate totals
+      const totals = await db.select({
+        totalMessages: sql<number>`COALESCE(SUM(${discordActivity.messageCount}), 0)`,
+        totalVoiceMinutes: sql<number>`COALESCE(SUM(${discordActivity.voiceMinutes}), 0)`,
+        totalReactions: sql<number>`COALESCE(SUM(${discordActivity.reactionCount}), 0)`,
+        activeMembers: sql<number>`COUNT(*)`,
+      }).from(discordActivity);
+
+      // Inactive members (no activity record or last activity > 7 days)
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const { lt } = await import("drizzle-orm");
+      const inactive = await db.select({
+        discordId: discordActivity.discordId,
+        lastActivity: discordActivity.lastActivity,
+        messageCount: discordActivity.messageCount,
+      }).from(discordActivity).where(lt(discordActivity.lastActivity, sevenDaysAgo)).orderBy(discordActivity.lastActivity).limit(20);
+
+      const enrichedInactive = inactive.map(a => {
+        const member = memberMap.get(a.discordId);
+        return { ...a, username: member?.username || 'Unknown', avatar: member?.avatar || '' };
+      });
+
+      res.json({
+        server: serverStats,
+        totals: totals[0],
+        topActive: enrichedTop,
+        inactive: enrichedInactive,
+      });
+    } catch (e: any) {
+      console.error('activity-stats error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============ AI SERVER ANALYSIS ============
+  app.post("/api/admin/ai/analyze-server", requireAdmin, async (req, res) => {
+    try {
+      const { discordActivity, clanMembers } = await import("@shared/schema");
+      const { desc, sql } = await import("drizzle-orm");
+
+      // Gather server data
+      const serverStats = await getServerActivityStats();
+
+      const topActive = await db.select({
+        discordId: discordActivity.discordId,
+        messageCount: discordActivity.messageCount,
+        voiceMinutes: discordActivity.voiceMinutes,
+      }).from(discordActivity).orderBy(desc(discordActivity.messageCount)).limit(10);
+
+      const allMembers = await db.select({
+        discordId: clanMembers.discordId,
+        username: clanMembers.username,
+        role: clanMembers.role,
+        lumiCoins: clanMembers.lumiCoins,
+      }).from(clanMembers);
+
+      const memberMap = new Map(allMembers.map(m => [m.discordId, m]));
+
+      const totals = await db.select({
+        totalMessages: sql<number>`COALESCE(SUM(${discordActivity.messageCount}), 0)`,
+        totalVoiceMinutes: sql<number>`COALESCE(SUM(${discordActivity.voiceMinutes}), 0)`,
+        activeMembers: sql<number>`COUNT(*)`,
+      }).from(discordActivity);
+
+      const topActiveNames = topActive.map(a => {
+        const m = memberMap.get(a.discordId);
+        return `${m?.username || 'Unknown'}: ${a.messageCount} msgs, ${a.voiceMinutes} voice min`;
+      }).join('\n');
+
+      const roles = await getDiscordRoles();
+      const rolesSummary = roles.slice(0, 15).map(r => `${r.name} (${r.memberCount} members)`).join(', ');
+
+      const analysisPrompt = `You are a Discord server analyst. Analyze this gaming clan server and provide actionable recommendations IN RUSSIAN.
+
+Server: ${serverStats.guildName}
+Created: ${serverStats.createdAt}
+Total members: ${serverStats.totalMembers}
+Online now: ${serverStats.onlineMembers}
+Text channels: ${serverStats.textChannels}
+Voice channels: ${serverStats.voiceChannels}
+Roles: ${rolesSummary}
+Boost level: ${serverStats.boostLevel}, Boosts: ${serverStats.boostCount}
+
+Total messages: ${totals[0]?.totalMessages || 0}
+Total voice minutes: ${totals[0]?.totalVoiceMinutes || 0}
+Active members (with activity): ${totals[0]?.activeMembers || 0}
+Total registered: ${allMembers.length}
+
+Top 10 active:
+${topActiveNames}
+
+Provide analysis in this format:
+## 📊 Общий анализ сервера
+(overall health assessment)
+
+## ✅ Что хорошо
+(strengths, 3-5 points)
+
+## ⚠️ Проблемы
+(issues found, 3-5 points)
+
+## 💡 Рекомендации
+(specific actionable recommendations, 5-7 points)
+
+## 📈 План роста
+(growth plan for next 30 days)
+
+Be specific with numbers and channel/role names. Max 2000 chars.`;
+
+      // Use Pollinations AI (free, no key needed)
+      const aiResp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'openai',
+          messages: [{ role: 'user', content: analysisPrompt }],
+          max_tokens: 3000,
+          temperature: 0.7,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!aiResp.ok) throw new Error('AI сервис недоступен');
+      const aiData = await aiResp.json();
+      const analysis = aiData.choices?.[0]?.message?.content?.trim();
+
+      if (!analysis) throw new Error('AI не вернул ответ');
+
+      res.json({ analysis, serverStats, totals: totals[0] });
+    } catch (e: any) {
+      console.error('ai-analyze error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============ AI SERVER PROMOTION ============
+  app.post("/api/admin/ai/generate-promotion", requireAdmin, async (req, res) => {
+    try {
+      const { type = 'general', language = 'ru' } = req.body;
+
+      const serverStats = await getServerActivityStats();
+      const roles = await getDiscordRoles();
+
+      const typeDescriptions: Record<string, string> = {
+        'general': 'общий рекламный пост для привлечения новых участников',
+        'social': 'пост для социальных сетей (Twitter/X, VK, Reddit)',
+        'recruitment': 'сообщение для рекрутинга игроков в других Discord серверах',
+        'description': 'описание сервера для Discord Server Discovery',
+        'event': 'анонс мероприятия/ивента для привлечения участников',
+      };
+
+      const promoPrompt = `Generate a ${typeDescriptions[type] || typeDescriptions['general']} for this Discord gaming clan server. Write in ${language === 'ru' ? 'Russian' : 'English'}.
+
+Server: ${serverStats.guildName}
+Members: ${serverStats.totalMembers}
+Voice channels: ${serverStats.voiceChannels}
+Text channels: ${serverStats.textChannels}
+Boost level: ${serverStats.boostLevel}
+Roles available: ${roles.slice(0, 10).map(r => r.name).join(', ')}
+
+Requirements:
+- Be engaging, modern, use relevant emojis
+- Highlight unique features and community
+- Include a call to action
+- For social media: include relevant hashtags
+- Keep it concise but impactful (max 500 chars for social, 1000 for others)
+- Make it feel exclusive and exciting`;
+
+      const aiResp = await fetch('https://text.pollinations.ai/openai/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'openai',
+          messages: [{ role: 'user', content: promoPrompt }],
+          max_tokens: 1500,
+          temperature: 0.8,
+        }),
+        signal: AbortSignal.timeout(25000),
+      });
+
+      if (!aiResp.ok) throw new Error('AI сервис недоступен');
+      const aiData = await aiResp.json();
+      const content = aiData.choices?.[0]?.message?.content?.trim();
+
+      if (!content) throw new Error('AI не вернул ответ');
+
+      res.json({ content, type, language });
+    } catch (e: any) {
+      console.error('ai-promotion error:', e.message);
+      res.status(500).json({ error: e.message });
     }
   });
 

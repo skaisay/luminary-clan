@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Send, Hash, Users as UsersIcon, UserX, Ban, Shield, Plus, Trash2, Search, CheckCircle, XCircle, AlertTriangle, RefreshCw, Volume2, MessageSquare, Eye, Loader2, Zap, Bot, Edit, Power, Activity, Wifi, WifiOff } from "lucide-react";
+import { Send, Hash, Users as UsersIcon, UserX, Ban, Shield, Plus, Trash2, Search, CheckCircle, XCircle, AlertTriangle, RefreshCw, Volume2, MessageSquare, Eye, Loader2, Zap, Bot, Edit, Power, Activity, Wifi, WifiOff, BarChart3, Megaphone, Brain, Crown, Copy } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -691,6 +691,22 @@ export default function AdminDiscordTab() {
           <TabsTrigger value="soft-ban" className="gap-1.5">
             <Ban className="w-4 h-4" />
             Ограничения
+          </TabsTrigger>
+          <TabsTrigger value="roles-manage" className="gap-1.5">
+            <Crown className="w-4 h-4" />
+            Роли
+          </TabsTrigger>
+          <TabsTrigger value="activity-stats" className="gap-1.5">
+            <BarChart3 className="w-4 h-4" />
+            Статистика
+          </TabsTrigger>
+          <TabsTrigger value="ai-analysis" className="gap-1.5">
+            <Brain className="w-4 h-4" />
+            Анализ AI
+          </TabsTrigger>
+          <TabsTrigger value="ai-promo" className="gap-1.5">
+            <Megaphone className="w-4 h-4" />
+            Продвижение
           </TabsTrigger>
         </TabsList>
 
@@ -1842,7 +1858,602 @@ export default function AdminDiscordTab() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ============ ROLES MANAGEMENT TAB ============ */}
+        <TabsContent value="roles-manage" className="mt-6 space-y-4">
+          <RolesManageTab />
+        </TabsContent>
+
+        {/* ============ ACTIVITY STATS TAB ============ */}
+        <TabsContent value="activity-stats" className="mt-6 space-y-4">
+          <ActivityStatsTab />
+        </TabsContent>
+
+        {/* ============ AI ANALYSIS TAB ============ */}
+        <TabsContent value="ai-analysis" className="mt-6 space-y-4">
+          <AiAnalysisTab />
+        </TabsContent>
+
+        {/* ============ AI PROMOTION TAB ============ */}
+        <TabsContent value="ai-promo" className="mt-6 space-y-4">
+          <AiPromoTab />
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+// ============ ROLES MANAGEMENT SUB-TAB ============
+function RolesManageTab() {
+  const { toast } = useToast();
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleColor, setNewRoleColor] = useState("#5865f2");
+  const [newRoleHoist, setNewRoleHoist] = useState(false);
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [editRoleName, setEditRoleName] = useState("");
+  const [editRoleColor, setEditRoleColor] = useState("");
+  const [assignRoleId, setAssignRoleId] = useState("");
+  const [assignMemberId, setAssignMemberId] = useState("");
+
+  const { data: roles, isLoading: rolesLoading } = useQuery<Array<{id: string; name: string; color: string; position: number; memberCount: number}>>({
+    queryKey: ["/api/admin/discord/roles"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/discord/roles", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch roles");
+      return res.json();
+    },
+  });
+
+  const { data: members } = useQuery<Array<{id: string; username: string; avatar: string; roles: string[]}>>({
+    queryKey: ["/api/admin/discord/members"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/discord/members", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+
+  const createRoleMutation = useMutation({
+    mutationFn: async (data: { name: string; color: string; hoist: boolean }) => {
+      const res = await apiRequest("POST", "/api/admin/discord/roles", data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: `Роль "${data.name}" создана!` });
+      setNewRoleName("");
+      setNewRoleColor("#5865f2");
+      setNewRoleHoist(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/roles"] });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: e.message, variant: "destructive" }),
+  });
+
+  const editRoleMutation = useMutation({
+    mutationFn: async ({ roleId, data }: { roleId: string; data: { name?: string; color?: string } }) => {
+      const res = await apiRequest("PUT", `/api/admin/discord/roles/${roleId}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Роль обновлена!" });
+      setEditingRoleId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/roles"] });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteRoleMutation = useMutation({
+    mutationFn: async (roleId: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/discord/roles/${roleId}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Роль удалена!" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/roles"] });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: e.message, variant: "destructive" }),
+  });
+
+  const assignRoleMutation = useMutation({
+    mutationFn: async (data: { discordId: string; roleId: string }) => {
+      const res = await apiRequest("POST", "/api/admin/discord/roles/assign", data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: `Роль "${data.roleName}" выдана ${data.memberName}` });
+      setAssignMemberId("");
+      setAssignRoleId("");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/roles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/members"] });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: e.message, variant: "destructive" }),
+  });
+
+  const removeRoleMutation = useMutation({
+    mutationFn: async (data: { discordId: string; roleId: string }) => {
+      const res = await apiRequest("POST", "/api/admin/discord/roles/remove", data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: `Роль "${data.roleName}" снята с ${data.memberName}` });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/roles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/members"] });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <>
+      {/* Create Role */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Crown className="w-5 h-5" />
+            Создать роль
+          </CardTitle>
+          <CardDescription>Создание новых ролей для Discord сервера</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <Label>Название</Label>
+              <Input
+                placeholder="Название роли..."
+                value={newRoleName}
+                onChange={(e) => setNewRoleName(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Цвет</Label>
+              <div className="flex gap-2">
+                <input
+                  type="color"
+                  value={newRoleColor}
+                  onChange={(e) => setNewRoleColor(e.target.value)}
+                  className="w-10 h-10 rounded cursor-pointer border"
+                />
+                <Input value={newRoleColor} onChange={(e) => setNewRoleColor(e.target.value)} className="flex-1" />
+              </div>
+            </div>
+            <div className="flex items-end gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox checked={newRoleHoist} onCheckedChange={(v) => setNewRoleHoist(!!v)} />
+                <span className="text-sm">Отображать отдельно</span>
+              </label>
+            </div>
+          </div>
+          <Button
+            onClick={() => createRoleMutation.mutate({ name: newRoleName.trim(), color: newRoleColor, hoist: newRoleHoist })}
+            disabled={createRoleMutation.isPending || !newRoleName.trim()}
+            className="w-full"
+          >
+            {createRoleMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+            Создать роль
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Assign/Remove Role */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UsersIcon className="w-5 h-5" />
+            Назначить / Снять роль
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <Label>Участник</Label>
+              <Select value={assignMemberId} onValueChange={setAssignMemberId}>
+                <SelectTrigger><SelectValue placeholder="Выберите участника" /></SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {members?.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.username}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Роль</Label>
+              <Select value={assignRoleId} onValueChange={setAssignRoleId}>
+                <SelectTrigger><SelectValue placeholder="Выберите роль" /></SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {roles?.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: r.color !== "#000000" ? r.color : "#99aab5" }} />
+                        {r.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => assignRoleMutation.mutate({ discordId: assignMemberId, roleId: assignRoleId })}
+              disabled={!assignMemberId || !assignRoleId || assignRoleMutation.isPending}
+              className="flex-1"
+            >
+              {assignRoleMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Назначить роль
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => removeRoleMutation.mutate({ discordId: assignMemberId, roleId: assignRoleId })}
+              disabled={!assignMemberId || !assignRoleId || removeRoleMutation.isPending}
+              className="flex-1"
+            >
+              {removeRoleMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+              Снять роль
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Role List */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle>Все роли сервера</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {rolesLoading ? (
+            <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          ) : roles && roles.length > 0 ? (
+            <div className="space-y-2">
+              {roles.map((role) => (
+                <div key={role.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <span className="w-4 h-4 rounded-full" style={{ backgroundColor: role.color !== "#000000" ? role.color : "#99aab5" }} />
+                    {editingRoleId === role.id ? (
+                      <div className="flex gap-2 items-center">
+                        <Input
+                          value={editRoleName}
+                          onChange={(e) => setEditRoleName(e.target.value)}
+                          className="w-40 h-8"
+                        />
+                        <input type="color" value={editRoleColor} onChange={(e) => setEditRoleColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer" />
+                        <Button size="sm" onClick={() => editRoleMutation.mutate({ roleId: role.id, data: { name: editRoleName, color: editRoleColor } })}>
+                          <CheckCircle className="w-3 h-3" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditingRoleId(null)}>
+                          <XCircle className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="font-medium">{role.name}</span>
+                    )}
+                    <Badge variant="secondary" className="text-xs">{role.memberCount} чел.</Badge>
+                  </div>
+                  {editingRoleId !== role.id && (
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setEditingRoleId(role.id);
+                          setEditRoleName(role.name);
+                          setEditRoleColor(role.color);
+                        }}
+                      >
+                        <Edit className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive"
+                        onClick={() => deleteRoleMutation.mutate(role.id)}
+                        disabled={deleteRoleMutation.isPending}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-center py-4 text-muted-foreground text-sm">Ролей нет</p>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+// ============ ACTIVITY STATS SUB-TAB ============
+function ActivityStatsTab() {
+  const { data: stats, isLoading } = useQuery<{
+    server: { totalMembers: number; onlineMembers: number; textChannels: number; voiceChannels: number; rolesCount: number; boostLevel: number; boostCount: number; createdAt: string; guildName: string };
+    totals: { totalMessages: number; totalVoiceMinutes: number; totalReactions: number; activeMembers: number };
+    topActive: Array<{ discordId: string; username: string; avatar: string; messageCount: number; voiceMinutes: number; reactionCount: number; lastActivity: string; lumiCoins: number; level: number }>;
+    inactive: Array<{ discordId: string; username: string; avatar: string; lastActivity: string; messageCount: number }>;
+  }>({
+    queryKey: ["/api/admin/discord/activity-stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/discord/activity-stats", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+
+  if (isLoading) return <div className="space-y-4">{[1,2,3].map(i => <Skeleton key={i} className="h-32 w-full" />)}</div>;
+  if (!stats) return <p className="text-muted-foreground text-center py-8">Нет данных</p>;
+
+  return (
+    <>
+      {/* Server Overview */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart3 className="w-5 h-5" />
+            Обзор сервера: {stats.server.guildName}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center p-3 bg-muted/30 rounded-lg">
+              <div className="text-2xl font-bold">{stats.server.totalMembers}</div>
+              <div className="text-xs text-muted-foreground">Участников</div>
+            </div>
+            <div className="text-center p-3 bg-muted/30 rounded-lg">
+              <div className="text-2xl font-bold text-green-500">{stats.server.onlineMembers}</div>
+              <div className="text-xs text-muted-foreground">Онлайн</div>
+            </div>
+            <div className="text-center p-3 bg-muted/30 rounded-lg">
+              <div className="text-2xl font-bold">{stats.server.textChannels}</div>
+              <div className="text-xs text-muted-foreground">Текстовых каналов</div>
+            </div>
+            <div className="text-center p-3 bg-muted/30 rounded-lg">
+              <div className="text-2xl font-bold">{stats.server.voiceChannels}</div>
+              <div className="text-xs text-muted-foreground">Голосовых каналов</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+            <div className="text-center p-3 bg-muted/30 rounded-lg">
+              <div className="text-2xl font-bold text-blue-500">{stats.totals.totalMessages}</div>
+              <div className="text-xs text-muted-foreground">Всего сообщений</div>
+            </div>
+            <div className="text-center p-3 bg-muted/30 rounded-lg">
+              <div className="text-2xl font-bold text-purple-500">{Math.round((stats.totals.totalVoiceMinutes || 0) / 60)}</div>
+              <div className="text-xs text-muted-foreground">Часов в голосовых</div>
+            </div>
+            <div className="text-center p-3 bg-muted/30 rounded-lg">
+              <div className="text-2xl font-bold text-yellow-500">{stats.totals.totalReactions}</div>
+              <div className="text-xs text-muted-foreground">Реакций</div>
+            </div>
+            <div className="text-center p-3 bg-muted/30 rounded-lg">
+              <div className="text-2xl font-bold text-cyan-500">{stats.totals.activeMembers}</div>
+              <div className="text-xs text-muted-foreground">Активных участников</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Top Active Table */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="w-5 h-5" />
+            Топ активных участников
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2 px-2">#</th>
+                  <th className="text-left py-2 px-2">Участник</th>
+                  <th className="text-right py-2 px-2">Сообщ.</th>
+                  <th className="text-right py-2 px-2">Голос (мин)</th>
+                  <th className="text-right py-2 px-2">Реакции</th>
+                  <th className="text-right py-2 px-2">LC</th>
+                  <th className="text-right py-2 px-2">Ур.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.topActive.map((m, i) => (
+                  <tr key={m.discordId} className="border-b border-muted/20">
+                    <td className="py-2 px-2 font-bold">{i + 1}</td>
+                    <td className="py-2 px-2 flex items-center gap-2">
+                      {m.avatar ? <img src={m.avatar} className="w-6 h-6 rounded-full" alt="" /> : <UsersIcon className="w-6 h-6 text-muted-foreground" />}
+                      {m.username}
+                    </td>
+                    <td className="py-2 px-2 text-right">{m.messageCount || 0}</td>
+                    <td className="py-2 px-2 text-right">{m.voiceMinutes || 0}</td>
+                    <td className="py-2 px-2 text-right">{m.reactionCount || 0}</td>
+                    <td className="py-2 px-2 text-right text-amber-500">{m.lumiCoins || 0}</td>
+                    <td className="py-2 px-2 text-right">{m.level || 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Inactive Members */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <WifiOff className="w-5 h-5 text-red-500" />
+            Неактивные участники (7+ дней)
+          </CardTitle>
+          <CardDescription>Участники, которые не проявляли активность более 7 дней</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {stats.inactive.length > 0 ? (
+            <div className="space-y-2">
+              {stats.inactive.map((m) => (
+                <div key={m.discordId} className="flex items-center justify-between p-2 bg-muted/30 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    {m.avatar ? <img src={m.avatar} className="w-6 h-6 rounded-full" alt="" /> : <UsersIcon className="w-6 h-6 text-muted-foreground" />}
+                    <span className="text-sm">{m.username}</span>
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground">
+                    <p>Посл. активность: {new Date(m.lastActivity).toLocaleDateString('ru-RU')}</p>
+                    <p>{m.messageCount || 0} сообщ.</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-muted-foreground">
+              <CheckCircle className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">Все участники активны!</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+// ============ AI ANALYSIS SUB-TAB ============
+function AiAnalysisTab() {
+  const { toast } = useToast();
+  const [analysis, setAnalysis] = useState<string | null>(null);
+
+  const analyzeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/ai/analyze-server");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setAnalysis(data.analysis);
+    },
+    onError: (e: any) => toast({ title: "Ошибка анализа", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card className="glass-card">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Brain className="w-5 h-5" />
+          AI Анализ сервера
+        </CardTitle>
+        <CardDescription>
+          Искусственный интеллект проанализирует ваш сервер и даст рекомендации по улучшению
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Button
+          onClick={() => analyzeMutation.mutate()}
+          disabled={analyzeMutation.isPending}
+          className="w-full"
+          size="lg"
+        >
+          {analyzeMutation.isPending ? (
+            <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Анализируем сервер...</>
+          ) : (
+            <><Brain className="w-5 h-5 mr-2" /> Запустить анализ</>
+          )}
+        </Button>
+
+        {analysis && (
+          <div className="mt-4 p-4 bg-muted/30 rounded-lg prose prose-sm prose-invert max-w-none">
+            <div className="whitespace-pre-wrap text-sm">{analysis}</div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============ AI PROMOTION SUB-TAB ============
+function AiPromoTab() {
+  const { toast } = useToast();
+  const [promoType, setPromoType] = useState("general");
+  const [promoLang, setPromoLang] = useState("ru");
+  const [promoResult, setPromoResult] = useState<string | null>(null);
+
+  const promoMutation = useMutation({
+    mutationFn: async (data: { type: string; language: string }) => {
+      const res = await apiRequest("POST", "/api/admin/ai/generate-promotion", data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setPromoResult(data.content);
+    },
+    onError: (e: any) => toast({ title: "Ошибка генерации", description: e.message, variant: "destructive" }),
+  });
+
+  const copyToClipboard = () => {
+    if (promoResult) {
+      navigator.clipboard.writeText(promoResult);
+      toast({ title: "Скопировано!" });
+    }
+  };
+
+  return (
+    <Card className="glass-card">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Megaphone className="w-5 h-5" />
+          AI Продвижение сервера
+        </CardTitle>
+        <CardDescription>
+          Генерация рекламных текстов для привлечения новых участников
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label>Тип контента</Label>
+            <Select value={promoType} onValueChange={setPromoType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="general">🎯 Общий рекламный пост</SelectItem>
+                <SelectItem value="social">📱 Для соц. сетей</SelectItem>
+                <SelectItem value="recruitment">🎮 Рекрутинг игроков</SelectItem>
+                <SelectItem value="description">📝 Описание сервера</SelectItem>
+                <SelectItem value="event">🎉 Анонс мероприятия</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Язык</Label>
+            <Select value={promoLang} onValueChange={setPromoLang}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ru">🇷🇺 Русский</SelectItem>
+                <SelectItem value="en">🇺🇸 English</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <Button
+          onClick={() => promoMutation.mutate({ type: promoType, language: promoLang })}
+          disabled={promoMutation.isPending}
+          className="w-full"
+          size="lg"
+        >
+          {promoMutation.isPending ? (
+            <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Генерируем...</>
+          ) : (
+            <><Megaphone className="w-5 h-5 mr-2" /> Сгенерировать</>
+          )}
+        </Button>
+
+        {promoResult && (
+          <div className="mt-4 relative">
+            <div className="p-4 bg-muted/30 rounded-lg">
+              <div className="whitespace-pre-wrap text-sm">{promoResult}</div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              onClick={copyToClipboard}
+            >
+              <Copy className="w-4 h-4 mr-1" /> Копировать
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
