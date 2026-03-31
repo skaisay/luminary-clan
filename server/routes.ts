@@ -6435,7 +6435,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
 
       // Deduct balance
       const newBalance = (member.lumiCoins || 0) - cost;
-      await storage.updateMember(member.id, { lumiCoins: newBalance });
+      await storage.updateClanMember(member.id, { lumiCoins: newBalance });
 
       // Create ad spot (7 days)
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -6813,7 +6813,7 @@ Requirements:
 
       // Deduct balance
       const newBalance = (member.lumiCoins || 0) - preset.price;
-      await storage.updateMember(member.id, { lumiCoins: newBalance });
+      await storage.updateClanMember(member.id, { lumiCoins: newBalance });
 
       // Apply Discord color role
       const result = await setNicknameColor(user.discordId, finalColor);
