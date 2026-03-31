@@ -1867,17 +1867,17 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     }
   });
 
-  // Create a new Discord channel
+  // Create a new Discord channel (with optional role-based access control)
   app.post("/api/admin/discord/create-channel", requireAdmin, async (req, res) => {
     try {
-      const { name, type, category, topic } = req.body;
+      const { name, type, category, topic, allowedRoleIds } = req.body;
       if (!name || !type) {
         return res.status(400).json({ error: "name и type обязательны" });
       }
       if (!['text', 'voice'].includes(type)) {
         return res.status(400).json({ error: "type должен быть 'text' или 'voice'" });
       }
-      const result = await createDiscordChannel({ name, type, category, topic });
+      const result = await createDiscordChannel({ name, type, category, topic, allowedRoleIds });
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

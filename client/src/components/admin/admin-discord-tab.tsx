@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface DiscordChannel {
   id: string;
@@ -66,6 +67,21 @@ export default function AdminDiscordTab() {
   const [newChannelType, setNewChannelType] = useState<"text" | "voice">("text");
   const [newChannelCategory, setNewChannelCategory] = useState("");
   const [newChannelTopic, setNewChannelTopic] = useState("");
+  const [newChannelRoleIds, setNewChannelRoleIds] = useState<string[]>([]);
+
+  // Roles query
+  const { data: roles } = useQuery<Array<{id: string; name: string; color: string; position: number; memberCount: number}>>({
+    queryKey: ["/api/admin/discord/roles"],
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/admin/discord/roles", { credentials: "include" });
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    },
+  });
 
   // Rule setup state
   const [ruleChannelId, setRuleChannelId] = useState("");
@@ -443,7 +459,7 @@ export default function AdminDiscordTab() {
 
   // Channel creation
   const createChannelMutation = useMutation({
-    mutationFn: async (data: { name: string; type: string; category?: string; topic?: string }) => {
+    mutationFn: async (data: { name: string; type: string; category?: string; topic?: string; allowedRoleIds?: string[] }) => {
       const res = await apiRequest("POST", "/api/admin/discord/create-channel", data);
       return res.json();
     },
@@ -451,6 +467,7 @@ export default function AdminDiscordTab() {
       toast({ title: `Канал #${data.name} создан!` });
       setNewChannelName("");
       setNewChannelTopic("");
+      setNewChannelRoleIds([]);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/channels"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/channels-detailed"] });
     },
@@ -573,6 +590,7 @@ export default function AdminDiscordTab() {
       type: newChannelType,
       category: (newChannelCategory && newChannelCategory !== "__none__") ? newChannelCategory : undefined,
       topic: newChannelTopic || undefined,
+      allowedRoleIds: newChannelRoleIds.length > 0 ? newChannelRoleIds : undefined,
     });
   };
 
@@ -741,6 +759,43 @@ export default function AdminDiscordTab() {
                       value={newChannelTopic}
                       onChange={(e) => setNewChannelTopic(e.target.value)}
                     />
+                  </div>
+                )}
+
+                {/* Role-based access */}
+                {roles && roles.length > 0 && (
+                  <div>
+                    <Label>Доступ по ролям (приватный канал)</Label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Если выбраны роли, канал будет виден только участникам с этими ролями
+                    </p>
+                    <div className="max-h-40 overflow-y-auto space-y-2 border rounded-md p-2">
+                      {roles.map((role) => (
+                        <label key={role.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
+                          <Checkbox
+                            checked={newChannelRoleIds.includes(role.id)}
+                            onCheckedChange={(checked) => {
+                              setNewChannelRoleIds(prev =>
+                                checked
+                                  ? [...prev, role.id]
+                                  : prev.filter(id => id !== role.id)
+                              );
+                            }}
+                          />
+                          <span
+                            className="w-3 h-3 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: role.color !== "#000000" ? role.color : "#99aab5" }}
+                          />
+                          <span className="text-sm">{role.name}</span>
+                          <Badge variant="secondary" className="ml-auto text-xs">{role.memberCount}</Badge>
+                        </label>
+                      ))}
+                    </div>
+                    {newChannelRoleIds.length > 0 && (
+                      <p className="text-xs text-amber-500 mt-1">
+                        🔒 Канал будет приватным — доступ только для {newChannelRoleIds.length} выбранных ролей
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

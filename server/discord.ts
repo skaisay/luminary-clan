@@ -418,6 +418,7 @@ export async function createDiscordChannel(options: {
   type: 'text' | 'voice';
   category?: string;
   topic?: string;
+  allowedRoleIds?: string[]; // If provided, only these roles can see the channel
 }) {
   const client = getSharedBot();
   if (!client) throw new Error('Бот не подключён');
@@ -439,11 +440,32 @@ export async function createDiscordChannel(options: {
   const channelData: any = {
     name: options.name,
     type: channelType,
-    reason: 'Создан через админ-панель',
+    reason: 'Created via admin panel / Создан через админ-панель',
   };
   if (parent) channelData.parent = parent;
   if (options.topic && channelType === ChannelType.GuildText) {
     channelData.topic = options.topic;
+  }
+
+  // Set role-based permissions: deny @everyone, allow only specified roles
+  if (options.allowedRoleIds && options.allowedRoleIds.length > 0) {
+    channelData.permissionOverwrites = [
+      // Deny @everyone from viewing
+      {
+        id: guild.id, // @everyone role ID = guild ID
+        deny: [PermissionFlagsBits.ViewChannel],
+      },
+      // Allow bot to see the channel
+      ...(client.user ? [{
+        id: client.user.id,
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+      }] : []),
+      // Allow specified roles
+      ...options.allowedRoleIds.map(roleId => ({
+        id: roleId,
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.Connect],
+      })),
+    ];
   }
 
   const newChannel = await guild.channels.create(channelData);
@@ -453,6 +475,30 @@ export async function createDiscordChannel(options: {
     name: newChannel.name,
     type: options.type,
   };
+}
+
+/**
+ * Get all roles from the guild.
+ */
+export async function getDiscordRoles() {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  await guild.roles.fetch();
+  const roles = guild.roles.cache
+    .filter(r => r.id !== guild.id) // Exclude @everyone
+    .sort((a, b) => b.position - a.position)
+    .map(r => ({
+      id: r.id,
+      name: r.name,
+      color: r.hexColor,
+      position: r.position,
+      memberCount: r.members.size,
+    }));
+
+  return roles;
 }
 
 /**

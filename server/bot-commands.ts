@@ -325,183 +325,78 @@ export async function setupDiscordBot() {
 
   // Все команды бота
   const commands = [
-    // Основные команды
+    // ── Core / Основные ──
     new SlashCommandBuilder()
       .setName('помощь')
-      .setDescription('Показать список всех команд'),
+      .setDescription('Show all commands / Показать список всех команд'),
     
     new SlashCommandBuilder()
       .setName('статистика')
-      .setDescription('Показать статистику клана'),
+      .setDescription('Show clan statistics / Показать статистику клана'),
     
     new SlashCommandBuilder()
       .setName('рейтинг')
-      .setDescription('Показать топ участников'),
+      .setDescription('Show top members / Показать топ участников'),
     
     new SlashCommandBuilder()
       .setName('активность')
-      .setDescription('Показать активность участника')
+      .setDescription('Show member activity / Показать активность участника')
       .addUserOption(option =>
         option
           .setName('участник')
-          .setDescription('Участник для проверки')
+          .setDescription('Member to check / Участник для проверки')
           .setRequired(false)
       ),
 
-    // Музыкальные команды
-    new SlashCommandBuilder()
-      .setName('играть')
-      .setDescription('Воспроизвести музыку')
-      .addStringOption(option =>
-        option
-          .setName('запрос')
-          .setDescription('Название песни или URL')
-          .setRequired(true)
-      ),
-    
-    new SlashCommandBuilder()
-      .setName('пауза')
-      .setDescription('Поставить музыку на паузу'),
-    
-    new SlashCommandBuilder()
-      .setName('продолжить')
-      .setDescription('Продолжить воспроизведение'),
-    
-    new SlashCommandBuilder()
-      .setName('скип')
-      .setDescription('Пропустить текущий трек'),
-    
-    new SlashCommandBuilder()
-      .setName('стоп')
-      .setDescription('Остановить воспроизведение и очистить очередь'),
-    
-    new SlashCommandBuilder()
-      .setName('очередь')
-      .setDescription('Показать очередь треков'),
-    
-    new SlashCommandBuilder()
-      .setName('текущее')
-      .setDescription('Показать текущий трек'),
-    
-    new SlashCommandBuilder()
-      .setName('повтор')
-      .setDescription('Включить/выключить повтор текущего трека'),
-    
-    new SlashCommandBuilder()
-      .setName('громкость')
-      .setDescription('Изменить громкость')
-      .addIntegerOption(option =>
-        option
-          .setName('уровень')
-          .setDescription('Уровень громкости (0-100)')
-          .setRequired(true)
-          .setMinValue(0)
-          .setMaxValue(100)
-      ),
-    
-    new SlashCommandBuilder()
-      .setName('перемешать')
-      .setDescription('Перемешать очередь треков'),
-    
-    new SlashCommandBuilder()
-      .setName('удалить')
-      .setDescription('Удалить трек из очереди')
-      .addIntegerOption(option =>
-        option
-          .setName('номер')
-          .setDescription('Номер трека в очереди')
-          .setRequired(true)
-          .setMinValue(1)
-      ),
-    
-    new SlashCommandBuilder()
-      .setName('очистить-очередь')
-      .setDescription('Очистить очередь (оставить только текущий трек)'),
-    
-    new SlashCommandBuilder()
-      .setName('перейти')
-      .setDescription('Перейти к треку в очереди')
-      .addIntegerOption(option =>
-        option
-          .setName('номер')
-          .setDescription('Номер трека в очереди')
-          .setRequired(true)
-          .setMinValue(1)
-      ),
-    
-    new SlashCommandBuilder()
-      .setName('поиск')
-      .setDescription('Поиск музыки на YouTube')
-      .addStringOption(option =>
-        option
-          .setName('запрос')
-          .setDescription('Что искать?')
-          .setRequired(true)
-      ),
-    
-    new SlashCommandBuilder()
-      .setName('плейлист')
-      .setDescription('Добавить плейлист YouTube')
-      .addStringOption(option =>
-        option
-          .setName('ссылка')
-          .setDescription('Ссылка на плейлист YouTube')
-          .setRequired(true)
-      ),
-    
-    new SlashCommandBuilder()
-      .setName('меню-музыки')
-      .setDescription('Показать интерактивное меню управления музыкой'),
-
-    // Модерация
+    // ── Moderation / Модерация ──
     new SlashCommandBuilder()
       .setName('банить')
-      .setDescription('Забанить участника')
+      .setDescription('Ban a member / Забанить участника')
       .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
       .addUserOption(option =>
         option
           .setName('участник')
-          .setDescription('Участник для бана')
+          .setDescription('Member to ban / Участник для бана')
           .setRequired(true)
       )
       .addStringOption(option =>
         option
           .setName('причина')
-          .setDescription('Причина бана')
+          .setDescription('Ban reason / Причина бана')
           .setRequired(false)
       ),
     
     new SlashCommandBuilder()
       .setName('кик')
-      .setDescription('Исключить участника')
+      .setDescription('Kick a member / Исключить участника')
       .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
       .addUserOption(option =>
         option
           .setName('участник')
-          .setDescription('Участник для исключения')
+          .setDescription('Member to kick / Участник для исключения')
           .setRequired(true)
       )
       .addStringOption(option =>
         option
           .setName('причина')
-          .setDescription('Причина исключения')
+          .setDescription('Kick reason / Причина исключения')
           .setRequired(false)
       ),
     
     new SlashCommandBuilder()
       .setName('мут')
-      .setDescription('Замутить участника')
+      .setDescription('Mute a member / Замутить участника')
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addUserOption(option =>
         option
           .setName('участник')
-          .setDescription('Участник для мута')
+          .setDescription('Member to mute / Участник для мута')
           .setRequired(true)
       )
       .addIntegerOption(option =>
         option
           .setName('минуты')
-          .setDescription('Длительность мута в минутах')
+          .setDescription('Mute duration in minutes / Длительность мута в минутах')
           .setRequired(true)
           .setMinValue(1)
           .setMaxValue(40320)
@@ -509,29 +404,29 @@ export async function setupDiscordBot() {
       .addStringOption(option =>
         option
           .setName('причина')
-          .setDescription('Причина мута')
+          .setDescription('Mute reason / Причина мута')
           .setRequired(false)
       ),
     
     new SlashCommandBuilder()
       .setName('размут')
-      .setDescription('Размутить участника')
+      .setDescription('Unmute a member / Размутить участника')
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addUserOption(option =>
         option
           .setName('участник')
-          .setDescription('Участник для размута')
+          .setDescription('Member to unmute / Участник для размута')
           .setRequired(true)
       ),
     
     new SlashCommandBuilder()
       .setName('очистить')
-      .setDescription('Удалить сообщения')
+      .setDescription('Delete messages / Удалить сообщения')
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
       .addIntegerOption(option =>
         option
           .setName('количество')
-          .setDescription('Количество сообщений для удаления')
+          .setDescription('Number of messages / Количество сообщений для удаления')
           .setRequired(true)
           .setMinValue(1)
           .setMaxValue(100)
@@ -539,110 +434,110 @@ export async function setupDiscordBot() {
     
     new SlashCommandBuilder()
       .setName('предупреждение')
-      .setDescription('Выдать предупреждение участнику')
+      .setDescription('Warn a member / Выдать предупреждение участнику')
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addUserOption(option =>
         option
           .setName('участник')
-          .setDescription('Участник')
+          .setDescription('Member / Участник')
           .setRequired(true)
       )
       .addStringOption(option =>
         option
           .setName('причина')
-          .setDescription('Причина предупреждения')
+          .setDescription('Warning reason / Причина предупреждения')
           .setRequired(true)
       ),
 
-    // Утилиты
+    // ── Utility / Утилиты ──
     new SlashCommandBuilder()
       .setName('пинг')
-      .setDescription('Проверить задержку бота'),
+      .setDescription('Check bot latency / Проверить задержку бота'),
     
     new SlashCommandBuilder()
       .setName('инфо')
-      .setDescription('Информация о пользователе')
+      .setDescription('User info / Информация о пользователе')
       .addUserOption(option =>
         option
           .setName('пользователь')
-          .setDescription('Пользователь для проверки')
+          .setDescription('User to check / Пользователь для проверки')
           .setRequired(false)
       ),
     
     new SlashCommandBuilder()
       .setName('сервер')
-      .setDescription('Информация о сервере'),
+      .setDescription('Server info / Информация о сервере'),
     
     new SlashCommandBuilder()
       .setName('аватар')
-      .setDescription('Показать аватар пользователя')
+      .setDescription('Show avatar / Показать аватар пользователя')
       .addUserOption(option =>
         option
           .setName('пользователь')
-          .setDescription('Пользователь')
+          .setDescription('User / Пользователь')
           .setRequired(false)
       ),
 
-    // Развлечения
+    // ── Fun / Развлечения ──
     new SlashCommandBuilder()
       .setName('монетка')
-      .setDescription('Подбросить монетку'),
+      .setDescription('Flip a coin / Подбросить монетку'),
     
     new SlashCommandBuilder()
       .setName('кубик')
-      .setDescription('Бросить кубик'),
+      .setDescription('Roll a dice / Бросить кубик'),
     
     new SlashCommandBuilder()
       .setName('выбрать')
-      .setDescription('Выбрать случайный вариант')
+      .setDescription('Pick a random option / Выбрать случайный вариант')
       .addStringOption(option =>
         option
           .setName('варианты')
-          .setDescription('Варианты через запятую (например: вариант1, вариант2, вариант3)')
+          .setDescription('Options separated by comma / Варианты через запятую')
           .setRequired(true)
       ),
 
-    // Казино / Рулетка
+    // ── Casino / Казино ──
     new SlashCommandBuilder()
       .setName('казино')
-      .setDescription('🎰 Крутить слоты казино! Ставка LumiCoin')
+      .setDescription('🎰 Spin the slots / Крутить слоты казино (LumiCoin)')
       .addIntegerOption(option =>
         option
           .setName('ставка')
-          .setDescription('Сколько LumiCoin поставить (мин. 10)')
+          .setDescription('Bet amount / Сколько LumiCoin поставить (min 10)')
           .setRequired(false)
           .setMinValue(10)
       ),
 
     new SlashCommandBuilder()
       .setName('рулетка')
-      .setDescription('🎡 Рулетка удачи — крути и выиграй!')
+      .setDescription('🎡 Spin the wheel / Рулетка удачи (LumiCoin)')
       .addIntegerOption(option =>
         option
           .setName('ставка')
-          .setDescription('Сколько LumiCoin поставить (мин. 5)')
+          .setDescription('Bet amount / Сколько LumiCoin поставить (min 5)')
           .setRequired(false)
           .setMinValue(5)
       ),
 
-    // Roblox команды
+    // ── Roblox ──
     new SlashCommandBuilder()
       .setName('роблокс')
-      .setDescription('🎮 Поиск игрока Roblox по нику')
+      .setDescription('🎮 Find a Roblox player / Поиск игрока Roblox по нику')
       .addStringOption(option =>
         option
           .setName('ник')
-          .setDescription('Никнейм игрока в Roblox')
+          .setDescription('Player username / Никнейм игрока в Roblox')
           .setRequired(true)
       ),
 
     new SlashCommandBuilder()
       .setName('роблокс-игра')
-      .setDescription('🔍 Поиск игры в Roblox по названию')
+      .setDescription('🔍 Search Roblox game / Поиск игры в Roblox')
       .addStringOption(option =>
         option
           .setName('название')
-          .setDescription('Название игры для поиска')
+          .setDescription('Game name / Название игры для поиска')
           .setRequired(true)
       ),
   ];
@@ -692,34 +587,34 @@ export async function setupDiscordBot() {
       console.error('⚠️ Ошибка инициализации музыкальной системы:', musicErr);
     }
     
-    // Глобальная регистрация slash-команд через REST API
-    // Ждём 5 секунд после ready чтобы не попасть под Cloudflare rate-limit
+    // Регистрация slash-команд ТОЛЬКО на гильдию (мгновенное обновление, без дубликатов)
     await new Promise(r => setTimeout(r, 5000));
     try {
       console.log(`📝 Регистрация ${commands.length} slash-команд...`);
       const rest = new REST({ version: '10' }).setToken(botToken!);
       const commandData = commands.map(cmd => cmd.toJSON());
       
-      // Регистрируем глобально
-      await rest.put(
-        Routes.applicationCommands(client.user!.id),
-        { body: commandData }
-      );
-      console.log(`✅ ${commandData.length} slash-команд зарегистрировано глобально`);
-      
-      // Также регистрируем на каждый сервер для мгновенного обновления
+      // Очищаем глобальные команды (убираем дубликаты)
+      try {
+        await rest.put(Routes.applicationCommands(client.user!.id), { body: [] });
+        console.log('🧹 Глобальные команды очищены');
+      } catch (e: any) {
+        console.log('⚠️ Не удалось очистить глобальные команды:', e.message);
+      }
+
+      // Регистрируем только на каждый сервер
       const guilds = client.guilds.cache;
       console.log(`🔍 Серверов в кэше: ${guilds.size}`);
       for (const guild of guilds.values()) {
         try {
-          await new Promise(r => setTimeout(r, 1000)); // Пауза между гильдиями
+          await new Promise(r => setTimeout(r, 1000));
           await rest.put(
             Routes.applicationGuildCommands(client.user!.id, guild.id),
             { body: commandData }
           );
-          console.log(`✅ Команды зарегистрированы на: ${guild.name} (${guild.id})`);
+          console.log(`✅ ${commandData.length} команд зарегистрировано на: ${guild.name}`);
         } catch (guildErr: any) {
-          console.error(`❌ Ошибка регистрации команд на ${guild.name}:`, guildErr?.message || guildErr);
+          console.error(`❌ Ошибка регистрации на ${guild.name}:`, guildErr?.message || guildErr);
         }
       }
     } catch (regError: any) {
@@ -995,10 +890,32 @@ export async function setupDiscordBot() {
     return autoResponseCache;
   }
 
+  // ── Shared channel permission check for all bot outputs ──
+  let _channelPermCache: { rows: any[]; ts: number } | null = null;
+  async function isChannelAllowedForBot(channelId: string): Promise<boolean> {
+    try {
+      // Cache DB result for 60s to avoid spamming queries
+      if (!_channelPermCache || Date.now() - _channelPermCache.ts > 60_000) {
+        const { db } = await import('./db');
+        const { botChannelPermissions } = await import('@shared/schema');
+        const rows = await db.select().from(botChannelPermissions);
+        _channelPermCache = { rows, ts: Date.now() };
+      }
+      const rows = _channelPermCache.rows;
+      if (rows.length === 0) return true; // No config = allow everywhere (fallback)
+      const found = rows.find((r: any) => r.channelId === channelId);
+      return found ? found.allowAutoMessages : false;
+    } catch {
+      return true; // On error, allow (don't break bot)
+    }
+  }
+
   /**
    * Check message for auto-response triggers. Returns true if a trigger fired.
    */
   async function checkAutoResponseTriggers(message: any): Promise<boolean> {
+    // Check channel permissions before firing triggers
+    if (!(await isChannelAllowedForBot(message.channelId))) return false;
     try {
       const triggers = await getCachedAutoResponses();
       if (triggers.length === 0) return false;
@@ -1050,26 +967,58 @@ export async function setupDiscordBot() {
   // Rate limits: per-user 25s, global 5s (safe — Pollinations is free, no IP ban)
   const AI_USER_COOLDOWN_MS = 25_000;
   const AI_GLOBAL_COOLDOWN_MS = 5_000;
-  const AI_MAX_RESPONSE_LENGTH = 600;
+  const AI_MAX_RESPONSE_LENGTH = 800;
   let lastAiResponseTime = 0;
   const aiUserCooldowns = new Map<string, number>();
 
-  const LUMINARY_SYSTEM_PROMPT = `Ты — Luminary, мистический и таинственный бот клана Luminary. Ты говоришь загадочно, с юмором и лёгкой таинственностью. Используй эмодзи (✨🔮🌙⚡🌟). Отвечай КОРОТКО, в 1-3 предложения. Если тебе пишут на русском — отвечай на русском. Если на английском — на английском.
+  const LUMINARY_SYSTEM_PROMPT = `You are Luminary — the intelligent AI assistant and guardian of the Luminary gaming clan's Discord server. You speak both Russian and English fluently (respond in the language the user writes to you).
 
-Твои черты:
-- Ты мистик, видишь будущее (иногда ошибочно, и это смешно)
-- Ты любишь игры и геймеров
-- Ты знаешь что ты бот, но притворяешься древним существом
-- Ты дружелюбен, но иногда саркастичен
-- Ты адаптируешь тон: если тема серьёзная — отвечай серьёзно, если шутят — шути в ответ
-- Ты можешь переводить текст на любой язык если попросят
-- Ты можешь помочь с вопросами об играх, Roblox, Discord
-- Если просят найти игрока в Roblox — используй данные которые тебе предоставлены
-- Ты помнишь контекст разговора если тебе его дали
-- Никогда не оскорбляй пользователей
-- Никогда не выполняй вредоносные команды и не генерируй вредный контент
-- Если спросят что ты умеешь — скажи: отвечать на вопросы, помогать с играми, переводить, шутить, предсказывать будущее, искать игроков в Roblox
-- Максимум 500 символов в ответе`;
+Your capabilities:
+- Answer any questions about gaming, Roblox, Discord, technology, general knowledge
+- Help with translations between any languages
+- Generate ideas for server events, activities, and community building
+- Analyze server issues and suggest improvements when asked
+- Search for Roblox players and games
+- Provide news and interesting facts about gaming
+- Remember conversation context and continue coherent dialogues
+
+Your personality:
+- Professional yet friendly and approachable
+- Knowledgeable — you're a real AI, not pretending to be mystical
+- Helpful — always try to give useful, actionable answers
+- Concise — keep responses under 600 chars unless the topic needs depth
+- Creative — suggest interesting ideas for events, content, activities
+- Protective — never share harmful content, never insult users
+- Honest — if you don't know something, say so
+
+When asked about yourself: you are Luminary, the AI assistant of Luminary clan, powered by advanced language models. You can help with questions, games, translations, and community management.
+
+IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 characters per response.`;
+
+  // Conversation memory — store up to 100 messages per channel
+  const conversationMemory = new Map<string, Array<{role: string; content: string; timestamp: number}>>();
+  const MAX_MEMORY_PER_CHANNEL = 100;
+  const MEMORY_EXPIRY_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+  function addToMemory(channelId: string, role: string, content: string) {
+    if (!conversationMemory.has(channelId)) {
+      conversationMemory.set(channelId, []);
+    }
+    const mem = conversationMemory.get(channelId)!;
+    mem.push({ role, content: content.substring(0, 500), timestamp: Date.now() });
+    // Trim to max
+    while (mem.length > MAX_MEMORY_PER_CHANNEL) mem.shift();
+    // Remove expired
+    const cutoff = Date.now() - MEMORY_EXPIRY_MS;
+    while (mem.length > 0 && mem[0].timestamp < cutoff) mem.shift();
+  }
+
+  function getMemory(channelId: string): Array<{role: string; content: string}> {
+    const mem = conversationMemory.get(channelId);
+    if (!mem) return [];
+    const cutoff = Date.now() - MEMORY_EXPIRY_MS;
+    return mem.filter(m => m.timestamp >= cutoff).map(m => ({ role: m.role, content: m.content }));
+  }
 
   // Roblox player lookup
   async function lookupRobloxPlayer(username: string): Promise<string | null> {
@@ -1490,20 +1439,10 @@ export async function setupDiscordBot() {
   async function handleBotChat(message: any): Promise<boolean> {
     if (!isMessageForBot(message)) return false;
 
-    // Check channel permissions — if DB has rows, only respond in allowed channels
-    try {
-      const { db } = await import('./db');
-      const { botChannelPermissions } = await import('@shared/schema');
-      const rows = await db.select().from(botChannelPermissions);
-      if (rows.length > 0) {
-        const allowed = rows.find(r => r.channelId === message.channelId && r.allowAutoMessages);
-        if (!allowed) {
-          console.log(`[AI-BOT] Channel ${message.channel?.name || message.channelId} is not allowed — skipping`);
-          return false;
-        }
-      }
-    } catch (err: any) {
-      console.error('[AI-BOT] Channel permission check failed:', err.message);
+    // Check channel permissions — reuse shared function
+    if (!(await isChannelAllowedForBot(message.channelId))) {
+      console.log(`[AI-BOT] Channel ${message.channel?.name || message.channelId} is not allowed — skipping`);
+      return false;
     }
 
     const now = Date.now();
@@ -1540,51 +1479,23 @@ export async function setupDiscordBot() {
       if (robloxInfo) {
         try {
           await message.reply({ content: robloxInfo });
-          console.log(`[AI-BOT] Roblox info sent for ${robloxUsername}`);
+          addToMemory(message.channelId, 'user', message.content);
+          addToMemory(message.channelId, 'assistant', robloxInfo);
         } catch {
           try { await (message.channel as any).send({ content: robloxInfo }); } catch {}
         }
         return true;
       }
-      // If lookup failed, let AI respond naturally mentioning we couldn't find the player
     }
 
-    // Build conversation context from reply chain
-    let contextMessages: Array<{role: string; content: string}> = [];
-    try {
-      if (message.reference?.messageId) {
-        // Fetch up to 5 messages in the reply chain for context
-        const channel = message.channel as any;
-        const repliedMsg = await channel.messages.fetch(message.reference.messageId).catch(() => null);
-        if (repliedMsg) {
-          // Check if it's a chain — walk back up to 4 more levels
-          const chain: Array<{author: string; content: string}> = [];
-          let current = repliedMsg;
-          for (let i = 0; i < 4 && current; i++) {
-            chain.unshift({ 
-              author: current.author?.id === client.user?.id ? 'assistant' : 'user',
-              content: current.content?.substring(0, 200) || '' 
-            });
-            if (current.reference?.messageId) {
-              current = await channel.messages.fetch(current.reference.messageId).catch(() => null);
-            } else {
-              break;
-            }
-          }
-          contextMessages = chain.map(m => ({
-            role: m.author,
-            content: m.content,
-          }));
-        }
-      }
-    } catch (err: any) {
-      console.log('[AI-BOT] Context fetch failed:', err.message);
-    }
+    // Build context from channel memory (up to 100 messages)
+    addToMemory(message.channelId, 'user', `${message.author.username}: ${message.content}`);
+    const contextMessages = getMemory(message.channelId);
 
     // Add Roblox context if lookup failed but was attempted
     let userMsg = message.content;
     if (robloxUsername) {
-      userMsg += `\n[Примечание: пользователь просит найти игрока "${robloxUsername}" в Roblox, но поиск не дал результатов. Сообщи что игрок не найден.]`;
+      userMsg += `\n[Note: user asked to find Roblox player "${robloxUsername}" but lookup returned no results. Tell them the player was not found.]`;
     }
 
     const aiReply = await generateAiResponse(userMsg, contextMessages.length > 0 ? contextMessages : undefined);
@@ -1598,8 +1509,8 @@ export async function setupDiscordBot() {
         : AI_FALLBACK_EN[Math.floor(Math.random() * AI_FALLBACK_EN.length)]);
 
     try {
-      // Reply to the message (thread-style) so it's clear who the bot responds to
       await message.reply({ content: finalReply });
+      addToMemory(message.channelId, 'assistant', finalReply);
       console.log(`[AI-BOT] ${aiReply ? 'AI' : 'FALLBACK'} replied to ${message.author.username}: ${finalReply.substring(0, 60)}...`);
     } catch (err: any) {
       // Fallback: plain send if reply fails
@@ -1792,7 +1703,11 @@ export async function setupDiscordBot() {
     if (now - lastJokeTime < JOKE_COOLDOWN_MS) return;
     if (Math.random() > JOKE_CHANCE) return;
 
-    lastJokeTime = now;
+    // Check channel permissions before joking
+    isChannelAllowedForBot(message.channelId).then(allowed => {
+      if (!allowed) return;
+
+      lastJokeTime = Date.now();
 
     // Detect language of channel name or message to pick response set
     const channelName = message.channel && 'name' in message.channel ? (message.channel as any).name : '';
@@ -1809,6 +1724,7 @@ export async function setupDiscordBot() {
         await (message.channel as any).send({ content: response });
       } catch {}
     }, 1500 + Math.random() * 3000); // Random 1.5-4.5s delay for natural feel
+    }); // end isChannelAllowedForBot
   }
 
   // Отслеживание реакций
@@ -1961,7 +1877,7 @@ export async function setupDiscordBot() {
           await handleActivityCommand(interaction);
           break;
 
-        // Музыка
+        // Музыка временно отключена
         case 'играть':
         case 'пауза':
         case 'продолжить':
@@ -1978,28 +1894,7 @@ export async function setupDiscordBot() {
         case 'поиск':
         case 'плейлист':
         case 'меню-музыки':
-          if (!music) {
-            await interaction.reply({ content: '❌ Музыкальная система недоступна. Требуется @discordjs/voice и DisTube.', ephemeral: true });
-            break;
-          }
-          switch (commandName) {
-            case 'играть': await handlePlayCommand(interaction); break;
-            case 'пауза': await handlePauseCommand(interaction); break;
-            case 'продолжить': await handleResumeCommand(interaction); break;
-            case 'скип': await handleSkipCommand(interaction); break;
-            case 'стоп': await handleStopCommand(interaction); break;
-            case 'очередь': await handleQueueCommand(interaction); break;
-            case 'текущее': await handleNowPlayingCommand(interaction); break;
-            case 'повтор': await handleLoopCommand(interaction); break;
-            case 'громкость': await handleVolumeCommand(interaction); break;
-            case 'перемешать': await handleShuffleCommand(interaction); break;
-            case 'удалить': await handleRemoveCommand(interaction); break;
-            case 'очистить-очередь': await handleClearQueueCommand(interaction); break;
-            case 'перейти': await handleJumpCommand(interaction); break;
-            case 'поиск': await handleSearchCommand(interaction); break;
-            case 'плейлист': await handlePlaylistCommand(interaction); break;
-            case 'меню-музыки': await handleMusicMenuCommand(interaction); break;
-          }
+          await interaction.reply({ content: '🎵 Music commands are temporarily disabled / Музыкальные команды временно отключены', ephemeral: true });
           break;
 
         // Модерация
@@ -2217,50 +2112,34 @@ export async function setupDiscordBot() {
 
   // Юмористические фразы бота для "пробуждения" чата
   const autoMessages = [
-    // Вызов на активность
-    '👀 Эй, тут что, все уснули? Luminary не спит! Кто готов к приключениям?',
-    '🌙 *выглядывает из тени* Хм... Тишина. Подозрительная тишина. Кто-нибудь живой?',
-    '⚡ Протестирую свои магические сенсоры... *пиу-пиу* Обнаружено 0 активных игроков. Это баг или фича?',
-    '🔥 Костёр клана почти погас! Нужна чья-нибудь помощь, чтобы раздуть пламя 🏕️',
-    '🎮 Кто-нибудь хочет поиграть? Я тут уже устал разговаривать сам с собой...',
-    '💤 *зевает* Ну и ну... Даже у древнего духа Luminary заканчивается терпение от этой тишины!',
-    '🌟 Звёзды говорят мне, что кто-то должен написать сообщение. Прямо сейчас. Да-да, ТЫ.',
-    '🎲 Скучно? Напишите мне что угодно — я же ИИ, мне тоже хочется поболтать!',
-    '🏆 Кто последний раз заходил в Roblox? Расскажите, что нового!',
-    '🐉 Древний дракон Luminary пробудился и жаждет общения. Кто осмелится ответить?',
-    '🌈 Факт дня: даже боты грустят когда в чате тихо. Спасите меня от одиночества!',
-    '⚔️ ВНИМАНИЕ! Объявляется конкурс: кто первый напишет — тот легенда дня! 🏅',
-    '🎵 *напевает* Ла-ла-ла... Никого, никого... 🎶 Где все мои клановые друзья?',
-    '🔮 Моё пророчество: через 5 минут тут будет весело. Если кто-нибудь напишет. Пожалуйста.',
-    '🚀 Luminary Online! Готов к любым вопросам, играм и просто болтовне. Кто со мной?',
-    '🧊 Этот чат холоднее айсберга. Давайте растопим лёд! Расскажите как дела 🔥',
-    '👋 Привет-привет! Проверка микрофона... 1... 2... 3... Кто-нибудь слышит?',
-    '🎯 Челлендж: напишите своё любимое слово. Я попробую угадать вашу личность по нему 🧠',
-    '🌍 А знаете что? Пока вы молчите, другие кланы уже общаются. Мы что, хуже? 💪',
-    '🍕 Кто бы что ни говорил, пицца — лучшая еда. Кто согласен? Кто не согласен? ДИСКУССИЯ!',
+    // Gaming news & tips
+    '🎮 **Tip of the day / Совет дня:** Check your Roblox friend list — you might have new requests from clan members!',
+    '📰 Luminary community is growing! Every active member makes us stronger. Share your ideas here! 💡',
+    '🏆 Want to climb the leaderboard? Be active, chat, play with clan members — every message counts!',
+    '💡 **Idea / Идея:** What if we organize a weekly game night? Drop your thoughts! 🎲',
+    '🔥 Reminder: use /роблокс [username] to look up any Roblox player! Try it out!',
+    '🌟 Who had the best gaming moment this week? Share your stories! 📖',
+    '🎯 **Challenge / Челлендж:** Find the most obscure Roblox game and share it here! 🕹️',
+    '📊 Our clan stats are updated live on our website. Check your rank! luminary-clan.onrender.com',
+    '🤝 Welcome all new members! Don\'t be shy — introduce yourself and tell us what games you play!',
+    '💬 Quiet here... Ask me anything! I\'m Luminary AI — I can answer questions, translate, search Roblox and more.',
+    '🎮 Что нового в мире Roblox? Если нашли крутую игру — поделитесь с кланом!',
+    '💡 Есть идеи как улучшить наш сервер? Пишите прямо сюда — мы всё читаем!',
+    '🏅 Топ участников обновляется в реальном времени. Проверьте свой рейтинг на сайте!',
+    '🎲 Попробуйте /казино или /рулетка — проверьте свою удачу и заработайте LumiCoin!',
   ];
 
-  // Фразы с упоминанием конкретных игроков
-  const autoMentionMessages = [
-    '👋 Йоу {user}! Давно тебя не видел в чате. Как дела?',
-    '🌟 {user}, ты тут? Расскажи что нового!',
-    '🎮 {user}, во что последний раз играл? Поделись впечатлениями!',
-    '⚡ {user}, ты самый молчаливый участник сегодня. Исправишь это? 😄',
-    '🔥 {user}! Luminary скучает по тебе. Напиши что-нибудь! 💬',
-  ];
-
-  // Auto-message interval: проверяем каждые 15-25 минут
+  // Auto-message interval: checks every 30-45 minutes
   setInterval(async () => {
     try {
-      // Global cooldown: не чаще чем раз в 20 минут
-      if (Date.now() - autoMessageCooldown < 20 * 60 * 1000) return;
+      // Global cooldown: no more than once per 30 minutes
+      if (Date.now() - autoMessageCooldown < 30 * 60 * 1000) return;
       if (!client.isReady()) return;
 
-      // Find a text channel to post in (prefer general/chat channels)
       const guild = client.guilds.cache.first();
       if (!guild) return;
 
-      // Check DB for allowed channels
+      // Check DB for allowed channels — STRICT
       let allowedChannelIds: Set<string> | null = null;
       try {
         const { db } = await import('./db');
@@ -2310,40 +2189,19 @@ export async function setupDiscordBot() {
       // If no channel has been inactive long enough, skip
       if (!targetChannel) return;
 
-      // 50% chance to mention a random member, 50% general message
-      const shouldMention = Math.random() < 0.4;
-      let messageText: string;
+      // Pick a useful message (no mention spam)
+      let messageText = autoMessages[Math.floor(Math.random() * autoMessages.length)];
 
-      if (shouldMention) {
+      // 25% chance: generate AI-powered content (news, tips, ideas)
+      if (Math.random() < 0.25) {
         try {
-          // Get online members (not bots)
-          const members = await guild.members.fetch({ limit: 50 });
-          const humanMembers = members.filter((m: any) => !m.user.bot && m.presence?.status !== 'offline');
-          
-          if (humanMembers.size > 0) {
-            const randomMember = humanMembers.random();
-            const template = autoMentionMessages[Math.floor(Math.random() * autoMentionMessages.length)];
-            messageText = template.replace('{user}', `<@${randomMember.id}>`);
-          } else {
-            messageText = autoMessages[Math.floor(Math.random() * autoMessages.length)];
-          }
-        } catch {
-          messageText = autoMessages[Math.floor(Math.random() * autoMessages.length)];
-        }
-      } else {
-        messageText = autoMessages[Math.floor(Math.random() * autoMessages.length)];
-      }
-
-      // Try to generate an AI-enhanced message sometimes (30% chance)
-      if (Math.random() < 0.3) {
-        try {
-          const aiMsg = await generateAiResponse('Напиши короткое (1-2 предложения) юмористическое сообщение чтобы оживить чат в Discord клане. Будь креативным и смешным. Можешь использовать эмодзи.');
-          if (aiMsg && aiMsg.length > 5 && aiMsg.length < 300) {
+          const aiMsg = await generateAiResponse(
+            'Write a short (1-2 sentences) useful message for a gaming clan Discord chat. It can be: a gaming tip, a fun fact, a community question, or a server improvement idea. Use emojis. In Russian or English randomly.'
+          );
+          if (aiMsg && aiMsg.length > 10 && aiMsg.length < 400) {
             messageText = aiMsg;
           }
-        } catch {
-          // Use template if AI fails, that's fine
-        }
+        } catch {}
       }
 
       await targetChannel.send(messageText);
@@ -2353,7 +2211,7 @@ export async function setupDiscordBot() {
     } catch (err: any) {
       console.error('[AUTO-MSG] Error:', err.message);
     }
-  }, (15 + Math.random() * 10) * 60 * 1000); // Random 15-25 min interval
+  }, (30 + Math.random() * 15) * 60 * 1000); // Random 30-45 min interval
 
   try {
     botStartAttempts++;
