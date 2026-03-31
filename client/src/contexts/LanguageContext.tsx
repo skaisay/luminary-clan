@@ -81,6 +81,7 @@ const translations = {
       miniGames: 'Мини-игры',
       clanWars: 'Войны',
       decorations: 'Украшения',
+      nicknameColors: 'Цвет ника',
       menu: 'Меню',
     },
     dashboard: {
@@ -684,6 +685,7 @@ const translations = {
       miniGames: 'Mini-games',
       clanWars: 'Wars',
       decorations: 'Decorations',
+      nicknameColors: 'Nick Color',
       menu: 'Menu',
     },
     dashboard: {

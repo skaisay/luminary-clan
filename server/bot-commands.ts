@@ -892,10 +892,12 @@ export async function setupDiscordBot() {
 
   // ── Shared channel permission check for all bot outputs ──
   let _channelPermCache: { rows: any[]; ts: number } | null = null;
+  // Allow external cache invalidation
+  (globalThis as any).__invalidateBotChannelCache = () => { _channelPermCache = null; };
   async function isChannelAllowedForBot(channelId: string): Promise<boolean> {
     try {
-      // Cache DB result for 60s to avoid spamming queries
-      if (!_channelPermCache || Date.now() - _channelPermCache.ts > 60_000) {
+      // Cache DB result for 30s to avoid spamming queries
+      if (!_channelPermCache || Date.now() - _channelPermCache.ts > 30_000) {
         const { db } = await import('./db');
         const { botChannelPermissions } = await import('@shared/schema');
         const rows = await db.select().from(botChannelPermissions);

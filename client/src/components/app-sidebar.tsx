@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Home, Trophy, Newspaper, Users, Info, Music, BarChart3, ShoppingBag, Package, Coins, Gamepad2 } from "lucide-react";
+import { Home, Trophy, Newspaper, Users, Info, Music, BarChart3, ShoppingBag, Package, Coins, Gamepad2, Palette } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import type { ClanSettings } from "@shared/schema";
@@ -53,6 +53,11 @@ const menuItemsConfig = [
     key: "nav.inventory",
     url: "/inventory",
     icon: Package,
+  },
+  {
+    key: "nav.nicknameColors",
+    url: "/nickname-colors",
+    icon: Palette,
   },
   {
     key: "nav.convert",

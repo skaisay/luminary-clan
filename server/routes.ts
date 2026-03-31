@@ -33,6 +33,8 @@ import {
   addRoleToMember,
   removeRoleFromMember,
   getServerActivityStats,
+  setNicknameColor,
+  getDiscordMemberPreview,
 } from "./discord";
 import { requireAdmin, requireDiscordAuth } from "./auth";
 import { 
@@ -1846,6 +1848,10 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
           });
       }
       const updated = await db.select().from(botChannelPermissions);
+      // Invalidate bot's permission cache immediately
+      if (typeof (globalThis as any).__invalidateBotChannelCache === 'function') {
+        (globalThis as any).__invalidateBotChannelCache();
+      }
       res.json({ success: true, channels: updated });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -6740,6 +6746,128 @@ Requirements:
       console.error('ai-promotion error:', e.message);
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // ============ NICKNAME COLOR SHOP ============
+  const NICKNAME_COLOR_PRESETS = [
+    { id: 'red', name: 'Огненный', color: '#e74c3c', price: 500 },
+    { id: 'blue', name: 'Ледяной', color: '#3498db', price: 500 },
+    { id: 'green', name: 'Изумруд', color: '#2ecc71', price: 500 },
+    { id: 'purple', name: 'Аметист', color: '#9b59b6', price: 800 },
+    { id: 'gold', name: 'Золотой', color: '#f1c40f', price: 1000 },
+    { id: 'pink', name: 'Розовый', color: '#e91e63', price: 800 },
+    { id: 'cyan', name: 'Бирюзовый', color: '#00bcd4', price: 800 },
+    { id: 'orange', name: 'Апельсин', color: '#ff9800', price: 500 },
+    { id: 'teal', name: 'Морской', color: '#009688', price: 800 },
+    { id: 'indigo', name: 'Индиго', color: '#3f51b5', price: 800 },
+    { id: 'crimson', name: 'Малиновый', color: '#dc143c', price: 1000 },
+    { id: 'lime', name: 'Лаймовый', color: '#cddc39', price: 500 },
+    { id: 'coral', name: 'Коралловый', color: '#ff6f61', price: 800 },
+    { id: 'midnight', name: 'Полуночный', color: '#191970', price: 1200 },
+    { id: 'neon-green', name: 'Неоновый', color: '#39ff14', price: 1500 },
+    { id: 'sakura', name: 'Сакура', color: '#ffb7c5', price: 1000 },
+    { id: 'diamond', name: 'Алмазный', color: '#b9f2ff', price: 2000 },
+    { id: 'custom', name: 'Свой цвет', color: 'custom', price: 3000 },
+  ];
+
+  app.get("/api/nickname-colors", (req, res) => {
+    res.json(NICKNAME_COLOR_PRESETS);
+  });
+
+  app.get("/api/nickname-colors/preview", requireDiscordAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация через Discord" });
+      const preview = await getDiscordMemberPreview(user.discordId);
+      res.json(preview);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/nickname-colors/buy", requireDiscordAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация через Discord" });
+
+      const { colorId, customColor } = req.body;
+      if (!colorId) return res.status(400).json({ error: "Укажите цвет" });
+
+      const preset = NICKNAME_COLOR_PRESETS.find(p => p.id === colorId);
+      if (!preset) return res.status(400).json({ error: "Неизвестный цвет" });
+
+      let finalColor = preset.color;
+      if (colorId === 'custom') {
+        if (!customColor || !/^#[0-9a-fA-F]{6}$/.test(customColor)) {
+          return res.status(400).json({ error: "Укажите корректный HEX цвет (#RRGGBB)" });
+        }
+        finalColor = customColor;
+      }
+
+      // Check balance
+      const member = await storage.getMemberByDiscordId(user.discordId);
+      if (!member) return res.status(404).json({ error: "Участник не найден" });
+      if ((member.lumiCoins || 0) < preset.price) {
+        return res.status(400).json({ error: `Недостаточно LumiCoins. Нужно: ${preset.price}, у вас: ${member.lumiCoins || 0}` });
+      }
+
+      // Deduct balance
+      const newBalance = (member.lumiCoins || 0) - preset.price;
+      await storage.updateMember(member.id, { lumiCoins: newBalance });
+
+      // Apply Discord color role
+      const result = await setNicknameColor(user.discordId, finalColor);
+
+      // Log transaction
+      const { transactions } = await import("@shared/schema");
+      await db.insert(transactions).values({
+        memberId: member.id,
+        discordId: user.discordId,
+        username: member.username || user.username,
+        amount: -preset.price,
+        type: 'purchase',
+        description: `Цвет никнейма: ${preset.name} (${finalColor})`,
+      });
+
+      // SSE broadcast
+      if (app.locals.broadcastSSE) {
+        app.locals.broadcastSSE('balance-update', { discordId: user.discordId, newBalance });
+      }
+
+      res.json({ success: true, newBalance, color: finalColor, roleName: result.roleName });
+    } catch (e: any) {
+      console.error('nickname-color buy error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============ WEBSITE PRESENCE TRACKING ============
+  const onlineUsers = new Map<string, { discordId: string; username: string; avatar: string; lastSeen: number }>();
+
+  app.post("/api/presence/heartbeat", (req, res) => {
+    const { discordId, username, avatar } = req.body;
+    if (!discordId || typeof discordId !== 'string') return res.status(400).json({ error: "discordId required" });
+    onlineUsers.set(discordId, {
+      discordId,
+      username: (typeof username === 'string' ? username : '').substring(0, 50),
+      avatar: (typeof avatar === 'string' ? avatar : '').substring(0, 300),
+      lastSeen: Date.now(),
+    });
+    res.json({ online: onlineUsers.size });
+  });
+
+  app.get("/api/presence/online", (req, res) => {
+    // Clean stale users (no heartbeat in 2 minutes)
+    const now = Date.now();
+    for (const [id, user] of onlineUsers) {
+      if (now - user.lastSeen > 120_000) onlineUsers.delete(id);
+    }
+    const users = Array.from(onlineUsers.values()).map(u => ({
+      discordId: u.discordId,
+      username: u.username,
+      avatar: u.avatar,
+    }));
+    res.json({ count: users.length, users });
   });
 
   const httpServer = createServer(app);

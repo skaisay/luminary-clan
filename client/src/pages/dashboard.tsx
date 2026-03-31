@@ -37,6 +37,11 @@ export default function Dashboard() {
     refetchInterval: 60000,
   });
 
+  const { data: presenceData } = useQuery<{ count: number; users: Array<{ discordId: string; username: string; avatar: string }> }>({
+    queryKey: ["/api/presence/online"],
+    refetchInterval: 30000,
+  });
+
   const { data: decorations } = useAllDecorations();
 
   const statCards = [
@@ -105,6 +110,12 @@ export default function Dashboard() {
               <Badge className="glass glass-border px-6 py-2 text-base" data-testid="badge-online-status">
                 <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                 {discordInfo?.onlineCount || 0} {t('dashboard.online')}
+              </Badge>
+            )}
+            {(presenceData?.count || 0) > 0 && (
+              <Badge className="glass glass-border px-6 py-2 text-base">
+                <div className="w-2 h-2 bg-blue-400 rounded-full mr-2 animate-pulse"></div>
+                {presenceData?.count} на сайте
               </Badge>
             )}
           </div>

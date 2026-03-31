@@ -51,10 +51,12 @@ import DailyRewardsPage from "@/pages/daily-rewards";
 import ProfilePage from "@/pages/profile";
 import MiniGamesPage from "@/pages/mini-games";
 import DecorationShop from "@/pages/decoration-shop";
+import NicknameColorsPage from "@/pages/nickname-colors";
 import ClanWarsPage from "@/pages/clan-wars";
 import NotFound from "@/pages/not-found";
 import { AiAssistant } from "@/components/AiAssistant";
 import { useSSE } from "@/hooks/useSSE";
+import { usePresenceHeartbeat } from "@/hooks/usePresence";
 
 function MainRouter() {
   return (
@@ -66,6 +68,7 @@ function MainRouter() {
       <Route path="/news"><MaintenanceGate pageId="news"><NewsPage /></MaintenanceGate></Route>
       <Route path="/shop"><MaintenanceGate pageId="shop"><Shop /></MaintenanceGate></Route>
       <Route path="/decorations"><DecorationShop /></Route>
+      <Route path="/nickname-colors"><NicknameColorsPage /></Route>
       <Route path="/convert"><MaintenanceGate pageId="convert"><ConvertPage /></MaintenanceGate></Route>
 
       <Route path="/about"><MaintenanceGate pageId="about"><About /></MaintenanceGate></Route>
@@ -138,6 +141,7 @@ function BackButton() {
 
 function MainLayout() {
   useSSE(); // Real-time balance & decoration updates via SSE
+  usePresenceHeartbeat(); // Track website visitors
   return (
     <>
       <TopNav />

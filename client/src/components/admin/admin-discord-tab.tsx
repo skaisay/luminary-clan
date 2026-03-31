@@ -1657,7 +1657,7 @@ export default function AdminDiscordTab() {
                       const allChannels = (channelsDetailed?.channels || channels) || [];
                       const textChannels = allChannels.filter(c => {
                         const t = typeof c.type === 'number' ? c.type : (c.type === 'text' ? 0 : 2);
-                        return t === 0;
+                        return t !== 2 && t !== 13; // all text-like channels
                       });
                       const payload = textChannels.map(ch => ({
                         channelId: ch.id,

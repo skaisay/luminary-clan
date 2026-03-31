@@ -379,6 +379,94 @@ export async function changeDiscordNickname(discordId: string, newNickname: stri
   }
 }
 
+/**
+ * Set a nickname color for a user by creating/reusing a personal color role.
+ * Discord shows the color of the highest-positioned role.
+ */
+export async function setNicknameColor(discordId: string, hexColor: string): Promise<{ success: boolean; roleName: string; color: string }> {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  const member = guild.members.cache.get(discordId) || await guild.members.fetch(discordId);
+  if (!member) throw new Error('Участник не найден');
+
+  const colorRoleName = `🎨 ${member.user.username}`;
+  const colorInt = parseInt(hexColor.replace('#', ''), 16);
+
+  // Check if user already has a personal color role
+  let existingRole = guild.roles.cache.find(r => r.name === colorRoleName);
+
+  if (existingRole) {
+    // Update existing role color
+    await existingRole.edit({ color: colorInt, reason: 'Обновление цвета никнейма через магазин' });
+  } else {
+    // Remove any old color roles from this user (prefix 🎨)
+    const oldColorRoles = member.roles.cache.filter(r => r.name.startsWith('🎨 '));
+    for (const [, role] of oldColorRoles) {
+      await member.roles.remove(role);
+      // Delete role if no other members have it
+      if (role.members.size <= 1) {
+        await role.delete('Старая цветовая роль');
+      }
+    }
+
+    // Create new color role at a high position
+    const botRole = guild.members.me?.roles.highest;
+    const position = botRole ? botRole.position - 1 : 1;
+
+    existingRole = await guild.roles.create({
+      name: colorRoleName,
+      color: colorInt,
+      hoist: false,
+      mentionable: false,
+      position: Math.max(1, position),
+      reason: 'Цвет никнейма через LumiCoin магазин',
+    });
+  }
+
+  // Assign the role
+  if (!member.roles.cache.has(existingRole.id)) {
+    await member.roles.add(existingRole, 'Цвет никнейма');
+  }
+
+  return { success: true, roleName: existingRole.name, color: hexColor };
+}
+
+/**
+ * Get a member's Discord info for preview card.
+ */
+export async function getDiscordMemberPreview(discordId: string) {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  const member = guild.members.cache.get(discordId) || await guild.members.fetch(discordId);
+  if (!member) throw new Error('Участник не найден');
+
+  const user = member.user;
+  // Fetch full user to get banner
+  const fullUser = await user.fetch(true);
+
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: member.displayName,
+    avatar: user.displayAvatarURL({ size: 256 }),
+    banner: fullUser.bannerURL({ size: 512 }) || null,
+    bannerColor: fullUser.hexAccentColor || null,
+    highestRoleColor: member.displayHexColor !== '#000000' ? member.displayHexColor : null,
+    status: member.presence?.status || 'offline',
+    roles: member.roles.cache
+      .filter(r => r.id !== guild.id)
+      .sort((a, b) => b.position - a.position)
+      .map(r => ({ id: r.id, name: r.name, color: r.hexColor }))
+      .slice(0, 10),
+  };
+}
+
 // ==================== CHANNEL MANAGEMENT ====================
 
 /**
