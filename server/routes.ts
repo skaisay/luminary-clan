@@ -6421,7 +6421,7 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
       }
 
       const cost = 500000;
-      const member = await storage.getMemberByDiscordId(user.discordId);
+      const member = await storage.getClanMemberByDiscordId(user.discordId);
       if (!member || (member.lumiCoins || 0) < cost) {
         return res.status(400).json({ error: "Not enough LumiCoins (need 500,000)" });
       }
@@ -6805,7 +6805,7 @@ Requirements:
       }
 
       // Check balance
-      const member = await storage.getMemberByDiscordId(user.discordId);
+      const member = await storage.getClanMemberByDiscordId(user.discordId);
       if (!member) return res.status(404).json({ error: "Участник не найден" });
       if ((member.lumiCoins || 0) < preset.price) {
         return res.status(400).json({ error: `Недостаточно LumiCoins. Нужно: ${preset.price}, у вас: ${member.lumiCoins || 0}` });
