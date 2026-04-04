@@ -750,21 +750,24 @@ export async function getDiscordChannelsDetailed() {
 const LATIN_TO_CYRILLIC: Record<string, string> = {
   'a': 'а', 'e': 'е', 'o': 'о', 'p': 'р', 'c': 'с', 'x': 'х',
   'y': 'у', 'k': 'к', 'n': 'п', 'm': 'м', 'b': 'в', 'h': 'н',
-  't': 'т', 'i': 'і', 'u': 'и',
+  't': 'т', 'i': 'і', 'u': 'и', 'd': 'д', 'r': 'г',
 };
 const CYRILLIC_TO_LATIN: Record<string, string> = {
   'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x',
   'у': 'y', 'к': 'k', 'п': 'n', 'м': 'm', 'в': 'b', 'н': 'h',
-  'т': 't', 'і': 'i', 'и': 'u',
+  'т': 't', 'і': 'i', 'и': 'u', 'д': 'd', 'г': 'r',
 };
 
 // Characters to strip before analysis (decorators, zero-width, etc.)
-const JUNK_CHARS_REGEX = /[\u200B-\u200F\u2060\uFEFF\u034F\u00AD\u180E⠀​᠎\s\d_\-.,!?;:"'()\[\]{}<>@#$%^&*+=\/\\|~`™®©€£¥°±²³¹₀₁₂₃₄₅₆₇₈₉⁰¹²³⁴⁵⁶⁷⁸⁹]/g;
+const JUNK_CHARS_REGEX = /[\u200B-\u200F\u2060\uFEFF\u034F\u00AD\u180E⠀​᠎\s\d_\-.,!?;:"'()\[\]{}<>@#$%^&*+=\/\\|~`™®©€£¥°±²³¹₀₁₂₃₄₅₆₇₈₉⁰¹²³⁴⁵⁶⁷⁸⁹•*·★☆♡♥❤️💀🖕🤬😡×÷→←↑↓▪▫●○◎◇◆■□¤§¶†‡※‼️⁉️‽]/g;
 
 // Leet-speak / obfuscation substitutions for profanity
 const LEET_MAP: Record<string, string> = {
-  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't',
-  '@': 'a', '$': 's', '!': 'i', '(': 'c',
+  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b', '9': 'g',
+  '@': 'a', '$': 's', '!': 'i', '(': 'c', ')': 'j',
+  '¡': 'i', '€': 'e', '£': 'l', '¥': 'y',
+  'ё': 'е', // Russian ё → е for stem matching
+  'й': 'и', // й → и for looser matching
 };
 
 /**
@@ -799,17 +802,77 @@ function normalizeLeet(text: string): string {
 export function normalizeForModeration(text: string): string {
   let t = text.toLowerCase();
   t = normalizeLeet(t);
-  // Remove repeating characters (>2) to handle "fuuuuck" → "fuck"
-  t = t.replace(/(.)\1{2,}/g, '$1$1');
+  // Remove repeating characters (>1) — "шлюююха" → "шлюха", "fuuuck" → "fuck"
+  t = t.replace(/(.)\1{1,}/g, '$1');
   return t;
+}
+
+/**
+ * Generate multiple normalized variants of the text for matching.
+ * Each variant applies a different deobfuscation strategy.
+ */
+function getMatchVariants(content: string): string[] {
+  const lower = content.toLowerCase();
+  const leet = normalizeLeet(lower);
+  
+  // Standard normalization
+  const norm = normalizeForModeration(content);
+  
+  // Homoglyph variants
+  const asCyr = normalizeHomoglyphs(norm, 'cyrillic');
+  const asLat = normalizeHomoglyphs(norm, 'latin');
+  
+  // Stripped (letters only, no spaces/symbols)
+  const stripped = stripJunk(norm);
+  const strippedCyr = stripJunk(asCyr);
+  const strippedLat = stripJunk(asLat);
+  
+  // Also strip ALL non-letter chars from original lowered text (catches "ш.л.ю.х.а" or "ш л ю х а")
+  const rawLettersOnly = lower.replace(/[^a-zа-яёі]/g, '');
+  const rawLettersNorm = rawLettersOnly.replace(/(.)\1{1,}/g, '$1');
+  const rawLettersCyr = normalizeHomoglyphs(rawLettersNorm, 'cyrillic');
+  const rawLettersLat = normalizeHomoglyphs(rawLettersNorm, 'latin');
+  
+  // Leet + stripped
+  const leetStripped = stripJunk(leet).replace(/(.)\1{1,}/g, '$1');
+  const leetCyr = normalizeHomoglyphs(leetStripped, 'cyrillic');
+  const leetLat = normalizeHomoglyphs(leetStripped, 'latin');
+  
+  return [
+    norm, asCyr, asLat,
+    stripped, strippedCyr, strippedLat,
+    rawLettersNorm, rawLettersCyr, rawLettersLat,
+    leetStripped, leetCyr, leetLat,
+  ];
+}
+
+/**
+ * Check if any variant contains the given stem.
+ */
+function matchesStem(variants: string[], stem: string): boolean {
+  const cleanStem = stem.trim().replace(/\s/g, '');
+  if (cleanStem.length === 0) return false;
+  return variants.some(v => v.includes(cleanStem));
 }
 
 // Common Russian profanity stems (abbreviated to avoid explicit content)
 const RU_PROFANITY_STEMS = [
-  'бля', 'хуй', 'хуе', 'хуё', 'пизд', 'ебат', 'ебан', 'ёбан', 'сука', 'сук ',
+  'бля', 'хуй', 'хуе', 'хуё', 'пизд', 'ебат', 'ебан', 'ёбан', 'сука', 'сук',
   'нахуй', 'нахер', 'пидор', 'пидар', 'мудак', 'мудил', 'залуп', 'шлюх',
-  'дебил', 'уёб', 'уеб', 'ублюд', 'блят', 'пиздец', 'хуяр', 'ёб ', 'еб ',
-  'хер ', 'херов', 'сучк', 'сучар', 'пидр', 'ахуе', 'охуе', 'отъеб', 'отьеб',
+  'дебил', 'уёб', 'уеб', 'ублюд', 'блят', 'пиздец', 'хуяр', 'ёб', 'еб',
+  'хер', 'херов', 'сучк', 'сучар', 'пидр', 'ахуе', 'охуе', 'отъеб', 'отьеб',
+  // Additional stems and common evasions
+  'ебл', 'ёбл', 'хуил', 'хуял', 'выбляд', 'пизд', 'спизд',
+  'пздц', 'хуйн', 'хуен', 'хуён', 'ебуч', 'ёбуч', 'ебош', 'заеб', 'заёб',
+  'долбоеб', 'долбоёб', 'мудозвон', 'педик', 'педераст', 'гандон',
+  'сволоч', 'выродок', 'тварь', 'падл', 'мразь', 'мраз', 'урод',
+  'блядь', 'блядин', 'блядск', 'шалав', 'потаскух', 'проститут',
+  'засран', 'говн', 'жоп', 'срань', 'срака', 'сран',
+  'хуесос', 'пиздобол', 'хуеплёт', 'мудоёб', 'ёбтвоюмать',
+  'ебтвоюмать', 'твоюмать', 'ёбаный', 'ебаный', 'ебанат', 'ёбанат',
+  'впизд', 'напизд', 'распизд', 'припизд', 'опизд',
+  'выебан', 'выёбан', 'наебан', 'наёбан', 'приеб', 'приёб',
+  'поеб', 'поёб', 'объеб', 'объёб', 'перееб', 'переёб',
 ];
 
 // Russian profanity written in Latin letters (transliteration bypass)
@@ -823,6 +886,14 @@ const RU_TRANSLIT_PROFANITY = [
   'ohuel', 'ohuet', 'ahuet', 'ahuel', 'nahren', 'blet', 'bled',
   'syka', 'suca', 'bl9d', 'bl9t', 'p1zda', 'p1zd', 'xu9', 'xyu', 'xyй',
   'pzdc', 'pzd', 'huyesos', 'pidorас', 'ped1k', 'pederast',
+  // Additional transliterations
+  'pizduk', 'sukin', 'blyadi', 'mraz', 'tvary', 'urod', 'padla',
+  'gavno', 'govno', 'zhopa', 'sran', 'zasranec',
+  'huesos', 'pizdobol', 'yobtvoyumat', 'ebtvoyumat',
+  'ebanat', 'yobanat', 'ebanashka', 'pizdabol',
+  'huyeplit', 'huynya', 'nahuysos', 'pohuy', 'pohui',
+  'zaebis', 'zaebal', 'zaebat', 'priebat', 'prieb',
+  'otyebis', 'otyebal', 'svoloch', 'vyrodok',
 ];
 
 // Common English profanity stems
@@ -830,6 +901,11 @@ const EN_PROFANITY_STEMS = [
   'fuck', 'shit', 'bitch', 'asshole', 'dick', 'cunt', 'bastard', 'damn',
   'whore', 'slut', 'retard', 'faggot', 'nigger', 'nigga', 'stfu', 'wtf',
   'fck', 'fcuk', 'phuck', 'biatch', 'btch',
+  // Additional
+  'motherfuck', 'bullshit', 'horseshit', 'dipshit', 'dumbass', 'jackass',
+  'piss', 'cock', 'dildo', 'wanker', 'twat', 'prick', 'arse',
+  'fuk', 'fuq', 'fuc', 'sht', 'btch', 'b1tch', 'a55', 'azz',
+  'sh1t', 'd1ck', 'c0ck', 'f4g', 'fag', 'cnt',
 ];
 
 // Discrimination keywords (both languages)
@@ -924,48 +1000,32 @@ export function checkMessageViolations(
   // For very short messages (1 char), only check language restriction, skip profanity
   const isVeryShort = content.trim().length < 2;
 
-  // Full normalization pipeline
-  const normalized = normalizeForModeration(content);
-  // Also create a version with homoglyphs resolved both ways
-  const asCyrillic = normalizeHomoglyphs(normalized, 'cyrillic');
-  const asLatin = normalizeHomoglyphs(normalized, 'latin');
-  // Stripped version (letters only, no symbols/spaces)
-  const stripped = stripJunk(normalized);
-  const strippedCyr = stripJunk(asCyrillic);
-  const strippedLat = stripJunk(asLatin);
+  // Generate all deobfuscation variants at once
+  const variants = getMatchVariants(content);
 
-  // 1) Discrimination check (highest priority) — check all normalized versions
+  // 1) Discrimination check (highest priority)
   if (rules.blockDiscrimination && !isVeryShort) {
     for (const kw of DISCRIMINATION_KEYWORDS) {
-      if (normalized.includes(kw) || asCyrillic.includes(kw) || asLatin.includes(kw)
-          || stripped.includes(kw.replace(/\s/g, ''))
-          || strippedCyr.includes(kw.replace(/\s/g, ''))
-          || strippedLat.includes(kw.replace(/\s/g, ''))) {
+      if (matchesStem(variants, kw)) {
         return { reason: 'discrimination', reasonDetail: `Обнаружена дискриминация` };
       }
     }
   }
 
-  // 2) Profanity check — check normalized + homoglyph versions + stripped
+  // 2) Profanity check — against all deobfuscated variants
   if (rules.blockProfanity && !isVeryShort) {
     for (const stem of RU_PROFANITY_STEMS) {
-      const stemClean = stem.trim();
-      if (normalized.includes(stemClean) || asCyrillic.includes(stemClean)
-          || stripped.includes(stemClean.replace(/\s/g, ''))
-          || strippedCyr.includes(stemClean.replace(/\s/g, ''))) {
+      if (matchesStem(variants, stem)) {
         return { reason: 'profanity', reasonDetail: `Нецензурная лексика (RU)` };
       }
     }
     for (const stem of EN_PROFANITY_STEMS) {
-      if (normalized.includes(stem) || asLatin.includes(stem)
-          || stripped.includes(stem) || strippedLat.includes(stem)) {
+      if (matchesStem(variants, stem)) {
         return { reason: 'profanity', reasonDetail: `Нецензурная лексика (EN)` };
       }
     }
-    // 2b) Russian profanity in Latin transliteration (suka, blyat, nahui etc.)
     for (const stem of RU_TRANSLIT_PROFANITY) {
-      if (normalized.includes(stem) || asLatin.includes(stem)
-          || stripped.includes(stem) || strippedLat.includes(stem)) {
+      if (matchesStem(variants, stem)) {
         return { reason: 'profanity', reasonDetail: `Нецензурная лексика (транслит RU→EN)` };
       }
     }
