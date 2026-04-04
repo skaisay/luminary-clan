@@ -826,38 +826,58 @@ function getMatchVariants(content: string): string[] {
   const asLat = normalizeHomoglyphs(norm, 'latin');
   const asCyrYo = asCyr.replace(/ё/g, 'е');
   
-  // Stripped (letters only, no spaces/symbols)
-  const stripped = stripJunk(norm);
-  const strippedCyr = stripJunk(asCyr);
-  const strippedLat = stripJunk(asLat);
+  // Per-word stripped: remove junk from each word individually but keep spaces
+  // This catches "ш.л.ю.х.а тут" → "шлюха тут" without creating cross-word false positives
+  const wordStrip = (s: string) => s.split(/\s+/).map(w => w.replace(/[^a-zа-яёі]/g, '')).filter(Boolean).join(' ');
+  const wordStripped = wordStrip(norm);
+  const wordStrippedCyr = wordStrip(asCyr);
+  const wordStrippedYo = wordStripped.replace(/ё/g, 'е');
   
-  // Also strip ALL non-letter chars from original lowered text (catches "ш.л.ю.х.а" or "ш л ю х а")
+  // Fully stripped (letters only, no spaces) — used ONLY for short text / evasion detection
+  const stripped = stripJunk(norm);
   const rawLettersOnly = lower.replace(/[^a-zа-яёі]/g, '');
   const rawLettersNorm = rawLettersOnly.replace(/(.)\1{1,}/g, '$1');
-  const rawLettersCyr = normalizeHomoglyphs(rawLettersNorm, 'cyrillic');
-  const rawLettersLat = normalizeHomoglyphs(rawLettersNorm, 'latin');
-  const rawLettersYo = rawLettersNorm.replace(/ё/g, 'е');
   
   // Leet + stripped
   const leetStripped = stripJunk(leet).replace(/(.)\1{1,}/g, '$1');
   const leetCyr = normalizeHomoglyphs(leetStripped, 'cyrillic');
-  const leetLat = normalizeHomoglyphs(leetStripped, 'latin');
   
   return [
+    // Spaced variants (safe — word boundaries preserved)
     norm, normYo, asCyr, asCyrYo, asLat,
-    stripped, strippedCyr, strippedLat,
-    rawLettersNorm, rawLettersYo, rawLettersCyr, rawLettersLat,
-    leetStripped, leetCyr, leetLat,
+    wordStripped, wordStrippedCyr, wordStrippedYo,
+    // Stripped variants (no spaces — only checked for short text)
+    stripped, rawLettersNorm, leetStripped, leetCyr,
   ];
 }
 
 /**
  * Check if any variant contains the given stem.
+ * For spaced variants: checks per-word + adjacent 2-3 word groups.
+ * For stripped variants: only checks if text is short (likely evasion, not normal sentence).
  */
 function matchesStem(variants: string[], stem: string): boolean {
   const cleanStem = stem.trim().replace(/\s/g, '');
   if (cleanStem.length === 0) return false;
-  return variants.some(v => v.includes(cleanStem));
+  for (const v of variants) {
+    if (v.includes(' ')) {
+      // Spaced variant — check per-word and adjacent groups
+      const words = v.split(/\s+/).filter(w => w.length > 0);
+      for (const w of words) {
+        if (w.includes(cleanStem)) return true;
+      }
+      for (let i = 0; i < words.length - 1; i++) {
+        if ((words[i] + words[i + 1]).includes(cleanStem)) return true;
+      }
+      for (let i = 0; i < words.length - 2; i++) {
+        if ((words[i] + words[i + 1] + words[i + 2]).includes(cleanStem)) return true;
+      }
+    } else if (v.length > 0 && v.length <= 30) {
+      // Stripped variant — only check short text to avoid cross-word false positives
+      if (v.includes(cleanStem)) return true;
+    }
+  }
+  return false;
 }
 
 // ── REGEX-BASED ROOT PATTERNS ──
@@ -938,11 +958,28 @@ const EN_PROFANITY_REGEXES: RegExp[] = [
 
 /**
  * Check if any variant matches any of the regex patterns.
+ * For spaced variants: checks per-word + adjacent 2-3 word groups.
+ * For stripped variants: only checks short text (avoids cross-word false positives).
  */
 function matchesRegexPatterns(variants: string[], patterns: RegExp[]): boolean {
   for (const pattern of patterns) {
     for (const v of variants) {
-      if (pattern.test(v)) return true;
+      if (v.includes(' ')) {
+        // Spaced variant — check each word and adjacent groups
+        const words = v.split(/\s+/).filter(w => w.length > 0);
+        for (const w of words) {
+          if (w.length >= 2 && pattern.test(w)) return true;
+        }
+        for (let i = 0; i < words.length - 1; i++) {
+          if (pattern.test(words[i] + words[i + 1])) return true;
+        }
+        for (let i = 0; i < words.length - 2; i++) {
+          if (pattern.test(words[i] + words[i + 1] + words[i + 2])) return true;
+        }
+      } else if (v.length > 0 && v.length <= 30) {
+        // Stripped — only check short strings (evasion attempts like "ш.л.ю.х.а")
+        if (pattern.test(v)) return true;
+      }
     }
   }
   return false;

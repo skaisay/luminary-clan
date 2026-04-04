@@ -46,6 +46,13 @@ const userViolations = new Map<string, UserViolationRecord>();
 // Anti-spam: track message rate per user per channel (key = `userId:channelId`)
 const spamTracker = new Map<string, number[]>(); // timestamps of recent messages
 
+// ── MULTI-MESSAGE PROFANITY DETECTION ──
+// Track recent short messages per user to catch split profanity ("шлю" + "ха")
+interface RecentMsg { text: string; ts: number; msgId: string; channelId: string }
+const recentMessagesPerUser = new Map<string, RecentMsg[]>();
+const MULTI_MSG_WINDOW_MS = 15000; // 15 seconds window for combining messages
+const MULTI_MSG_MAX = 5;           // keep last 5 messages
+
 // Moderation delete queue — batch up deletes to avoid individual rate limits
 const deleteQueue: Array<{ channelId: string; messageId: string; timestamp: number }> = [];
 let deleteQueueProcessing = false;
@@ -63,16 +70,31 @@ async function getCachedViolationChecker() {
 // Spam thresholds
 const SPAM_WINDOW_MS = 5000;       // 5 seconds window
 const SPAM_MAX_MESSAGES = 5;       // max messages in window before counting as spam
-const VIOLATION_WINDOW_MS = 300000; // 5 minutes window for violation tracking
-const WARN_COOLDOWN_MS = 10000;    // min 10s between warnings to same user
-const TIMEOUT_THRESHOLD = 4;       // violations before timeout
-const TIMEOUT_DURATION_MS = 60000; // 1 minute timeout
-const TIMEOUT_ESCALATE_MS = 300000; // 5 minute timeout after 8+ violations
+const VIOLATION_WINDOW_MS = 3600000; // 1 hour window for violation tracking
+const WARN_COOLDOWN_MS = 5000;     // min 5s between warnings to same user
+
+// Escalating timeout durations: violation count → timeout duration
+// Every violation = mute. More violations = longer mute.
+const TIMEOUT_DURATIONS: { minViolations: number; durationMs: number; label: string }[] = [
+  { minViolations: 10, durationMs: 86400000, label: '24 часа' },    // 10+ → 24h
+  { minViolations: 7,  durationMs: 7200000,  label: '2 часа' },     // 7-9 → 2h
+  { minViolations: 5,  durationMs: 1800000,  label: '30 минут' },   // 5-6 → 30min
+  { minViolations: 3,  durationMs: 300000,   label: '5 минут' },    // 3-4 → 5min
+  { minViolations: 1,  durationMs: 60000,    label: '1 минуту' },   // 1-2 → 1min
+];
+
+function getTimeoutDuration(violationCount: number): { durationMs: number; label: string } {
+  for (const tier of TIMEOUT_DURATIONS) {
+    if (violationCount >= tier.minViolations) return { durationMs: tier.durationMs, label: tier.label };
+  }
+  return { durationMs: 60000, label: '1 минуту' };
+}
 
 /**
- * Record a violation for a user and return the escalation level.
+ * Record a violation for a user and return the violation count.
+ * Every violation triggers a mute — escalating duration.
  */
-function recordViolation(userId: string): { level: 'warn' | 'timeout' | 'timeout_long'; count: number } {
+function recordViolation(userId: string): { count: number } {
   const now = Date.now();
   let record = userViolations.get(userId);
   if (!record) {
@@ -84,10 +106,7 @@ function recordViolation(userId: string): { level: 'warn' | 'timeout' | 'timeout
   record.violations.push(now);
   record.warnings++;
 
-  const count = record.violations.length;
-  if (count >= TIMEOUT_THRESHOLD * 2) return { level: 'timeout_long', count };
-  if (count >= TIMEOUT_THRESHOLD) return { level: 'timeout', count };
-  return { level: 'warn', count };
+  return { count: record.violations.length };
 }
 
 /**
@@ -164,6 +183,11 @@ setInterval(() => {
   for (const [userId, record] of userViolations) {
     record.violations = record.violations.filter(t => now - t < VIOLATION_WINDOW_MS);
     if (record.violations.length === 0) userViolations.delete(userId);
+  }
+  for (const [userId, msgs] of recentMessagesPerUser) {
+    const fresh = msgs.filter(m => now - m.ts < MULTI_MSG_WINDOW_MS);
+    if (fresh.length === 0) recentMessagesPerUser.delete(userId);
+    else recentMessagesPerUser.set(userId, fresh);
   }
 }, 300000);
 
@@ -1604,10 +1628,60 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
       });
 
       // If spamming in moderated channel, treat as violation even if content seems ok
-      const effectiveViolation = violation || (spamming ? {
+      let effectiveViolation = violation || (spamming ? {
         reason: 'spam',
         reasonDetail: `Спам в модерируемом канале (${SPAM_MAX_MESSAGES}+ сообщений за ${SPAM_WINDOW_MS / 1000}с)`,
       } : null);
+
+      // ── MULTI-MESSAGE PROFANITY DETECTION ──
+      // Track recent messages per user, check if combining them forms profanity
+      let multiMsgIds: string[] = [];
+      if (rules.blockProfanity && !effectiveViolation) {
+        const now = Date.now();
+        const userId = message.author.id;
+        let recent = recentMessagesPerUser.get(userId) || [];
+        // Clean old messages
+        recent = recent.filter(m => now - m.ts < MULTI_MSG_WINDOW_MS);
+        // Add current message
+        recent.push({ text: message.content, ts: now, msgId: message.id, channelId: message.channelId });
+        // Keep max N
+        if (recent.length > MULTI_MSG_MAX) recent = recent.slice(-MULTI_MSG_MAX);
+        recentMessagesPerUser.set(userId, recent);
+
+        // Check combinations of last 2, 3, 4, 5 messages concatenated
+        const sameChannelMsgs = recent.filter(m => m.channelId === message.channelId);
+        if (sameChannelMsgs.length >= 2) {
+          for (let windowSize = 2; windowSize <= Math.min(sameChannelMsgs.length, 5); windowSize++) {
+            const slice = sameChannelMsgs.slice(-windowSize);
+            const combined = slice.map(m => m.text).join('');
+            const multiViolation = checkViolations(combined, {
+              languageRestriction: null, // Don't check language for combined
+              blockProfanity: true,
+              blockDiscrimination: true,
+            });
+            if (multiViolation) {
+              effectiveViolation = {
+                reason: multiViolation.reason,
+                reasonDetail: `${multiViolation.reasonDetail} (обнаружено в ${windowSize} сообщениях)`,
+              };
+              // Collect message IDs for deletion
+              multiMsgIds = slice.map(m => m.msgId);
+              // Clear the user's recent messages to avoid re-flagging
+              recentMessagesPerUser.delete(userId);
+              break;
+            }
+          }
+        }
+      } else if (!effectiveViolation) {
+        // Even for clean messages, track them for future multi-msg detection
+        const now = Date.now();
+        const userId = message.author.id;
+        let recent = recentMessagesPerUser.get(userId) || [];
+        recent = recent.filter(m => now - m.ts < MULTI_MSG_WINDOW_MS);
+        recent.push({ text: message.content, ts: now, msgId: message.id, channelId: message.channelId });
+        if (recent.length > MULTI_MSG_MAX) recent = recent.slice(-MULTI_MSG_MAX);
+        recentMessagesPerUser.set(userId, recent);
+      }
 
       if (!effectiveViolation) {
         // Clean message — maybe joke
@@ -1620,43 +1694,38 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
       const channelName = message.channel && 'name' in message.channel
         ? (message.channel as any).name : 'unknown';
 
-      // 4) TIMEOUT FIRST — apply before deleting so Discord blocks input immediately
-      if (escalation.level === 'timeout' || escalation.level === 'timeout_long') {
-        const duration = escalation.level === 'timeout_long' ? TIMEOUT_ESCALATE_MS : TIMEOUT_DURATION_MS;
-        const durationText = duration >= 300000 ? '5 минут' : '1 минуту';
-        try {
-          const member = message.member || await message.guild?.members.fetch(message.author.id).catch(() => null);
-          if (member && 'timeout' in member) {
-            await (member as any).timeout(duration, `Автомодерация: ${escalation.count} нарушений за 5 минут`);
-            console.log(`[MOD] ⏱ Timeout ${message.author.username} for ${durationText} (${escalation.count} violations)`);
-          }
-        } catch (timeoutErr: any) {
-          console.error(`[MOD] Failed to timeout user: ${timeoutErr.message}`);
+      // 4) TIMEOUT (MUTE) — every violation = Discord timeout, escalating duration
+      const { durationMs, label: durationText } = getTimeoutDuration(escalation.count);
+      try {
+        const member = message.member || await message.guild?.members.fetch(message.author.id).catch(() => null);
+        if (member && 'timeout' in member) {
+          await (member as any).timeout(durationMs, `Автомодерация: ${escalation.count} нарушение(й) — мут ${durationText}`);
+          console.log(`[MOD] 🔇 Mute ${message.author.username} for ${durationText} (${escalation.count} violations)`);
         }
+      } catch (timeoutErr: any) {
+        console.error(`[MOD] Failed to timeout user: ${timeoutErr.message}`);
+      }
 
-        // Send private warning about timeout
-        const record = userViolations.get(message.author.id);
-        if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
-          record.lastWarning = Date.now();
-          sendPrivateWarning(message,
-            `Вы заглушены на ${durationText} за повторные нарушения (${escalation.count}x).\nYou have been timed out for ${durationText} for repeated violations (${escalation.count}x).`
-          );
-        }
-      } else if (escalation.count <= 2) {
-        // First violations — send private warning
-        const record = userViolations.get(message.author.id);
-        if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
-          record.lastWarning = Date.now();
-          const langWarning = effectiveViolation.reason === 'wrong_language'
-            ? `Этот канал только для ${rules.languageRestriction === 'en' ? 'английского' : 'русского'} языка.\nThis channel is ${rules.languageRestriction === 'en' ? 'English' : 'Russian'} only.`
-            : effectiveViolation.reasonDetail;
-          sendPrivateWarning(message, langWarning);
-        }
+      // Send private warning about the mute
+      const record = userViolations.get(message.author.id);
+      if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
+        record.lastWarning = Date.now();
+        const langWarning = effectiveViolation.reason === 'wrong_language'
+          ? `⚠️ Вы заглушены на ${durationText}. Этот канал только для ${rules.languageRestriction === 'en' ? 'английского' : 'русского'} языка.\n⚠️ You are muted for ${durationText}. This channel is ${rules.languageRestriction === 'en' ? 'English' : 'Russian'} only.`
+          : `⚠️ Вы заглушены на ${durationText} за нарушение правил (${escalation.count}x): ${effectiveViolation.reasonDetail}\n⚠️ You are muted for ${durationText} for rule violation (${escalation.count}x).`;
+        sendPrivateWarning(message, langWarning);
       }
 
       // 5) Auto-delete AFTER timeout — message disappears, input field already blocked
       if (rules.autoDelete) {
-        if (spamming) {
+        if (multiMsgIds.length > 0) {
+          // Multi-message violation: delete all involved messages
+          for (const msgId of multiMsgIds) {
+            deleteQueue.push({ channelId: message.channelId, messageId: msgId, timestamp: Date.now() });
+          }
+          processDeleteQueue(client);
+          console.log(`[MOD] Multi-msg deleted ${multiMsgIds.length} msgs by ${message.author.username} in #${channelName}: ${effectiveViolation.reason}`);
+        } else if (spamming) {
           deleteQueue.push({
             channelId: message.channelId,
             messageId: message.id,
@@ -1668,7 +1737,9 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
             console.error(`[MOD] Failed to delete: ${err.message}`);
           });
         }
-        console.log(`[MOD] ${spamming ? 'Queue-' : ''}Deleted msg by ${message.author.username} in #${channelName}: ${effectiveViolation.reason} (violations: ${escalation.count})`);
+        if (!multiMsgIds.length) {
+          console.log(`[MOD] ${spamming ? 'Queue-' : ''}Deleted msg by ${message.author.username} in #${channelName}: ${effectiveViolation.reason} (violations: ${escalation.count})`);
+        }
       }
 
       // 6) Save to flagged_messages DB (fire-and-forget)
@@ -1737,24 +1808,23 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
         });
       }
 
+      // Mute user — every violation = timeout
+      const { durationMs, label: durationText } = getTimeoutDuration(escalation.count);
+      try {
+        const member = newMessage.member || await newMessage.guild?.members.fetch(newMessage.author.id).catch(() => null);
+        if (member && 'timeout' in member) {
+          await (member as any).timeout(durationMs, `Автомодерация: обход цензуры через редактирование — мут ${durationText}`);
+          console.log(`[MOD-EDIT] 🔇 Mute ${newMessage.author.username} for ${durationText} (${escalation.count} violations)`);
+        }
+      } catch {}
+
       // Warn user
       const record = userViolations.get(newMessage.author.id);
       if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
         record.lastWarning = Date.now();
         sendPrivateWarning(newMessage,
-          `Редактирование сообщения с нарушением правил. Это тоже модерируется.\nEditing messages to bypass rules is also moderated.`
+          `⚠️ Вы заглушены на ${durationText}. Редактирование сообщений с нарушением правил тоже модерируется.\n⚠️ You are muted for ${durationText}. Editing messages to bypass rules is also moderated.`
         );
-      }
-
-      // Timeout for repeat offenders
-      if (escalation.level === 'timeout' || escalation.level === 'timeout_long') {
-        const duration = escalation.level === 'timeout_long' ? TIMEOUT_ESCALATE_MS : TIMEOUT_DURATION_MS;
-        try {
-          const member = newMessage.member || await newMessage.guild?.members.fetch(newMessage.author.id).catch(() => null);
-          if (member && 'timeout' in member) {
-            await (member as any).timeout(duration, `Автомодерация: обход цензуры через редактирование`);
-          }
-        } catch {}
       }
 
       // Log to DB
@@ -1880,6 +1950,23 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
     if (!userId || newState.member?.user.bot) return;
 
     try {
+      // ── MUTE ENFORCEMENT: kick timed-out users from voice ──
+      if (newState.channelId && newState.member) {
+        const member = newState.member;
+        // Discord timeout = communicationDisabledUntil is set and in the future
+        if (member.communicationDisabledUntil && new Date(member.communicationDisabledUntil) > new Date()) {
+          try {
+            await member.voice.disconnect('Вы заглушены — войс запрещён во время мута');
+            console.log(`[MOD] 🔇 Kicked ${member.user.username} from voice — user is timed out until ${member.communicationDisabledUntil}`);
+            // Try to DM them
+            member.user.send('⚠️ Вы не можете заходить в голосовые каналы во время мута.\n⚠️ You cannot join voice channels while muted.').catch(() => {});
+          } catch (kickErr: any) {
+            console.error(`[MOD] Failed to kick muted user from voice: ${kickErr.message}`);
+          }
+          return; // Don't track voice activity for muted users
+        }
+      }
+
       // Пользователь зашел в войс
       if (!oldState.channelId && newState.channelId) {
         voiceJoinTimes.set(userId, new Date());
