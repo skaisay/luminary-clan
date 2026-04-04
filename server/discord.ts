@@ -818,9 +818,13 @@ function getMatchVariants(content: string): string[] {
   // Standard normalization
   const norm = normalizeForModeration(content);
   
+  // ё → е normalization (critical for Russian profanity)
+  const normYo = norm.replace(/ё/g, 'е');
+  
   // Homoglyph variants
   const asCyr = normalizeHomoglyphs(norm, 'cyrillic');
   const asLat = normalizeHomoglyphs(norm, 'latin');
+  const asCyrYo = asCyr.replace(/ё/g, 'е');
   
   // Stripped (letters only, no spaces/symbols)
   const stripped = stripJunk(norm);
@@ -832,6 +836,7 @@ function getMatchVariants(content: string): string[] {
   const rawLettersNorm = rawLettersOnly.replace(/(.)\1{1,}/g, '$1');
   const rawLettersCyr = normalizeHomoglyphs(rawLettersNorm, 'cyrillic');
   const rawLettersLat = normalizeHomoglyphs(rawLettersNorm, 'latin');
+  const rawLettersYo = rawLettersNorm.replace(/ё/g, 'е');
   
   // Leet + stripped
   const leetStripped = stripJunk(leet).replace(/(.)\1{1,}/g, '$1');
@@ -839,9 +844,9 @@ function getMatchVariants(content: string): string[] {
   const leetLat = normalizeHomoglyphs(leetStripped, 'latin');
   
   return [
-    norm, asCyr, asLat,
+    norm, normYo, asCyr, asCyrYo, asLat,
     stripped, strippedCyr, strippedLat,
-    rawLettersNorm, rawLettersCyr, rawLettersLat,
+    rawLettersNorm, rawLettersYo, rawLettersCyr, rawLettersLat,
     leetStripped, leetCyr, leetLat,
   ];
 }
@@ -853,6 +858,94 @@ function matchesStem(variants: string[], stem: string): boolean {
   const cleanStem = stem.trim().replace(/\s/g, '');
   if (cleanStem.length === 0) return false;
   return variants.some(v => v.includes(cleanStem));
+}
+
+// ── REGEX-BASED ROOT PATTERNS ──
+// These catch ALL derivative forms: diminutives, augmentatives, verb conjugations, etc.
+// Each pattern matches the root + any suffix (шлюх → шлюха, шлюшка, шлюшечка, шлюхоидный...)
+const RU_PROFANITY_REGEXES: RegExp[] = [
+  // шлюх* — шлюха, шлюшка, шлюшечка, шлюшонок, шлюхоидный
+  /шлю[хшщ]/,
+  // блять, бляди, блядина, блядский, бля
+  /бля[дтнск]?/,
+  // хуй, хуе, хуё, хуя, хуил, хуйня, хуесос, хуеплёт
+  /ху[йеёяилн]/,
+  // пизд*, пиздец, пиздобол, пиздюк, пиздато
+  /пизд/,
+  // ебать, ебан, ёбан, ебало, ебанат, ебашить, ебучий, ебля
+  /[её]ба[нтлшч]?/,
+  /еб[алуио]/,
+  // сука, сучка, сученок, сучий, сучара, суки, сукин
+  /сук[аиеёоу]|суч[каеёоин]/,
+  // пидор, пидар, пидорас, педик, педераст 
+  /п[иеё]д[оаие]?[рксн]/,
+  // мудак, мудила, мудозвон, мудоёб
+  /муд[аоиеёя]/,
+  // дебил, дебилоид, дебильный
+  /дебил/,
+  // урод, уродина, уродский
+  /урод/,
+  // мразь, мразина, мразота, мразотный
+  /мраз[ьоие]/,
+  // тварь, тварина, тварюка
+  /твар[ьиеюя]/,
+  // падла, падлюка, падлец
+  /падл[аеюёиу]/,
+  // говно, говнюк, говняшка, говнище
+  /говн[оюяеиа]/,
+  // жопа, жопный, жопошник
+  /жоп[аеоунс]/,
+  // залупа, залупный
+  /залуп/,
+  // гандон
+  /гандон/,
+  // сволочь, сволочной
+  /сволоч/,
+  // выродок
+  /выродок|выродк/,
+  // засранец, засранка
+  /засран/,
+  // проститутка
+  /проститут/,
+  // шалава
+  /шалав/,
+  // потаскуха, потаскушка
+  /потаскух|потаскуш/,
+  // нахуй, нахер
+  /нах[уе][йр]/,
+  // долбоёб
+  /долбо[её]б/,
+  // ублюдок, ублюдочный
+  /ублюд/,
+];
+
+const EN_PROFANITY_REGEXES: RegExp[] = [
+  /fuck/,
+  /f[uv]ck|fuk|fuq|fuc[ck]|phuck|fck/,
+  /shit|sh[i1]t|sht/,
+  /bitch|b[i1]tch|btch|biatch/,
+  /asshole|a[s5]{2}hole/,
+  /dick|d[i1]ck/,
+  /cunt|c[uv]nt|cnt/,
+  /whore|wh[o0]re/,
+  /slut|sl[uv]t/,
+  /retard/,
+  /fag[g]?[oi]t|f[a4]g/,
+  /nigg[ae]r|n[i1]gg[ae]/,
+  /cock|c[o0]ck/,
+  /wanker|twat|prick/,
+];
+
+/**
+ * Check if any variant matches any of the regex patterns.
+ */
+function matchesRegexPatterns(variants: string[], patterns: RegExp[]): boolean {
+  for (const pattern of patterns) {
+    for (const v of variants) {
+      if (pattern.test(v)) return true;
+    }
+  }
+  return false;
 }
 
 // Common Russian profanity stems (abbreviated to avoid explicit content)
@@ -1012,8 +1105,16 @@ export function checkMessageViolations(
     }
   }
 
-  // 2) Profanity check — against all deobfuscated variants
+  // 2) Profanity check — REGEX first (catches all derivative forms), then stem fallback
   if (rules.blockProfanity && !isVeryShort) {
+    // 2a) Regex patterns — catch diminutives, conjugations, all forms
+    if (matchesRegexPatterns(variants, RU_PROFANITY_REGEXES)) {
+      return { reason: 'profanity', reasonDetail: `Нецензурная лексика (RU)` };
+    }
+    if (matchesRegexPatterns(variants, EN_PROFANITY_REGEXES)) {
+      return { reason: 'profanity', reasonDetail: `Нецензурная лексика (EN)` };
+    }
+    // 2b) Stem-based fallback — catches specific forms not covered by regex
     for (const stem of RU_PROFANITY_STEMS) {
       if (matchesStem(variants, stem)) {
         return { reason: 'profanity', reasonDetail: `Нецензурная лексика (RU)` };
