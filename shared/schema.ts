@@ -929,6 +929,14 @@ export const discordRestrictedUsers = pgTable("discord_restricted_users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ==================== ACTIVE ANIMATED GRADIENTS (persisted across restarts) ====================
+export const activeGradients = pgTable("active_gradients", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  discordId: text("discord_id").notNull().unique(),
+  colors: text("colors").notNull(), // JSON array of hex colors
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Ping-protected users — cannot be @mentioned by other users
 export const pingProtectedUsers = pgTable("ping_protected_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

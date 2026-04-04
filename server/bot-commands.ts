@@ -3,6 +3,7 @@ import { storage } from './storage';
 import { db } from './db';
 import { discordActivity, clanMembers, transactions, shopItems, discordChannelRules } from '@shared/schema';
 import { eq } from 'drizzle-orm';
+import { restoreGradientsFromDB } from './discord';
 
 // Try to import music system - optional if modules not installed
 let music: any = null;
@@ -673,13 +674,13 @@ export async function setupDiscordBot() {
                 await storage.createClanMember({
                   discordId: member.user.id,
                   username: member.user.username,
-                  avatar: member.user.displayAvatarURL(),
+                  avatar: member.user.displayAvatarURL({ extension: 'png', size: 256 }),
                   role: 'Member',
                 });
                 totalAdded++;
               } else {
                 // Обновляем аватар и username существующего участника
-                const newAvatar = member.user.displayAvatarURL();
+                const newAvatar = member.user.displayAvatarURL({ extension: 'png', size: 256 });
                 const newUsername = member.user.username;
                 
                 if (existingMember.avatar !== newAvatar || existingMember.username !== newUsername) {
@@ -705,6 +706,13 @@ export async function setupDiscordBot() {
     } catch (error) {
       console.error('❌ Ошибка синхронизации участников:', error);
     }
+
+    // Restore animated gradients from DB after bot is ready
+    try {
+      await restoreGradientsFromDB();
+    } catch (e: any) {
+      console.error('❌ Ошибка восстановления градиентов:', e.message);
+    }
     
     // Автоматическая синхронизация каждый час
     if (hourSyncInterval) clearInterval(hourSyncInterval); // Prevent stacking
@@ -728,7 +736,7 @@ export async function setupDiscordBot() {
                 });
                 
                 if (existingMember) {
-                  const newAvatar = member.user.displayAvatarURL();
+                  const newAvatar = member.user.displayAvatarURL({ extension: 'png', size: 256 });
                   const newUsername = member.user.username;
                   
                   if (existingMember.avatar !== newAvatar || existingMember.username !== newUsername) {

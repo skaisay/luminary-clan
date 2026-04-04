@@ -334,21 +334,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let avatarDataUri = "";
       if (avatarUrl) {
         try {
-          // Add size param and User-Agent to avoid Discord CDN rejections
-          const fetchUrl = avatarUrl.includes('?') ? avatarUrl : `${avatarUrl}?size=256`;
+          // Request PNG format explicitly from Discord CDN (WebP won't render in SVG)
+          let fetchUrl = avatarUrl;
+          // Convert Discord CDN URL to request PNG instead of WebP
+          if (fetchUrl.includes('cdn.discordapp.com')) {
+            fetchUrl = fetchUrl.replace(/\.webp/, '.png').replace(/\.gif/, '.png');
+            fetchUrl = fetchUrl.includes('?') ? fetchUrl + '&size=256' : fetchUrl + '?size=256';
+          } else {
+            fetchUrl = fetchUrl.includes('?') ? fetchUrl : `${fetchUrl}?size=256`;
+          }
           console.log(`[OG-IMAGE] Fetching avatar: ${fetchUrl}`);
           const resp = await fetch(fetchUrl, {
             headers: {
               'User-Agent': 'Mozilla/5.0 (compatible; LuminaryClanBot/1.0)',
-              'Accept': 'image/*',
+              'Accept': 'image/png, image/*',
             },
             signal: AbortSignal.timeout(8000),
           });
           if (resp.ok) {
-            const buf = Buffer.from(await resp.arrayBuffer());
-            const ct = resp.headers.get("content-type") || "image/png";
-            avatarDataUri = `data:${ct};base64,${buf.toString("base64")}`;
-            console.log(`[OG-IMAGE] Avatar fetched OK: ${buf.length} bytes, type=${ct}`);
+            const rawBuf = Buffer.from(await resp.arrayBuffer());
+            // Convert to PNG using sharp to ensure SVG/librsvg compatibility
+            try {
+              const sharp = (await import("sharp")).default;
+              const pngBuf = await sharp(rawBuf).resize(256, 256).png().toBuffer();
+              avatarDataUri = `data:image/png;base64,${pngBuf.toString("base64")}`;
+              console.log(`[OG-IMAGE] Avatar converted to PNG: ${pngBuf.length} bytes`);
+            } catch {
+              // Fallback: use raw buffer as-is
+              const ct = resp.headers.get("content-type") || "image/png";
+              avatarDataUri = `data:${ct};base64,${rawBuf.toString("base64")}`;
+              console.log(`[OG-IMAGE] Avatar fallback (no convert): ${rawBuf.length} bytes, type=${ct}`);
+            }
           } else {
             console.error(`[OG-IMAGE] Avatar fetch failed: HTTP ${resp.status} for ${fetchUrl}`);
           }
@@ -437,7 +453,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   ${avatarCircle}
 
   <text x="165" y="225" font-family="Arial,Helvetica,sans-serif" font-size="32" fill="${nameColor}" font-weight="bold">${escapeXml(displayName)}</text>
-  <rect x="165" y="240" width="${Math.min(escapeXml(role).length * 9 + 20, 200)}" height="24" rx="5" fill="#ffffff15"/>
+  <rect x="165" y="240" width="${Math.min(role.length * 9 + 20, 200)}" height="24" rx="5" fill="#ffffff15"/>
   <text x="175" y="257" font-family="Arial,sans-serif" font-size="13" fill="#a5b4fc">${escapeXml(role)}</text>
   ${badgeSvg}
 

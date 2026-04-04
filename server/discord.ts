@@ -491,7 +491,10 @@ export function startGradientCycler() {
         const newColor = getGradientColor(grad.colors, grad.step, grad.steps);
         grad.step = (grad.step + 1) % grad.steps;
 
-        const member = guild.members.cache.get(discordId);
+        let member = guild.members.cache.get(discordId);
+        if (!member) {
+          try { member = await guild.members.fetch(discordId); } catch { continue; }
+        }
         if (!member) continue;
 
         const colorRoleName = `🎨 ${member.user.username}`;
@@ -505,15 +508,33 @@ export function startGradientCycler() {
   }, 4000);
 }
 
-/** Add an animated gradient for a user */
-export function addAnimatedGradient(discordId: string, colors: string[], speed?: number) {
+/** Add an animated gradient for a user (+ persist to DB) */
+export async function addAnimatedGradient(discordId: string, colors: string[], speed?: number) {
   const steps = 20; // 20 steps × 4s = 80s full cycle
   animatedGradients.set(discordId, { discordId, colors, speed: speed || 4000, step: 0, steps });
+  // Persist to database
+  try {
+    const { db } = await import("./db");
+    const { activeGradients: agTable } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const existing = await db.select({ id: agTable.id }).from(agTable).where(eq(agTable.discordId, discordId)).limit(1);
+    if (existing.length > 0) {
+      await db.update(agTable).set({ colors: JSON.stringify(colors) }).where(eq(agTable.discordId, discordId));
+    } else {
+      await db.insert(agTable).values({ discordId, colors: JSON.stringify(colors) });
+    }
+  } catch (e: any) { console.error('[GRADIENT] DB save error:', e.message); }
 }
 
-/** Remove animated gradient for a user (they switched to static color) */
-export function removeAnimatedGradient(discordId: string) {
+/** Remove animated gradient for a user (+ remove from DB) */
+export async function removeAnimatedGradient(discordId: string) {
   animatedGradients.delete(discordId);
+  try {
+    const { db } = await import("./db");
+    const { activeGradients: agTable } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(agTable).where(eq(agTable.discordId, discordId));
+  } catch (e: any) { console.error('[GRADIENT] DB delete error:', e.message); }
 }
 
 /** Check if a user has an animated gradient active */
@@ -524,6 +545,35 @@ export function hasAnimatedGradient(discordId: string): boolean {
 /** Get all animated gradient entries (for persistence/display) */
 export function getAnimatedGradients(): Map<string, AnimatedGradient> {
   return animatedGradients;
+}
+
+/** Restore active gradients from DB on startup */
+export async function restoreGradientsFromDB() {
+  try {
+    const { db } = await import("./db");
+    const { activeGradients: agTable } = await import("@shared/schema");
+    const rows = await db.select().from(agTable);
+    for (const row of rows) {
+      try {
+        const colors = JSON.parse(row.colors) as string[];
+        if (Array.isArray(colors) && colors.length >= 2) {
+          animatedGradients.set(row.discordId, {
+            discordId: row.discordId,
+            colors,
+            speed: 4000,
+            step: 0,
+            steps: 20,
+          });
+        }
+      } catch {}
+    }
+    if (animatedGradients.size > 0) {
+      startGradientCycler();
+      console.log(`🎨 Восстановлено ${animatedGradients.size} анимированных градиентов из БД`);
+    }
+  } catch (e: any) {
+    console.error('[GRADIENT] DB restore error:', e.message);
+  }
 }
 
 /**
