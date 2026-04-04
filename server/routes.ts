@@ -383,15 +383,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch (_) {}
 
-      const avatarCircle = avatarDataUri
-        ? `<image x="52" y="170" width="96" height="96" href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
-        : `<rect x="52" y="170" width="96" height="96" rx="48" fill="#4c1d95"/>
-           <text x="100" y="228" font-family="Arial,sans-serif" font-size="36" fill="white" text-anchor="middle" font-weight="bold">${escapeXml((m.username || '?').substring(0, 1).toUpperCase())}</text>`;
-
-      const badgeSvg = badges.slice(0, 4).map((b, i) =>
-        `<text x="${170 + 26 * i}" y="305" font-family="Arial,sans-serif" font-size="18">${b.emoji || '⬥'}</text>`
-      ).join('');
-
       const coinsForCurrent = level * level * 3;
       const coinsForNext = (level + 1) * (level + 1) * 3;
       const xpPct = level >= 300 ? 100 : Math.min(100, Math.max(0, ((coins - coinsForCurrent) / Math.max(1, coinsForNext - coinsForCurrent)) * 100));
