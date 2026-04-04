@@ -434,6 +434,98 @@ export async function setNicknameColor(discordId: string, hexColor: string): Pro
   return { success: true, roleName: existingRole.name, color: hexColor };
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ANIMATED GRADIENT NICKNAMES — cycle role color through gradient stops
+// ═══════════════════════════════════════════════════════════════
+
+interface AnimatedGradient {
+  discordId: string;
+  colors: string[];  // array of hex colors to cycle through
+  speed: number;     // ms between color changes
+  step: number;      // current position in cycle (0..steps-1)
+  steps: number;     // total interpolation steps
+}
+
+// Active animated gradients (discordId → gradient config)
+const animatedGradients = new Map<string, AnimatedGradient>();
+
+/** Interpolate between two hex colors by factor t (0..1) */
+function interpolateColor(hex1: string, hex2: string, t: number): string {
+  const r1 = parseInt(hex1.slice(1, 3), 16), g1 = parseInt(hex1.slice(3, 5), 16), b1 = parseInt(hex1.slice(5, 7), 16);
+  const r2 = parseInt(hex2.slice(1, 3), 16), g2 = parseInt(hex2.slice(3, 5), 16), b2 = parseInt(hex2.slice(5, 7), 16);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+/** Get the interpolated color at a given step in a multi-color gradient cycle */
+function getGradientColor(colors: string[], step: number, totalSteps: number): string {
+  if (colors.length < 2) return colors[0] || '#ffffff';
+  // Cycle: 0..totalSteps maps through all color pairs and back
+  const segments = colors.length; // include wrap-around to first color
+  const progress = (step % totalSteps) / totalSteps; // 0..1
+  const segmentFloat = progress * segments;
+  const segIdx = Math.floor(segmentFloat) % segments;
+  const t = segmentFloat - Math.floor(segmentFloat);
+  const c1 = colors[segIdx];
+  const c2 = colors[(segIdx + 1) % colors.length];
+  return interpolateColor(c1, c2, t);
+}
+
+let gradientInterval: ReturnType<typeof setInterval> | null = null;
+
+/** Start the gradient cycling interval */
+export function startGradientCycler() {
+  if (gradientInterval) return;
+  // Cycle every 4 seconds — Discord rate limit is ~2 role edits/sec
+  gradientInterval = setInterval(async () => {
+    if (animatedGradients.size === 0) return;
+    const client = getSharedBot();
+    if (!client) return;
+    const guild = getGuild(client);
+    if (!guild) return;
+
+    for (const [discordId, grad] of animatedGradients) {
+      try {
+        const newColor = getGradientColor(grad.colors, grad.step, grad.steps);
+        grad.step = (grad.step + 1) % grad.steps;
+
+        const member = guild.members.cache.get(discordId);
+        if (!member) continue;
+
+        const colorRoleName = `🎨 ${member.user.username}`;
+        const role = guild.roles.cache.find(r => r.name === colorRoleName);
+        if (role) {
+          const colorInt = parseInt(newColor.replace('#', ''), 16);
+          await role.edit({ color: colorInt }).catch(() => {});
+        }
+      } catch {}
+    }
+  }, 4000);
+}
+
+/** Add an animated gradient for a user */
+export function addAnimatedGradient(discordId: string, colors: string[], speed?: number) {
+  const steps = 20; // 20 steps × 4s = 80s full cycle
+  animatedGradients.set(discordId, { discordId, colors, speed: speed || 4000, step: 0, steps });
+}
+
+/** Remove animated gradient for a user (they switched to static color) */
+export function removeAnimatedGradient(discordId: string) {
+  animatedGradients.delete(discordId);
+}
+
+/** Check if a user has an animated gradient active */
+export function hasAnimatedGradient(discordId: string): boolean {
+  return animatedGradients.has(discordId);
+}
+
+/** Get all animated gradient entries (for persistence/display) */
+export function getAnimatedGradients(): Map<string, AnimatedGradient> {
+  return animatedGradients;
+}
+
 /**
  * Get a member's Discord info for preview card.
  */

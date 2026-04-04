@@ -35,6 +35,10 @@ import {
   getServerActivityStats,
   setNicknameColor,
   getDiscordMemberPreview,
+  addAnimatedGradient,
+  removeAnimatedGradient,
+  hasAnimatedGradient,
+  startGradientCycler,
 } from "./discord";
 import { requireAdmin, requireDiscordAuth } from "./auth";
 import { 
@@ -380,93 +384,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (_) {}
 
       const avatarCircle = avatarDataUri
-        ? `<image x="50" y="285" width="120" height="120" xlink:href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
-        : `<rect x="50" y="285" width="120" height="120" rx="60" fill="#4c1d95"/>
-           <text x="110" y="358" font-family="Arial,sans-serif" font-size="40" fill="white" text-anchor="middle" font-weight="bold">${(m.username || "?").substring(0, 2).toUpperCase()}</text>`;
+        ? `<image x="52" y="170" width="96" height="96" href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
+        : `<rect x="52" y="170" width="96" height="96" rx="48" fill="#4c1d95"/>
+           <text x="100" y="228" font-family="Arial,sans-serif" font-size="36" fill="white" text-anchor="middle" font-weight="bold">${escapeXml((m.username || '?').substring(0, 1).toUpperCase())}</text>`;
 
-      const badgeSvg = badges.slice(0, 5).map((b, i) =>
-        `<text x="${195 + 28 * i}" y="374" font-family="Arial,sans-serif" font-size="22">${b.emoji || '✦'}</text>`
-      ).join("");
+      const badgeSvg = badges.slice(0, 4).map((b, i) =>
+        `<text x="${170 + 26 * i}" y="305" font-family="Arial,sans-serif" font-size="18">${b.emoji || '⬥'}</text>`
+      ).join('');
 
       const coinsForCurrent = level * level * 3;
       const coinsForNext = (level + 1) * (level + 1) * 3;
-      const xpPct = level >= 300 ? 100 : Math.min(100, ((coins - coinsForCurrent) / (coinsForNext - coinsForCurrent)) * 100);
-      const joinDate = m.joinedAt ? new Date(m.joinedAt).toLocaleDateString('ru-RU') : '—';
+      const xpPct = level >= 300 ? 100 : Math.min(100, Math.max(0, ((coins - coinsForCurrent) / Math.max(1, coinsForNext - coinsForCurrent)) * 100));
+      const joinDate = m.joinedAt ? new Date(m.joinedAt).toLocaleDateString('ru-RU') : '';
 
-      // Generate SVG that mirrors the actual profile card layout (1200×630)
+      // Extract colors from bannerGradient CSS for SVG linearGradient stops
+      const gradientColors: string[] = [];
+      const hexMatch = bannerGradient.match(/#[0-9a-fA-F]{3,8}/g);
+      if (hexMatch) gradientColors.push(...hexMatch);
+      if (gradientColors.length === 0) gradientColors.push('#6366f1', '#8b5cf6', '#a855f7');
+      if (gradientColors.length === 1) gradientColors.push(gradientColors[0]);
+
+      const bannerStops = gradientColors.length === 2
+        ? `<stop offset="0%" stop-color="${gradientColors[0]}"/><stop offset="100%" stop-color="${gradientColors[1]}"/>`
+        : gradientColors.map((c, i) => `<stop offset="${Math.round(i / (gradientColors.length - 1) * 100)}%" stop-color="${c}"/>`).join('');
+
+      // Truncate username if too long for SVG layout
+      const displayName = (m.username || '???').length > 20 ? (m.username || '???').substring(0, 18) + '..' : (m.username || '???');
+
+      // Avatar: use embedded base64 data or fallback to initials
+      const avatarCircle = avatarDataUri
+        ? `<image x="52" y="170" width="96" height="96" href="${avatarDataUri}" clip-path="url(#avatar-clip)" />`
+        : `<rect x="52" y="170" width="96" height="96" rx="48" fill="#4c1d95"/>
+           <text x="100" y="228" font-family="Arial,sans-serif" font-size="36" fill="white" text-anchor="middle" font-weight="bold">${escapeXml((m.username || '?').substring(0, 1).toUpperCase())}</text>`;
+
+      const badgeSvg = badges.slice(0, 4).map((b, i) =>
+        `<text x="${170 + 26 * i}" y="305" font-family="Arial,sans-serif" font-size="18">${b.emoji || '⬥'}</text>`
+      ).join('');
+
+      // Generate clean SVG optimized for sharp PNG conversion (1200×630)
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>
-    <clipPath id="avatar-clip"><circle cx="110" cy="345" r="58"/></clipPath>
-    <linearGradient id="bg" x1="0" y1="0" x2="0.3" y2="1">
+    <clipPath id="avatar-clip"><circle cx="100" cy="218" r="46"/></clipPath>
+    <linearGradient id="bg-g" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#0c0a1d"/>
-      <stop offset="100%" stop-color="#161233"/>
+      <stop offset="100%" stop-color="#151030"/>
     </linearGradient>
-    <linearGradient id="banner-g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#6366f1"/>
-      <stop offset="50%" stop-color="#8b5cf6"/>
-      <stop offset="100%" stop-color="#a855f7"/>
+    <linearGradient id="banner-g" x1="0" y1="0" x2="1" y2="1">${bannerStops}</linearGradient>
+    <linearGradient id="xp-g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${gradientColors[0]}"/>
+      <stop offset="100%" stop-color="${gradientColors[gradientColors.length - 1]}"/>
     </linearGradient>
-    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
-      <stop offset="60%" stop-color="#000" stop-opacity="0.4"/>
-      <stop offset="100%" stop-color="#000" stop-opacity="0.85"/>
-    </linearGradient>
-    <linearGradient id="xp-bar" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#6366f1"/>
-      <stop offset="100%" stop-color="#a855f7"/>
-    </linearGradient>
-    <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-    <filter id="card-shadow"><feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#000" flood-opacity="0.4"/></filter>
   </defs>
 
-  <!-- Full background -->
-  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#bg-g)"/>
+  <rect x="30" y="15" width="1140" height="600" rx="20" fill="#0f0d23" opacity="0.95"/>
 
-  <!-- Card container -->
-  <rect x="40" y="20" width="1120" height="590" rx="24" fill="#0f0d23" stroke="#6366f140" stroke-width="1.5" filter="url(#card-shadow)"/>
+  <rect x="30" y="15" width="1140" height="170" rx="20" fill="url(#banner-g)"/>
+  <rect x="30" y="120" width="1140" height="65" fill="#0f0d23" opacity="0.5"/>
 
-  <!-- Banner — fills top of card -->
-  <rect x="40" y="20" width="1120" height="280" rx="24" fill="url(#banner-g)"/>
-  <rect x="40" y="200" width="1120" height="100" fill="url(#fade)"/>
-
-  <!-- Avatar ring -->
-  <circle cx="110" cy="345" r="65" fill="#0f0d23" stroke="#6366f1" stroke-width="3"/>
+  <circle cx="100" cy="218" r="52" fill="#0f0d23" stroke="${gradientColors[0]}" stroke-width="3"/>
   ${avatarCircle}
 
-  <!-- Username + badges -->
-  <text x="190" y="350" font-family="Arial,Helvetica,sans-serif" font-size="36" fill="${nameColor}" font-weight="bold">${escapeXml(m.username)}</text>
+  <text x="165" y="225" font-family="Arial,Helvetica,sans-serif" font-size="32" fill="${nameColor}" font-weight="bold">${escapeXml(displayName)}</text>
+  <rect x="165" y="240" width="${Math.min(escapeXml(role).length * 9 + 20, 200)}" height="24" rx="5" fill="#ffffff15"/>
+  <text x="175" y="257" font-family="Arial,sans-serif" font-size="13" fill="#a5b4fc">${escapeXml(role)}</text>
   ${badgeSvg}
-  <!-- Role badge -->
-  <rect x="190" y="362" width="${role.length * 10 + 24}" height="26" rx="6" fill="#ffffff12" stroke="#ffffff20" stroke-width="1"/>
-  <text x="202" y="381" font-family="Arial,sans-serif" font-size="14" fill="#a5b4fc">${escapeXml(role)}</text>
 
-  <!-- XP bar -->
-  <text x="190" y="415" font-family="Arial,sans-serif" font-size="13" fill="#94a3b8">Уровень ${level} / 300 · ${coins.toLocaleString()} / ${coinsForNext.toLocaleString()} LC</text>
-  <rect x="190" y="422" width="400" height="8" rx="4" fill="#1e1b4b"/>
-  <rect x="190" y="422" width="${Math.max(8, (xpPct / 100) * 400)}" height="8" rx="4" fill="url(#xp-bar)"/>
+  <text x="165" y="330" font-family="Arial,sans-serif" font-size="13" fill="#94a3b8">LVL ${level}/300</text>
+  <rect x="165" y="338" width="350" height="8" rx="4" fill="#1e1b4b"/>
+  <rect x="165" y="338" width="${Math.max(8, (xpPct / 100) * 350)}" height="8" rx="4" fill="url(#xp-g)"/>
+  <text x="525" y="346" font-family="Arial,sans-serif" font-size="11" fill="#64748b">${Math.round(xpPct)}%</text>
 
-  <!-- Stats row -->
-  <rect x="60" y="460" width="240" height="110" rx="16" fill="#1a1740" stroke="#6366f130" stroke-width="1"/>
-  <text x="180" y="500" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">LumiCoins</text>
-  <text x="180" y="540" font-family="Arial,sans-serif" font-size="34" fill="#fbbf24" text-anchor="middle" font-weight="bold">${coins.toLocaleString()}</text>
+  <rect x="60" y="380" width="250" height="100" rx="14" fill="#1a1740"/>
+  <text x="185" y="418" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">LumiCoins</text>
+  <text x="185" y="458" font-family="Arial,sans-serif" font-size="36" fill="#fbbf24" text-anchor="middle" font-weight="bold">${coins.toLocaleString()}</text>
 
-  <rect x="320" y="460" width="200" height="110" rx="16" fill="#1a1740" stroke="#6366f130" stroke-width="1"/>
-  <text x="420" y="500" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">Побед</text>
-  <text x="420" y="540" font-family="Arial,sans-serif" font-size="34" fill="#34d399" text-anchor="middle" font-weight="bold">${wins}</text>
+  <rect x="330" y="380" width="200" height="100" rx="14" fill="#1a1740"/>
+  <text x="430" y="418" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">Ранг</text>
+  <text x="430" y="458" font-family="Arial,sans-serif" font-size="36" fill="#f472b6" text-anchor="middle" font-weight="bold">#${rank || '—'}</text>
 
-  <rect x="540" y="460" width="200" height="110" rx="16" fill="#1a1740" stroke="#6366f130" stroke-width="1"/>
-  <text x="640" y="500" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">Ранг</text>
-  <text x="640" y="540" font-family="Arial,sans-serif" font-size="34" fill="#f472b6" text-anchor="middle" font-weight="bold">#${rank || '—'}</text>
+  <rect x="550" y="380" width="200" height="100" rx="14" fill="#1a1740"/>
+  <text x="650" y="418" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">Побед</text>
+  <text x="650" y="458" font-family="Arial,sans-serif" font-size="36" fill="#34d399" text-anchor="middle" font-weight="bold">${wins}</text>
 
-  <!-- Right side: LumiCoins + join date -->
-  <rect x="780" y="300" width="360" height="130" rx="16" fill="#1a1740" stroke="#6366f130" stroke-width="1"/>
-  <text x="960" y="345" font-family="Arial,sans-serif" font-size="48" fill="#fbbf24" text-anchor="middle" font-weight="bold" filter="url(#glow)">${coins.toLocaleString()}</text>
-  <text x="960" y="375" font-family="Arial,sans-serif" font-size="16" fill="#94a3b8" text-anchor="middle">LumiCoins</text>
-  <text x="960" y="415" font-family="Arial,sans-serif" font-size="13" fill="#64748b" text-anchor="middle">Присоединился: ${joinDate}</text>
+  <rect x="770" y="380" width="200" height="100" rx="14" fill="#1a1740"/>
+  <text x="870" y="418" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">Уровень</text>
+  <text x="870" y="458" font-family="Arial,sans-serif" font-size="36" fill="#818cf8" text-anchor="middle" font-weight="bold">${level}</text>
 
-  <!-- Footer branding -->
-  <text x="960" y="540" font-family="Arial,sans-serif" font-size="20" fill="#6366f180" text-anchor="middle" font-weight="bold">✦ LUMINARY CLAN ✦</text>
-  <text x="960" y="565" font-family="Arial,sans-serif" font-size="12" fill="#475569" text-anchor="middle">luminary-clan.onrender.com</text>
+  <rect x="990" y="380" width="160" height="100" rx="14" fill="#1a1740"/>
+  <text x="1070" y="418" font-family="Arial,sans-serif" font-size="13" fill="#94a3b8" text-anchor="middle">Участник с</text>
+  <text x="1070" y="450" font-family="Arial,sans-serif" font-size="18" fill="#c4b5fd" text-anchor="middle" font-weight="bold">${joinDate || '—'}</text>
+
+  <text x="600" y="540" font-family="Arial,Helvetica,sans-serif" font-size="22" fill="#6366f1" text-anchor="middle" font-weight="bold" opacity="0.6">LUMINARY CLAN</text>
+  <text x="600" y="565" font-family="Arial,sans-serif" font-size="12" fill="#475569" text-anchor="middle">luminary-clan.onrender.com/profile/${m.discordId}</text>
 </svg>`;
 
       res.setHeader("Content-Type", "image/png");
@@ -6825,8 +6835,27 @@ Requirements:
     { id: 'custom', name: 'Свой цвет', color: 'custom', price: 3000 },
   ];
 
+  // Animated gradient presets — cycle between colors in Discord
+  const GRADIENT_PRESETS = [
+    { id: 'grad-fire', name: '🔥 Огненный градиент', colors: ['#ff0000', '#ff8c00', '#ffff00'], price: 5000 },
+    { id: 'grad-ocean', name: '🌊 Океан', colors: ['#0077b6', '#00b4d8', '#90e0ef'], price: 5000 },
+    { id: 'grad-aurora', name: '🌌 Северное сияние', colors: ['#00ff87', '#60efff', '#ff00ff'], price: 7000 },
+    { id: 'grad-sunset', name: '🌅 Закат', colors: ['#ff006e', '#fb5607', '#ffbe0b'], price: 5000 },
+    { id: 'grad-neon', name: '💜 Неон', colors: ['#ff00ff', '#00ffff', '#ff00ff'], price: 6000 },
+    { id: 'grad-galaxy', name: '🪐 Галактика', colors: ['#667eea', '#764ba2', '#f093fb'], price: 8000 },
+    { id: 'grad-toxic', name: '☢️ Токсичный', colors: ['#39ff14', '#00ff00', '#adff2f', '#7fff00'], price: 6000 },
+    { id: 'grad-ice', name: '❄️ Ледяной градиент', colors: ['#a8edea', '#fed6e3', '#a8edea'], price: 5000 },
+    { id: 'grad-blood', name: '🩸 Кровавый', colors: ['#8b0000', '#ff0000', '#ff4444'], price: 6000 },
+    { id: 'grad-rainbow', name: '🌈 Радуга', colors: ['#ff0000', '#ff8800', '#ffff00', '#00ff00', '#0088ff', '#8800ff'], price: 10000 },
+    { id: 'grad-custom', name: '✨ Свой градиент', colors: [], price: 8000 },
+  ];
+
   app.get("/api/nickname-colors", (req, res) => {
     res.json(NICKNAME_COLOR_PRESETS);
+  });
+
+  app.get("/api/nickname-gradients", (req, res) => {
+    res.json(GRADIENT_PRESETS);
   });
 
   app.get("/api/nickname-colors/preview", requireDiscordAuth, async (req, res) => {
@@ -6870,7 +6899,8 @@ Requirements:
       const newBalance = (member.lumiCoins || 0) - preset.price;
       await storage.updateClanMember(member.id, { lumiCoins: newBalance });
 
-      // Apply Discord color role
+      // Apply Discord color role (and stop any active gradient)
+      removeAnimatedGradient(user.discordId);
       const result = await setNicknameColor(user.discordId, finalColor);
 
       // Log transaction
@@ -6892,6 +6922,82 @@ Requirements:
       res.json({ success: true, newBalance, color: finalColor, roleName: result.roleName });
     } catch (e: any) {
       console.error('nickname-color buy error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============ BUY ANIMATED GRADIENT NICKNAME ============
+  app.post("/api/nickname-gradients/buy", requireDiscordAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация через Discord" });
+
+      const { gradientId, customColors } = req.body;
+      if (!gradientId) return res.status(400).json({ error: "Укажите градиент" });
+
+      const preset = GRADIENT_PRESETS.find(p => p.id === gradientId);
+      if (!preset) return res.status(400).json({ error: "Неизвестный градиент" });
+
+      let colors = preset.colors;
+      if (gradientId === 'grad-custom') {
+        if (!Array.isArray(customColors) || customColors.length < 2 || customColors.length > 6) {
+          return res.status(400).json({ error: "Укажите от 2 до 6 HEX цветов" });
+        }
+        const hexRegex = /^#[0-9a-fA-F]{6}$/;
+        if (!customColors.every((c: unknown) => typeof c === 'string' && hexRegex.test(c))) {
+          return res.status(400).json({ error: "Все цвета должны быть в формате #RRGGBB" });
+        }
+        colors = customColors;
+      }
+
+      // Check balance
+      const member = await storage.getClanMemberByDiscordId(user.discordId);
+      if (!member) return res.status(404).json({ error: "Участник не найден" });
+      if ((member.lumiCoins || 0) < preset.price) {
+        return res.status(400).json({ error: `Недостаточно LumiCoins. Нужно: ${preset.price}, у вас: ${member.lumiCoins || 0}` });
+      }
+
+      // Deduct balance
+      const newBalance = (member.lumiCoins || 0) - preset.price;
+      await storage.updateClanMember(member.id, { lumiCoins: newBalance });
+
+      // Set the first color as the initial role color
+      const result = await setNicknameColor(user.discordId, colors[0]);
+
+      // Activate animated gradient cycling
+      addAnimatedGradient(user.discordId, colors);
+      startGradientCycler();
+
+      // Log transaction
+      const { transactions } = await import("@shared/schema");
+      await db.insert(transactions).values({
+        memberId: member.id,
+        discordId: user.discordId,
+        username: member.username || user.username,
+        amount: -preset.price,
+        type: 'purchase',
+        description: `Градиент никнейма: ${preset.name} (${colors.join(' → ')})`,
+      });
+
+      if (app.locals.broadcastSSE) {
+        app.locals.broadcastSSE('balance-update', { discordId: user.discordId, newBalance });
+      }
+
+      res.json({ success: true, newBalance, gradient: colors, roleName: result.roleName });
+    } catch (e: any) {
+      console.error('nickname-gradient buy error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Stop animated gradient (switch to static)
+  app.post("/api/nickname-gradients/stop", requireDiscordAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация через Discord" });
+      removeAnimatedGradient(user.discordId);
+      res.json({ success: true });
+    } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });

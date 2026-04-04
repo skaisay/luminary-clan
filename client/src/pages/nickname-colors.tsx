@@ -18,6 +18,13 @@ type ColorPreset = {
   price: number;
 };
 
+type GradientPreset = {
+  id: string;
+  name: string;
+  colors: string[];
+  price: number;
+};
+
 type DiscordPreview = {
   id: string;
   username: string;
@@ -37,9 +44,15 @@ export default function NicknameColorsPage() {
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [customColor, setCustomColor] = useState("#ff6b6b");
   const [previewColor, setPreviewColor] = useState<string | null>(null);
+  const [selectedGradient, setSelectedGradient] = useState<string | null>(null);
+  const [customGradientColors, setCustomGradientColors] = useState(["#ff0000", "#0000ff"]);
 
   const { data: colors, isLoading: colorsLoading } = useQuery<ColorPreset[]>({
     queryKey: ["/api/nickname-colors"],
+  });
+
+  const { data: gradients } = useQuery<GradientPreset[]>({
+    queryKey: ["/api/nickname-gradients"],
   });
 
   const { data: preview, isLoading: previewLoading } = useQuery<DiscordPreview>({
@@ -73,19 +86,68 @@ export default function NicknameColorsPage() {
     },
   });
 
+  const buyGradientMutation = useMutation({
+    mutationFn: async (data: { gradientId: string; customColors?: string[] }) => {
+      const res = await apiRequest("POST", "/api/nickname-gradients/buy", data);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({ title: "Градиент активирован! 🌈", description: `Ваш ник теперь переливается! Баланс: ${data.newBalance} LC` });
+      setSelectedGradient(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/nickname-colors/preview"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/shop/balance/${user?.discordId}`] });
+    },
+    onError: (e: any) => {
+      toast({ title: "Ошибка", description: e.message, variant: "destructive" });
+    },
+  });
+
   const currentPreset = colors?.find(c => c.id === selectedColor);
+  const currentGradient = gradients?.find(g => g.id === selectedGradient);
   const displayColor = previewColor || preview?.highestRoleColor || "#ffffff";
 
   useEffect(() => {
     if (selectedColor === "custom") {
       setPreviewColor(customColor);
+      setSelectedGradient(null);
     } else if (selectedColor) {
       const p = colors?.find(c => c.id === selectedColor);
       if (p) setPreviewColor(p.color);
-    } else {
+      setSelectedGradient(null);
+    } else if (!selectedGradient) {
       setPreviewColor(null);
     }
   }, [selectedColor, customColor, colors]);
+
+  // Animate preview color for gradients
+  useEffect(() => {
+    if (!selectedGradient || !gradients) return;
+    const grad = gradients.find(g => g.id === selectedGradient);
+    if (!grad) return;
+    setSelectedColor(null);
+
+    const gColors = selectedGradient === 'grad-custom' ? customGradientColors : grad.colors;
+    if (gColors.length < 2) return;
+
+    let step = 0;
+    const totalSteps = 20;
+    const interval = setInterval(() => {
+      const segments = gColors.length;
+      const progress = (step % totalSteps) / totalSteps;
+      const segFloat = progress * segments;
+      const segIdx = Math.floor(segFloat) % segments;
+      const t = segFloat - Math.floor(segFloat);
+      const c1 = gColors[segIdx];
+      const c2 = gColors[(segIdx + 1) % gColors.length];
+      // Interpolate
+      const r = Math.round(parseInt(c1.slice(1, 3), 16) + (parseInt(c2.slice(1, 3), 16) - parseInt(c1.slice(1, 3), 16)) * t);
+      const g = Math.round(parseInt(c1.slice(3, 5), 16) + (parseInt(c2.slice(3, 5), 16) - parseInt(c1.slice(3, 5), 16)) * t);
+      const b = Math.round(parseInt(c1.slice(5, 7), 16) + (parseInt(c2.slice(5, 7), 16) - parseInt(c1.slice(5, 7), 16)) * t);
+      setPreviewColor(`#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`);
+      step = (step + 1) % totalSteps;
+    }, 200);
+    return () => clearInterval(interval);
+  }, [selectedGradient, gradients, customGradientColors]);
 
   if (!isAuthenticated) {
     return (
@@ -378,6 +440,168 @@ export default function NicknameColorsPage() {
               </ul>
             </CardContent>
           </Card>
+
+          {/* Animated Gradient Section */}
+          <Card className="glass-card border-purple-500/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-purple-400" />
+                Переливающиеся градиенты
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Ник будет плавно менять цвет в реальном времени на сервере
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {gradients?.filter(g => g.id !== "grad-custom").map(grad => (
+                  <button
+                    key={grad.id}
+                    onClick={() => setSelectedGradient(grad.id)}
+                    className={`relative p-3 rounded-xl border-2 transition-all hover:scale-105 ${
+                      selectedGradient === grad.id
+                        ? "border-white shadow-lg shadow-white/20"
+                        : "border-transparent hover:border-white/20"
+                    }`}
+                    style={{
+                      background: `linear-gradient(135deg, ${grad.colors.join(', ')})`,
+                    }}
+                  >
+                    <div className="bg-black/40 rounded-lg p-2">
+                      <p className="text-sm font-medium text-white drop-shadow">
+                        {grad.name}
+                      </p>
+                      <p className="text-xs text-white/70 mt-0.5">
+                        {grad.price.toLocaleString()} LC
+                      </p>
+                    </div>
+                    {selectedGradient === grad.id && (
+                      <div className="absolute top-1 right-1">
+                        <Check className="w-4 h-4 text-white drop-shadow" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+
+                {/* Custom gradient */}
+                {gradients?.find(g => g.id === "grad-custom") && (
+                  <button
+                    onClick={() => setSelectedGradient("grad-custom")}
+                    className={`relative p-3 rounded-xl border-2 transition-all hover:scale-105 ${
+                      selectedGradient === "grad-custom"
+                        ? "border-white shadow-lg shadow-white/20"
+                        : "border-transparent hover:border-white/20"
+                    }`}
+                    style={{
+                      background: `linear-gradient(135deg, ${customGradientColors.join(', ')})`,
+                    }}
+                  >
+                    <div className="bg-black/40 rounded-lg p-2">
+                      <p className="text-sm font-medium text-white drop-shadow">
+                        ✨ Свой градиент
+                      </p>
+                      <p className="text-xs text-white/70 mt-0.5">
+                        {gradients.find(g => g.id === "grad-custom")?.price?.toLocaleString()} LC
+                      </p>
+                    </div>
+                    {selectedGradient === "grad-custom" && (
+                      <div className="absolute top-1 right-1">
+                        <Check className="w-4 h-4 text-white drop-shadow" />
+                      </div>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {/* Custom gradient color pickers */}
+              {selectedGradient === "grad-custom" && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-sm text-muted-foreground">Выберите цвета для градиента (2-6):</p>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {customGradientColors.map((c, i) => (
+                      <div key={i} className="flex items-center gap-1">
+                        <input
+                          type="color"
+                          value={c}
+                          onChange={(e) => {
+                            const newColors = [...customGradientColors];
+                            newColors[i] = e.target.value;
+                            setCustomGradientColors(newColors);
+                          }}
+                          className="w-8 h-8 rounded cursor-pointer border-0"
+                        />
+                        {customGradientColors.length > 2 && (
+                          <button
+                            onClick={() => setCustomGradientColors(customGradientColors.filter((_, idx) => idx !== i))}
+                            className="text-xs text-red-400 hover:text-red-300"
+                          >✕</button>
+                        )}
+                      </div>
+                    ))}
+                    {customGradientColors.length < 6 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCustomGradientColors([...customGradientColors, "#ffffff"])}
+                      >
+                        + Цвет
+                      </Button>
+                    )}
+                  </div>
+                  <div
+                    className="h-6 rounded-full mt-2"
+                    style={{ background: `linear-gradient(90deg, ${customGradientColors.join(', ')})` }}
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Buy Gradient Button */}
+          {selectedGradient && currentGradient && (
+            <Card className="glass-card border-purple-500/30">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-6 h-6 rounded-full"
+                      style={{
+                        background: `linear-gradient(135deg, ${
+                          selectedGradient === "grad-custom"
+                            ? customGradientColors.join(', ')
+                            : currentGradient.colors.join(', ')
+                        })`,
+                      }}
+                    />
+                    <span className="font-medium">{currentGradient.name}</span>
+                  </div>
+                  <Badge variant="secondary" className="text-base">
+                    <Coins className="w-4 h-4 mr-1" /> {currentGradient.price.toLocaleString()} LC
+                  </Badge>
+                </div>
+                <Button
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                  size="lg"
+                  disabled={buyGradientMutation.isPending}
+                  onClick={() => {
+                    buyGradientMutation.mutate({
+                      gradientId: selectedGradient,
+                      customColors: selectedGradient === "grad-custom" ? customGradientColors : undefined,
+                    });
+                  }}
+                >
+                  {buyGradientMutation.isPending ? (
+                    <><ShoppingBag className="w-5 h-5 mr-2 animate-pulse" /> Активируем...</>
+                  ) : (
+                    <><Sparkles className="w-5 h-5 mr-2" /> Купить градиент</>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  Цвет ника будет плавно переливаться между выбранными цветами каждые ~4 сек
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
