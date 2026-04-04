@@ -929,3 +929,14 @@ export const discordRestrictedUsers = pgTable("discord_restricted_users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Ping-protected users — cannot be @mentioned by other users
+export const pingProtectedUsers = pgTable("ping_protected_users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  protectedDiscordId: text("protected_discord_id").notNull(), // user who is protected
+  protectedUsername: text("protected_username").notNull(),
+  fromDiscordId: text("from_discord_id"), // null = protected from everyone, or specific user
+  fromUsername: text("from_username"),
+  addedBy: text("added_by"), // admin who added this rule
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+

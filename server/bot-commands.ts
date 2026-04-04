@@ -320,7 +320,8 @@ export async function setupDiscordBot() {
       GatewayIntentBits.GuildVoiceStates,
       GatewayIntentBits.GuildMessageReactions,
       GatewayIntentBits.DirectMessages,
-    ]
+    ],
+    partials: [0, 1, 2], // Channel, Message, Reaction — needed for messageUpdate on uncached messages
   });
 
   // Все команды бота
@@ -908,7 +909,7 @@ export async function setupDiscordBot() {
       const found = rows.find((r: any) => r.channelId === channelId);
       return found ? found.allowAutoMessages : false;
     } catch {
-      return true; // On error, allow (don't break bot)
+      return false; // On error, block (safety first)
     }
   }
 
@@ -1697,6 +1698,139 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
     }
   });
 
+  // ── MESSAGE EDIT MODERATION — catch censorship bypass via editing ──
+  client.on('messageUpdate', async (oldMessage: any, newMessage: any) => {
+    try {
+      if (!newMessage.author || newMessage.author.bot) return;
+      if (!newMessage.content || newMessage.content.trim().length === 0) return;
+      // If content didn't change, skip
+      if (oldMessage.content === newMessage.content) return;
+
+      const rules = await getChannelModerationRules(newMessage.channelId);
+      if (!rules) return;
+
+      // Fetch partial message if needed
+      if (newMessage.partial) {
+        try { await newMessage.fetch(); } catch { return; }
+      }
+
+      const checkViolations = await getCachedViolationChecker();
+      const violation = checkViolations(newMessage.content, {
+        languageRestriction: rules.languageRestriction,
+        blockProfanity: rules.blockProfanity,
+        blockDiscrimination: rules.blockDiscrimination,
+      });
+
+      if (!violation) return;
+
+      // Violation found in edited message
+      const escalation = recordViolation(newMessage.author.id);
+      const channelName = newMessage.channel && 'name' in newMessage.channel
+        ? (newMessage.channel as any).name : 'unknown';
+
+      console.log(`[MOD-EDIT] Caught edited violation by ${newMessage.author.username} in #${channelName}: ${violation.reason}`);
+
+      // Delete the edited message
+      if (rules.autoDelete) {
+        newMessage.delete().catch((err: any) => {
+          console.error(`[MOD-EDIT] Failed to delete: ${err.message}`);
+        });
+      }
+
+      // Warn user
+      const record = userViolations.get(newMessage.author.id);
+      if (record && Date.now() - record.lastWarning > WARN_COOLDOWN_MS) {
+        record.lastWarning = Date.now();
+        sendPrivateWarning(newMessage,
+          `Редактирование сообщения с нарушением правил. Это тоже модерируется.\nEditing messages to bypass rules is also moderated.`
+        );
+      }
+
+      // Timeout for repeat offenders
+      if (escalation.level === 'timeout' || escalation.level === 'timeout_long') {
+        const duration = escalation.level === 'timeout_long' ? TIMEOUT_ESCALATE_MS : TIMEOUT_DURATION_MS;
+        try {
+          const member = newMessage.member || await newMessage.guild?.members.fetch(newMessage.author.id).catch(() => null);
+          if (member && 'timeout' in member) {
+            await (member as any).timeout(duration, `Автомодерация: обход цензуры через редактирование`);
+          }
+        } catch {}
+      }
+
+      // Log to DB
+      db.insert(
+        (await import('@shared/schema')).flaggedMessages
+      ).values({
+        messageId: newMessage.id,
+        channelId: newMessage.channelId,
+        channelName,
+        authorId: newMessage.author.id,
+        authorUsername: newMessage.author.username,
+        content: newMessage.content.substring(0, 500),
+        reason: violation.reason + ' (edited)',
+        reasonDetail: violation.reasonDetail,
+        status: rules.autoDelete ? 'deleted' : 'pending',
+        messageTimestamp: newMessage.editedAt || new Date(),
+      }).catch(() => {});
+
+    } catch (err: any) {
+      console.error('[MOD-EDIT] Error:', err.message);
+    }
+  });
+
+  // ── PING PROTECTION — prevent users from @mentioning protected users ──
+  let _pingProtectCache: { rules: any[]; ts: number } | null = null;
+  async function getPingProtectedUsers(): Promise<any[]> {
+    try {
+      if (!_pingProtectCache || Date.now() - _pingProtectCache.ts > 30_000) {
+        const { db: database } = await import('./db');
+        const { pingProtectedUsers } = await import('@shared/schema');
+        const rules = await database.select().from(pingProtectedUsers);
+        _pingProtectCache = { rules, ts: Date.now() };
+      }
+      return _pingProtectCache.rules;
+    } catch {
+      return [];
+    }
+  }
+  // Allow external cache invalidation
+  (globalThis as any).__invalidatePingProtectCache = () => { _pingProtectCache = null; };
+
+  client.on('messageCreate', async (message: any) => {
+    try {
+      if (message.author?.bot) return;
+      if (!message.mentions?.users?.size) return;
+
+      const protectedRules = await getPingProtectedUsers();
+      if (protectedRules.length === 0) return;
+
+      const mentionedIds = [...message.mentions.users.keys()];
+      for (const mentionedId of mentionedIds) {
+        // Check if this mentioned user is protected
+        const rule = protectedRules.find((r: any) => {
+          if (r.protectedDiscordId !== mentionedId) return false;
+          // If fromDiscordId is null, protected from everyone
+          if (!r.fromDiscordId) return true;
+          // If fromDiscordId matches message author, this specific user is blocked
+          return r.fromDiscordId === message.author.id;
+        });
+
+        if (rule) {
+          // Delete the message containing the forbidden ping
+          await message.delete().catch(() => {});
+          // Warn the user
+          sendPrivateWarning(message,
+            `Вам запрещено пинговать этого пользователя (@${rule.protectedUsername}).\nYou are not allowed to mention this user (@${rule.protectedUsername}).`
+          );
+          console.log(`[PING-PROTECT] Blocked ${message.author.username} from pinging ${rule.protectedUsername}`);
+          return; // Message already deleted, stop processing
+        }
+      }
+    } catch (err: any) {
+      console.error('[PING-PROTECT] Error:', err.message);
+    }
+  });
+
   /**
    * Maybe send a mystical joke response (2% chance, 2min cooldown).
    */
@@ -2141,45 +2275,21 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
       const guild = client.guilds.cache.first();
       if (!guild) return;
 
-      // Check DB for allowed channels — STRICT
-      let allowedChannelIds: Set<string> | null = null;
-      try {
-        const { db } = await import('./db');
-        const { botChannelPermissions } = await import('@shared/schema');
-        const rows = await db.select().from(botChannelPermissions);
-        if (rows.length > 0) {
-          // DB has channel permission rows — use them strictly
-          const enabledRows = rows.filter(r => r.allowAutoMessages);
-          allowedChannelIds = new Set(enabledRows.map(r => r.channelId));
-          console.log(`[AUTO-MSG] DB: ${rows.length} rows, ${enabledRows.length} enabled channels`);
-          // If all channels disabled → empty set → bot won't auto-message anywhere
-        } else {
-          console.log('[AUTO-MSG] No DB rows, using name-based fallback filter');
-        }
-        // If no rows at all → allowedChannelIds stays null → use fallback
-      } catch (err: any) {
-        console.error('[AUTO-MSG] DB check failed, using fallback filter:', err.message);
-      }
+      // Find suitable channels using the shared isChannelAllowedForBot check
+      const allTextChannels = guild.channels.cache.filter((ch: any) => ch.type === 0);
+      const allowedChecks = await Promise.all(
+        allTextChannels.map(async (ch: any) => ({ ch, allowed: await isChannelAllowedForBot(ch.id) }))
+      );
+      const textChannels = allowedChecks.filter(c => c.allowed).map(c => c.ch);
 
-      // Find suitable channels
-      const textChannels = guild.channels.cache.filter((ch: any) => {
-        if (ch.type !== 0) return false; // 0 = GUILD_TEXT
-        // If DB has explicit permissions, use them
-        if (allowedChannelIds) return allowedChannelIds.has(ch.id);
-        // Fallback: exclude bot/rules/admin channels by name
-        const name = ch.name.toLowerCase();
-        if (name.includes('rule') || name.includes('правил') || name.includes('log') || name.includes('admin') || name.includes('бот') || name.includes('bot-command') || name.includes('модер')) return false;
-        return true;
-      });
-
-      if (textChannels.size === 0) return;
+      if (textChannels.length === 0) return;
 
       // Find the channel with the LONGEST inactivity (or random if no tracking data)
       let targetChannel: any = null;
       let longestInactive = 0;
 
-      for (const [id, ch] of textChannels) {
-        const lastActive = lastChannelActivity.get(id) || 0;
+      for (const ch of textChannels) {
+        const lastActive = lastChannelActivity.get(ch.id) || 0;
         const inactiveMs = Date.now() - lastActive;
         // Only target channels that have been inactive for 15+ minutes
         if (inactiveMs > 15 * 60 * 1000 && inactiveMs > longestInactive) {
@@ -2191,7 +2301,7 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
       // If no channel has been inactive long enough, skip
       if (!targetChannel) return;
 
-      // Pick a useful message (no mention spam)
+      // Pick a useful message
       let messageText = autoMessages[Math.floor(Math.random() * autoMessages.length)];
 
       // 25% chance: generate AI-powered content (news, tips, ideas)
@@ -2205,6 +2315,22 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
           }
         } catch {}
       }
+
+      // 40% chance: ping a random online member to make the message more engaging
+      try {
+        if (Math.random() < 0.4) {
+          const members = await guild.members.fetch({ withPresences: true }).catch(() => null);
+          if (members) {
+            const onlineHumans = members.filter((m: any) => !m.user.bot && m.presence?.status && m.presence.status !== 'offline');
+            if (onlineHumans.size > 0) {
+              const randomMember = onlineHumans.random();
+              if (randomMember) {
+                messageText = `<@${randomMember.id}> ${messageText}`;
+              }
+            }
+          }
+        }
+      } catch {}
 
       await targetChannel.send(messageText);
       autoMessageCooldown = Date.now();

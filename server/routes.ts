@@ -1858,6 +1858,61 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     }
   });
 
+  // ==================== PING PROTECTION ====================
+  app.get("/api/admin/discord/ping-protection", requireAdmin, async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { pingProtectedUsers } = await import("@shared/schema");
+      const rules = await db.select().from(pingProtectedUsers);
+      res.json(rules);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/discord/ping-protection", requireAdmin, async (req, res) => {
+    try {
+      const { protectedDiscordId, protectedUsername, fromDiscordId, fromUsername } = req.body;
+      if (!protectedDiscordId || !protectedUsername) {
+        return res.status(400).json({ error: "protectedDiscordId and protectedUsername are required" });
+      }
+      const { db } = await import("./db");
+      const { pingProtectedUsers } = await import("@shared/schema");
+      await db.insert(pingProtectedUsers).values({
+        protectedDiscordId,
+        protectedUsername,
+        fromDiscordId: fromDiscordId || null,
+        fromUsername: fromUsername || null,
+        addedBy: (req as any).admin?.username || 'admin',
+      });
+      // Invalidate bot cache
+      if (typeof (globalThis as any).__invalidatePingProtectCache === 'function') {
+        (globalThis as any).__invalidatePingProtectCache();
+      }
+      const rules = await db.select().from(pingProtectedUsers);
+      res.json({ success: true, rules });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/admin/discord/ping-protection/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { db } = await import("./db");
+      const { pingProtectedUsers } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.delete(pingProtectedUsers).where(eq(pingProtectedUsers.id, id));
+      // Invalidate bot cache
+      if (typeof (globalThis as any).__invalidatePingProtectCache === 'function') {
+        (globalThis as any).__invalidatePingProtectCache();
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/admin/discord/create-test-roles", requireAdmin, async (req, res) => {
     try {
       const result = await createBeautifulTestRoles();

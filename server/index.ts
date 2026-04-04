@@ -236,6 +236,15 @@ app.use((req, res, next) => {
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS ping_protected_users (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        protected_discord_id TEXT NOT NULL,
+        protected_username TEXT NOT NULL,
+        from_discord_id TEXT,
+        from_username TEXT,
+        added_by TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
     `);
     console.log('[DB] Ensured all custom tables exist');
 

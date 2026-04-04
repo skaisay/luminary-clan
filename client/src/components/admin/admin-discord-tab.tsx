@@ -107,6 +107,11 @@ export default function AdminDiscordTab() {
   const [softBanReason, setSoftBanReason] = useState("");
   const [softBanSearch, setSoftBanSearch] = useState("");
 
+  // Ping protection state
+  const [pingProtectTarget, setPingProtectTarget] = useState("");
+  const [pingProtectFrom, setPingProtectFrom] = useState("");
+  const [pingProtectSearch, setPingProtectSearch] = useState("");
+
   const { data: channels, isLoading: channelsLoading, error: channelsError } = useQuery<DiscordChannel[]>({
     queryKey: ["/api/admin/discord/channels"],
     retry: false,
@@ -457,6 +462,46 @@ export default function AdminDiscordTab() {
     },
   });
 
+  // Ping protection
+  const { data: pingProtectRules } = useQuery<any[]>({
+    queryKey: ["/api/admin/discord/ping-protection"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/discord/ping-protection", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const addPingProtectMutation = useMutation({
+    mutationFn: async (data: { protectedDiscordId: string; protectedUsername: string; fromDiscordId?: string; fromUsername?: string }) => {
+      const res = await apiRequest("POST", "/api/admin/discord/ping-protection", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Защита от пинга добавлена!" });
+      setPingProtectTarget("");
+      setPingProtectFrom("");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/ping-protection"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Ошибка", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const removePingProtectMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/discord/ping-protection/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Защита снята" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/discord/ping-protection"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Ошибка", description: error.message, variant: "destructive" });
+    },
+  });
+
   // Channel creation
   const createChannelMutation = useMutation({
     mutationFn: async (data: { name: string; type: string; category?: string; topic?: string; allowedRoleIds?: string[] }) => {
@@ -691,6 +736,10 @@ export default function AdminDiscordTab() {
           <TabsTrigger value="soft-ban" className="gap-1.5">
             <Ban className="w-4 h-4" />
             Ограничения
+          </TabsTrigger>
+          <TabsTrigger value="ping-protect" className="gap-1.5">
+            <Shield className="w-4 h-4" />
+            Анти-пинг
           </TabsTrigger>
           <TabsTrigger value="roles-manage" className="gap-1.5">
             <Crown className="w-4 h-4" />
@@ -1855,6 +1904,131 @@ export default function AdminDiscordTab() {
                   <p className="text-sm">Нет ограниченных участников</p>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ============ PING PROTECTION TAB ============ */}
+        <TabsContent value="ping-protect" className="mt-6 space-y-4">
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-blue-400" />
+                Защита от пингов (@mention)
+              </CardTitle>
+              <CardDescription>
+                Запретите определённым пользователям пинговать (@) других. Бот автоматически удалит сообщение с запрещённым пингом и предупредит нарушителя.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Select who to protect */}
+              <div className="space-y-2">
+                <Label>🛡️ Кого защитить от пингов</Label>
+                <Input
+                  placeholder="Поиск по имени..."
+                  value={pingProtectSearch}
+                  onChange={(e) => setPingProtectSearch(e.target.value)}
+                />
+                {membersLoading ? (
+                  <Skeleton className="h-32 w-full" />
+                ) : (
+                  <div className="max-h-[200px] overflow-y-auto space-y-1">
+                    {members?.filter(m => {
+                      if (!pingProtectSearch.trim()) return true;
+                      return m.username.toLowerCase().includes(pingProtectSearch.toLowerCase()) || m.id.includes(pingProtectSearch);
+                    }).map((member) => (
+                      <div
+                        key={member.id}
+                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
+                          pingProtectTarget === member.id
+                            ? 'bg-blue-500/20 border border-blue-500/50'
+                            : 'glass glass-border hover:bg-white/5'
+                        }`}
+                        onClick={() => setPingProtectTarget(member.id)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <img src={member.avatar} alt="" className="w-6 h-6 rounded-full" />
+                          <span className="text-sm">{member.username}</span>
+                          <span className="text-xs text-muted-foreground">{member.id}</span>
+                        </div>
+                        {pingProtectTarget === member.id && <CheckCircle className="w-4 h-4 text-blue-400" />}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Select who is blocked from pinging (optional) */}
+              <div className="space-y-2">
+                <Label>🚫 Кому запретить пинговать (оставьте пустым = запрет для ВСЕХ)</Label>
+                <Select value={pingProtectFrom} onValueChange={setPingProtectFrom}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Все пользователи (запрет для всех)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все пользователи</SelectItem>
+                    {members?.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>{m.username} ({m.id})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Button
+                className="w-full"
+                disabled={!pingProtectTarget || addPingProtectMutation.isPending}
+                onClick={() => {
+                  const targetMember = members?.find(m => m.id === pingProtectTarget);
+                  if (!targetMember) return;
+                  const fromMember = pingProtectFrom && pingProtectFrom !== 'all'
+                    ? members?.find(m => m.id === pingProtectFrom) : undefined;
+                  addPingProtectMutation.mutate({
+                    protectedDiscordId: targetMember.id,
+                    protectedUsername: targetMember.username,
+                    fromDiscordId: fromMember?.id,
+                    fromUsername: fromMember?.username,
+                  });
+                }}
+              >
+                {addPingProtectMutation.isPending ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Сохранение...</>
+                ) : (
+                  <><Shield className="w-4 h-4 mr-2" /> Добавить защиту</>
+                )}
+              </Button>
+
+              {/* Current rules list */}
+              <div className="space-y-2 mt-4">
+                <Label>📋 Активные правила защиты</Label>
+                {(!pingProtectRules || pingProtectRules.length === 0) ? (
+                  <p className="text-sm text-muted-foreground">Нет активных правил защиты от пингов.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {pingProtectRules.map((rule: any) => (
+                      <div
+                        key={rule.id}
+                        className="flex items-center justify-between p-2 rounded-lg glass glass-border"
+                      >
+                        <div className="text-sm">
+                          <span className="text-blue-400 font-medium">@{rule.protectedUsername}</span>
+                          <span className="text-muted-foreground mx-1">защищён от</span>
+                          <span className="text-red-400 font-medium">
+                            {rule.fromUsername ? `@${rule.fromUsername}` : 'всех'}
+                          </span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removePingProtectMutation.mutate(rule.id)}
+                          disabled={removePingProtectMutation.isPending}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-400" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
