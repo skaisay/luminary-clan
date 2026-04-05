@@ -474,17 +474,28 @@ function getGradientColor(colors: string[], step: number, totalSteps: number): s
 }
 
 let gradientInterval: ReturnType<typeof setInterval> | null = null;
+let gradientErrorCount = 0;
 
 /** Start the gradient cycling interval */
 export function startGradientCycler() {
   if (gradientInterval) return;
-  // Cycle every 4 seconds — Discord rate limit is ~2 role edits/sec
+  console.log('[GRADIENT] Starting gradient cycler');
+  // Cycle every 5 seconds — safe for Discord rate limits (~2 role edits/sec)
   gradientInterval = setInterval(async () => {
     if (animatedGradients.size === 0) return;
     const client = getSharedBot();
-    if (!client) return;
+    if (!client || !client.isReady()) {
+      // Bot disconnected — don't log every tick, just count
+      gradientErrorCount++;
+      if (gradientErrorCount % 30 === 1) {
+        console.warn(`[GRADIENT] Bot not ready, skipping (${gradientErrorCount} skips total)`);
+      }
+      return;
+    }
     const guild = getGuild(client);
     if (!guild) return;
+
+    gradientErrorCount = 0; // Reset on success
 
     for (const [discordId, grad] of animatedGradients) {
       try {
@@ -501,11 +512,21 @@ export function startGradientCycler() {
         const role = guild.roles.cache.find(r => r.name === colorRoleName);
         if (role) {
           const colorInt = parseInt(newColor.replace('#', ''), 16);
-          await role.edit({ color: colorInt }).catch(() => {});
+          await role.edit({ color: colorInt }).catch((err: any) => {
+            if (err?.status === 429) {
+              console.warn(`[GRADIENT] Rate limited for ${discordId}, will retry next tick`);
+            }
+          });
         }
-      } catch {}
+        // Small delay between users to avoid rate limits
+        if (animatedGradients.size > 1) {
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      } catch (err: any) {
+        console.error(`[GRADIENT] Error cycling ${discordId}:`, err.message);
+      }
     }
-  }, 4000);
+  }, 5000);
 }
 
 /** Add an animated gradient for a user (+ persist to DB) */

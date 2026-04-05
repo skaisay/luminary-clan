@@ -10,6 +10,7 @@ import { Coins, Palette, Check, ShoppingBag, LogIn, Sparkles, Crown } from "luci
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocation } from "wouter";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 type ColorPreset = {
   id: string;
@@ -40,6 +41,7 @@ type DiscordPreview = {
 export default function NicknameColorsPage() {
   const { toast } = useToast();
   const { isAuthenticated, user } = useAuth();
+  const { t } = useLanguage();
   const [, setLocation] = useLocation();
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [customColor, setCustomColor] = useState("#ff6b6b");
@@ -65,7 +67,7 @@ export default function NicknameColorsPage() {
     },
   });
 
-  const { data: balance } = useQuery<{ lumiCoins: number }>({
+  const { data: balance } = useQuery<{ balance: number }>({
     queryKey: [`/api/shop/balance/${user?.discordId}`],
     enabled: !!user?.discordId,
   });
@@ -76,13 +78,13 @@ export default function NicknameColorsPage() {
       return res.json();
     },
     onSuccess: (data: any) => {
-      toast({ title: "Цвет никнейма применён! 🎨", description: `Новый баланс: ${data.newBalance} LC` });
+      toast({ title: t('nicknameColors.colorApplied', 'Цвет никнейма применён! 🎨'), description: `${t('nicknameColors.newBalance', 'Новый баланс')}: ${data.newBalance} LC` });
       setSelectedColor(null);
       queryClient.invalidateQueries({ queryKey: ["/api/nickname-colors/preview"] });
       queryClient.invalidateQueries({ queryKey: [`/api/shop/balance/${user?.discordId}`] });
     },
     onError: (e: any) => {
-      toast({ title: "Ошибка", description: e.message, variant: "destructive" });
+      toast({ title: t('nicknameColors.error', 'Ошибка'), description: e.message, variant: "destructive" });
     },
   });
 
@@ -92,13 +94,13 @@ export default function NicknameColorsPage() {
       return res.json();
     },
     onSuccess: (data: any) => {
-      toast({ title: "Градиент активирован! 🌈", description: `Ваш ник теперь переливается! Баланс: ${data.newBalance} LC` });
+      toast({ title: t('nicknameColors.gradientActivated', 'Градиент активирован! 🌈'), description: `${t('nicknameColors.nickShimmers', 'Ваш ник теперь переливается!')} ${t('nicknameColors.newBalance', 'Баланс')}: ${data.newBalance} LC` });
       setSelectedGradient(null);
       queryClient.invalidateQueries({ queryKey: ["/api/nickname-colors/preview"] });
       queryClient.invalidateQueries({ queryKey: [`/api/shop/balance/${user?.discordId}`] });
     },
     onError: (e: any) => {
-      toast({ title: "Ошибка", description: e.message, variant: "destructive" });
+      toast({ title: t('nicknameColors.error', 'Ошибка'), description: e.message, variant: "destructive" });
     },
   });
 
@@ -153,10 +155,10 @@ export default function NicknameColorsPage() {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <Palette className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-        <h2 className="text-2xl font-bold mb-2">Магазин цветов никнейма</h2>
-        <p className="text-muted-foreground mb-6">Войдите через Discord, чтобы купить цвет</p>
+        <h2 className="text-2xl font-bold mb-2">{t('nicknameColors.shopTitle', 'Магазин цветов никнейма')}</h2>
+        <p className="text-muted-foreground mb-6">{t('nicknameColors.loginPrompt', 'Войдите через Discord, чтобы купить цвет')}</p>
         <Button onClick={() => setLocation("/login")} size="lg">
-          <LogIn className="w-5 h-5 mr-2" /> Войти
+          <LogIn className="w-5 h-5 mr-2" /> {t('nicknameColors.login', 'Войти')}
         </Button>
       </div>
     );
@@ -167,14 +169,14 @@ export default function NicknameColorsPage() {
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold flex items-center justify-center gap-3">
           <Palette className="w-8 h-8" />
-          Цвет никнейма
+          {t('nicknameColors.title', 'Цвет никнейма')}
         </h1>
         <p className="text-muted-foreground mt-2">
-          Выбери цвет для своего никнейма в Discord — он будет виден всем на сервере
+          {t('nicknameColors.subtitle', 'Выбери цвет для своего никнейма в Discord — он будет виден всем на сервере')}
         </p>
         {balance && (
           <Badge variant="outline" className="mt-3 text-base px-4 py-1">
-            <Coins className="w-4 h-4 mr-1" /> {balance.lumiCoins?.toLocaleString() || 0} LC
+            <Coins className="w-4 h-4 mr-1" /> {(balance.balance ?? 0).toLocaleString()} LC
           </Badge>
         )}
       </div>
@@ -248,9 +250,9 @@ export default function NicknameColorsPage() {
 
                 {/* About section */}
                 <div>
-                  <h4 className="text-xs font-bold text-[#b5bac1] uppercase mb-1">О себе</h4>
+                  <h4 className="text-xs font-bold text-[#b5bac1] uppercase mb-1">{t('nicknameColors.aboutMe', 'О себе')}</h4>
                   <p className="text-sm text-[#dbdee1]">
-                    Участник клана Luminary ✨
+                    {t('nicknameColors.memberOf', 'Участник клана Luminary ✨')}
                   </p>
                 </div>
 
@@ -258,7 +260,7 @@ export default function NicknameColorsPage() {
                 {preview?.roles && preview.roles.length > 0 && (
                   <div>
                     <h4 className="text-xs font-bold text-[#b5bac1] uppercase mb-2">
-                      Роли — {preview.roles.length}
+                      {t('nicknameColors.roles', 'Роли')} — {preview.roles.length}
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {preview.roles.map(r => (
@@ -287,7 +289,7 @@ export default function NicknameColorsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5" />
-                Выберите цвет
+                {t('nicknameColors.chooseColor', 'Выберите цвет')}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -347,7 +349,7 @@ export default function NicknameColorsPage() {
                         />
                       </div>
                       <p className="text-sm font-medium" style={{ color: customColor }}>
-                        Свой цвет
+                        {t('nicknameColors.customColor', 'Свой цвет')}
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {colors.find(c => c.id === "custom")?.price} LC
@@ -379,7 +381,7 @@ export default function NicknameColorsPage() {
                     className="w-10 h-10 rounded-full border"
                     style={{ backgroundColor: customColor }}
                   />
-                  <span className="text-sm text-muted-foreground">HEX код вашего цвета</span>
+                  <span className="text-sm text-muted-foreground">{t('nicknameColors.hexCode', 'HEX код вашего цвета')}</span>
                 </div>
               )}
             </CardContent>
@@ -416,9 +418,9 @@ export default function NicknameColorsPage() {
                   }}
                 >
                   {buyMutation.isPending ? (
-                    <><ShoppingBag className="w-5 h-5 mr-2 animate-pulse" /> Применяем...</>
+                    <><ShoppingBag className="w-5 h-5 mr-2 animate-pulse" /> {t('nicknameColors.applying', 'Применяем...')}</>
                   ) : (
-                    <><Crown className="w-5 h-5 mr-2" /> Купить цвет</>
+                    <><Crown className="w-5 h-5 mr-2" /> {t('nicknameColors.buyColor', 'Купить цвет')}</>
                   )}
                 </Button>
               </CardContent>
@@ -429,14 +431,14 @@ export default function NicknameColorsPage() {
           <Card className="glass-card">
             <CardContent className="p-4">
               <h3 className="font-medium mb-2 flex items-center gap-2">
-                <Sparkles className="w-4 h-4" /> Как это работает?
+                <Sparkles className="w-4 h-4" /> {t('nicknameColors.howItWorks', 'Как это работает?')}
               </h3>
               <ul className="text-sm text-muted-foreground space-y-1.5">
-                <li>• Выбранный цвет станет цветом вашего никнейма в Discord</li>
-                <li>• Бот создаёт персональную цветовую роль</li>
-                <li>• Цвет виден всем участникам сервера</li>
-                <li>• Можно менять цвет в любое время (за LC)</li>
-                <li>• Свой цвет — любой HEX-код на ваш вкус</li>
+                <li>• {t('nicknameColors.info1', 'Выбранный цвет станет цветом вашего никнейма в Discord')}</li>
+                <li>• {t('nicknameColors.info2', 'Бот создаёт персональную цветовую роль')}</li>
+                <li>• {t('nicknameColors.info3', 'Цвет виден всем участникам сервера')}</li>
+                <li>• {t('nicknameColors.info4', 'Можно менять цвет в любое время (за LC)')}</li>
+                <li>• {t('nicknameColors.info5', 'Свой цвет — любой HEX-код на ваш вкус')}</li>
               </ul>
             </CardContent>
           </Card>
@@ -446,10 +448,10 @@ export default function NicknameColorsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-purple-400" />
-                Переливающиеся градиенты
+                {t('nicknameColors.gradientsTitle', 'Переливающиеся градиенты')}
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Ник будет плавно менять цвет в реальном времени на сервере
+                {t('nicknameColors.gradientsSubtitle', 'Ник будет плавно менять цвет в реальном времени на сервере')}
               </p>
             </CardHeader>
             <CardContent>
@@ -498,7 +500,7 @@ export default function NicknameColorsPage() {
                   >
                     <div className="bg-black/40 rounded-lg p-2">
                       <p className="text-sm font-medium text-white drop-shadow">
-                        ✨ Свой градиент
+                        ✨ {t('nicknameColors.customGradient', 'Свой градиент')}
                       </p>
                       <p className="text-xs text-white/70 mt-0.5">
                         {gradients.find(g => g.id === "grad-custom")?.price?.toLocaleString()} LC
@@ -516,7 +518,7 @@ export default function NicknameColorsPage() {
               {/* Custom gradient color pickers */}
               {selectedGradient === "grad-custom" && (
                 <div className="mt-4 space-y-2">
-                  <p className="text-sm text-muted-foreground">Выберите цвета для градиента (2-6):</p>
+                  <p className="text-sm text-muted-foreground">{t('nicknameColors.chooseGradientColors', 'Выберите цвета для градиента (2-6):')}:</p>
                   <div className="flex flex-wrap gap-2 items-center">
                     {customGradientColors.map((c, i) => (
                       <div key={i} className="flex items-center gap-1">
@@ -544,7 +546,7 @@ export default function NicknameColorsPage() {
                         size="sm"
                         onClick={() => setCustomGradientColors([...customGradientColors, "#ffffff"])}
                       >
-                        + Цвет
+                        + {t('nicknameColors.addColor', 'Цвет')}
                       </Button>
                     )}
                   </div>
@@ -591,13 +593,13 @@ export default function NicknameColorsPage() {
                   }}
                 >
                   {buyGradientMutation.isPending ? (
-                    <><ShoppingBag className="w-5 h-5 mr-2 animate-pulse" /> Активируем...</>
+                    <><ShoppingBag className="w-5 h-5 mr-2 animate-pulse" /> {t('nicknameColors.activating', 'Активируем...')}</>
                   ) : (
-                    <><Sparkles className="w-5 h-5 mr-2" /> Купить градиент</>
+                    <><Sparkles className="w-5 h-5 mr-2" /> {t('nicknameColors.buyGradient', 'Купить градиент')}</>
                   )}
                 </Button>
                 <p className="text-xs text-muted-foreground mt-2 text-center">
-                  Цвет ника будет плавно переливаться между выбранными цветами каждые ~4 сек
+                  {t('nicknameColors.gradientInfo', 'Цвет ника будет плавно переливаться между выбранными цветами каждые ~4 сек')}
                 </p>
               </CardContent>
             </Card>
