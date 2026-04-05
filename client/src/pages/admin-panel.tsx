@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Shield, Settings, Users, Newspaper, BarChart3, Activity, LogOut, Loader2, Hash, Store, Coins, FileText, Ban, Sparkles, Globe } from "lucide-react";
+import { Shield, Settings, Users, Newspaper, BarChart3, Activity, LogOut, Loader2, Hash, Store, Coins, FileText, Ban, Sparkles, Globe, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import AdminCoinMonitoring from "@/pages/admin-coin-monitoring";
 import AdminSiteBans from "@/pages/admin-site-bans";
 import AdminDecorationsTab from "@/components/admin/admin-decorations-tab";
 import AdminServersTab from "@/components/admin/admin-servers-tab";
+import AdminModeration from "@/pages/admin-moderation";
 
 export default function AdminPanel() {
   const [, navigate] = useLocation();
@@ -137,6 +138,10 @@ export default function AdminPanel() {
               <Coins className="w-4 h-4" />
               <span className="hidden sm:inline">Транзакции</span>
             </TabsTrigger>
+            <TabsTrigger value="moderation" className="gap-2" data-testid="tab-moderation">
+              <ShieldAlert className="w-4 h-4" />
+              <span className="hidden sm:inline">Модерация</span>
+            </TabsTrigger>
             <TabsTrigger value="bans" className="gap-2" data-testid="tab-bans">
               <Ban className="w-4 h-4" />
               <span className="hidden sm:inline">Баны</span>
@@ -191,6 +196,10 @@ export default function AdminPanel() {
 
           <TabsContent value="transactions">
             <AdminCoinMonitoring />
+          </TabsContent>
+
+          <TabsContent value="moderation">
+            <AdminModeration />
           </TabsContent>
 
           <TabsContent value="bans">

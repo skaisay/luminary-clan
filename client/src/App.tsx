@@ -30,6 +30,7 @@ import AdminPanel from "@/pages/admin-panel";
 import AdminMonitoring from "@/pages/admin-monitoring";
 import AdminCoinMonitoring from "@/pages/admin-coin-monitoring";
 import AdminSiteBans from "@/pages/admin-site-bans";
+import AdminModeration from "@/pages/admin-moderation";
 import { VideoPlatformLayout } from "@/components/video-platform/VideoPlatformLayout";
 import VideoPlatformHome from "@/pages/video-platform/VideoPlatformHome";
 import VideoUpload from "@/pages/video-platform/VideoUpload";
@@ -95,6 +96,7 @@ function AdminRouter() {
       <Route path="/admin/monitoring" component={AdminMonitoring} />
       <Route path="/admin/coin-monitoring" component={AdminCoinMonitoring} />
       <Route path="/admin/site-bans" component={AdminSiteBans} />
+      <Route path="/admin/moderation" component={AdminModeration} />
       <Route path="/admin" component={AdminPanel} />
       <Route component={AdminLogin} />
     </Switch>

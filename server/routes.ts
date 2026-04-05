@@ -2180,6 +2180,50 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     }
   });
 
+  // ==================== MUTE MANAGEMENT (Admin Panel) ====================
+
+  // Get all currently muted users
+  app.get("/api/admin/discord/muted-users", requireAdmin, async (req, res) => {
+    try {
+      const { getMutedUsers } = await import("./bot-commands");
+      const muted = await getMutedUsers();
+      res.json(muted);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Unmute a user from admin panel
+  app.post("/api/admin/discord/unmute", requireAdmin, async (req, res) => {
+    try {
+      const { discordId } = req.body;
+      if (!discordId) {
+        return res.status(400).json({ error: "discordId обязателен" });
+      }
+      const { webUnmuteUser } = await import("./bot-commands");
+      const result = await webUnmuteUser(discordId);
+      if (!result.success) {
+        return res.status(400).json({ error: result.message });
+      }
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get full moderation log (all flagged messages, not just pending)
+  app.get("/api/admin/discord/moderation-log", requireAdmin, async (req, res) => {
+    try {
+      const { desc: descOrder } = await import("drizzle-orm");
+      const messages = await db.select().from(flaggedMessages)
+        .orderBy(descOrder(flaggedMessages.createdAt))
+        .limit(500);
+      res.json(messages);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ==================== BOT AUTO-RESPONSES ====================
 
   // Get all auto-responses

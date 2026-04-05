@@ -937,6 +937,18 @@ export const activeGradients = pgTable("active_gradients", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Muted admin roles — stores roles stripped during mute for privileged users
+// When a privileged user (Admin, etc.) is muted, their admin roles are temporarily removed
+// and restored automatically when the mute expires. Rules are equal for everyone.
+export const discordMutedAdminRoles = pgTable("discord_muted_admin_roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  discordId: text("discord_id").notNull().unique(), // Discord user ID
+  removedRoleIds: text("removed_role_ids").notNull(), // JSON array of role IDs that were stripped
+  muteExpiresAt: timestamp("mute_expires_at").notNull(), // when mute expires and roles should be restored
+  reason: text("reason"), // why they were muted
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Ping-protected users — cannot be @mentioned by other users
 export const pingProtectedUsers = pgTable("ping_protected_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

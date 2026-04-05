@@ -1,9 +1,9 @@
 import { Client, GatewayIntentBits, SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, PermissionFlagsBits, GuildMember, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes } from 'discord.js';
 import { storage } from './storage';
 import { db } from './db';
-import { discordActivity, clanMembers, transactions, shopItems, discordChannelRules } from '@shared/schema';
-import { eq } from 'drizzle-orm';
-import { restoreGradientsFromDB } from './discord';
+import { discordActivity, clanMembers, transactions, shopItems, discordChannelRules, discordMutedAdminRoles } from '@shared/schema';
+import { eq, lt } from 'drizzle-orm';
+import { restoreGradientsFromDB, getOrCreateRestrictedRole, RESTRICTED_ROLE_NAME } from './discord';
 
 // Try to import music system - optional if modules not installed
 let music: any = null;
@@ -77,18 +77,330 @@ const WARN_COOLDOWN_MS = 5000;     // min 5s between warnings to same user
 // Escalating timeout durations: violation count → timeout duration
 // Every violation = mute. More violations = longer mute.
 const TIMEOUT_DURATIONS: { minViolations: number; durationMs: number; label: string }[] = [
-  { minViolations: 10, durationMs: 86400000, label: '24 часа' },    // 10+ → 24h
-  { minViolations: 7,  durationMs: 7200000,  label: '2 часа' },     // 7-9 → 2h
-  { minViolations: 5,  durationMs: 1800000,  label: '30 минут' },   // 5-6 → 30min
-  { minViolations: 3,  durationMs: 300000,   label: '5 минут' },    // 3-4 → 5min
-  { minViolations: 1,  durationMs: 60000,    label: '1 минуту' },   // 1-2 → 1min
+  { minViolations: 10, durationMs: 600000,  label: '10 минут' },   // 10+ → 10min
+  { minViolations: 7,  durationMs: 300000,  label: '5 минут' },    // 7-9 → 5min
+  { minViolations: 5,  durationMs: 120000,  label: '2 минуты' },   // 5-6 → 2min
+  { minViolations: 3,  durationMs: 60000,   label: '1 минуту' },   // 3-4 → 1min
+  { minViolations: 1,  durationMs: 15000,   label: '15 секунд' },  // 1-2 → 15s
 ];
 
 function getTimeoutDuration(violationCount: number): { durationMs: number; label: string } {
   for (const tier of TIMEOUT_DURATIONS) {
     if (violationCount >= tier.minViolations) return { durationMs: tier.durationMs, label: tier.label };
   }
-  return { durationMs: 60000, label: '1 минуту' };
+  return { durationMs: 15000, label: '15 секунд' };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ENFORCE MUTE — works on ALL users including admins.
+// Discord timeout() doesn't work on users with Administrator perm
+// or roles higher than the bot. For such users we:
+// 1) Strip their privileged roles (Administrator/ModerateMembers etc.)
+// 2) Add the 🔇 Restricted role (denies SendMessages, Connect, Speak)
+// 3) Save stripped roles to DB for auto-restore when mute expires
+// Rules are EQUAL for everyone — no exceptions.
+// ═══════════════════════════════════════════════════════════════
+
+// In-memory map of pending role restores (userId → timer)
+const muteRestoreTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// In-memory map of active mutes (userId → expiresAt timestamp)
+// Used for bot-level enforcement: delete messages from muted users even if Discord permissions fail
+export const activeMutes = new Map<string, number>();
+
+// Timers for removing restricted role from non-admin users
+const restrictedRoleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Privileged permission flags that bypass channel denies — must be stripped during mute
+const PRIVILEGED_PERMISSIONS = [
+  PermissionFlagsBits.Administrator,
+  PermissionFlagsBits.ManageGuild,
+  PermissionFlagsBits.ManageChannels,
+  PermissionFlagsBits.ManageRoles,
+];
+
+/**
+ * Check if a member has privileged roles that would bypass mute.
+ */
+function hasPrivilegedRoles(member: GuildMember): boolean {
+  return member.permissions.has(PermissionFlagsBits.Administrator);
+}
+
+/**
+ * Get IDs of privileged roles to strip from a member.
+ * Returns role IDs that grant Administrator or other bypass permissions.
+ */
+function getPrivilegedRoleIds(member: GuildMember): string[] {
+  return member.roles.cache
+    .filter(role => {
+      if (role.id === member.guild.id) return false; // skip @everyone
+      return PRIVILEGED_PERMISSIONS.some(perm => role.permissions.has(perm));
+    })
+    .map(role => role.id);
+}
+
+/**
+ * Enforce mute on ANY user, regardless of their roles/permissions.
+ * - Normal users: Discord timeout (fast, native)
+ * - Privileged users (admins): strip admin roles + add Restricted role + schedule restore
+ * 
+ * Returns true if mute was successfully applied.
+ */
+async function enforceMute(member: GuildMember, durationMs: number, reason: string): Promise<boolean> {
+  const guild = member.guild;
+  const isPrivileged = hasPrivilegedRoles(member);
+  const isGuildOwner = member.id === guild.ownerId;
+
+  // ── STEP 1: For privileged users, strip admin roles first ──
+  if (isPrivileged && !isGuildOwner) {
+    console.log(`[MOD] ⚠️ ${member.user.username} has privileged roles — stripping before mute`);
+    const roleIdsToStrip = getPrivilegedRoleIds(member);
+    
+    if (roleIdsToStrip.length > 0) {
+      const expiresAt = new Date(Date.now() + durationMs);
+      try {
+        await db.insert(discordMutedAdminRoles)
+          .values({
+            discordId: member.id,
+            removedRoleIds: JSON.stringify(roleIdsToStrip),
+            muteExpiresAt: expiresAt,
+            reason,
+          })
+          .onConflictDoUpdate({
+            target: discordMutedAdminRoles.discordId,
+            set: {
+              removedRoleIds: JSON.stringify(roleIdsToStrip),
+              muteExpiresAt: expiresAt,
+              reason,
+            },
+          });
+      } catch (dbErr: any) {
+        console.error(`[MOD] DB save muted roles error: ${dbErr.message}`);
+      }
+
+      for (const roleId of roleIdsToStrip) {
+        try {
+          await member.roles.remove(roleId, `Мут: ${reason}`);
+        } catch (stripErr: any) {
+          console.error(`[MOD] Failed to strip role ${roleId}: ${stripErr.message}`);
+        }
+      }
+      console.log(`[MOD] Stripped ${roleIdsToStrip.length} privileged role(s) from ${member.user.username}`);
+    }
+  }
+
+  // ── STEP 2: Try Discord timeout (works for everyone except guild owner) ──
+  if (!isGuildOwner) {
+    try {
+      await member.timeout(durationMs, reason);
+    } catch (err: any) {
+      console.log(`[MOD] Standard timeout failed for ${member.user.username}: ${err.message}`);
+    }
+  }
+
+  // ── STEP 3: ALWAYS add Restricted role — works as backup even if timeout fails ──
+  try {
+    const restrictedRole = await getOrCreateRestrictedRole(guild);
+    await member.roles.add(restrictedRole, `Мут: ${reason}`);
+  } catch (roleErr: any) {
+    console.error(`[MOD] Failed to add restricted role to ${member.user.username}: ${roleErr.message}`);
+  }
+
+  // ── STEP 4: ALWAYS disconnect from voice ──
+  if (member.voice?.channel) {
+    try {
+      await member.voice.disconnect(`Мут: ${reason}`);
+    } catch {}
+  }
+
+  // ── STEP 5: Track mute in memory for bot-level enforcement (guild owner + fallback) ──
+  activeMutes.set(member.id, Date.now() + durationMs);
+
+  // ── STEP 6: Schedule auto-restore (for role-stripped admins) ──
+  if (isPrivileged && !isGuildOwner) {
+    scheduleRoleRestore(member.id, guild.id, durationMs);
+  } else {
+    // For non-admin users, schedule restricted role removal
+    scheduleRestrictedRoleRemoval(member.id, guild.id, durationMs);
+  }
+
+  console.log(`[MOD] 🔇 Mute enforced on ${member.user.username} for ${Math.round(durationMs / 60000)}min${isGuildOwner ? ' (owner — bot-level enforcement)' : isPrivileged ? ' (admin — roles stripped)' : ''}`);
+  return true;
+}
+
+/**
+ * Schedule automatic role restore after mute expires.
+ */
+function scheduleRoleRestore(userId: string, guildId: string, delayMs: number) {
+  // Clear existing timer if any
+  const existing = muteRestoreTimers.get(userId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(async () => {
+    muteRestoreTimers.delete(userId);
+    await restoreMutedRoles(userId, guildId);
+  }, delayMs);
+
+  muteRestoreTimers.set(userId, timer);
+}
+
+/**
+ * Schedule restricted role removal for non-admin muted users.
+ * Also cleans up the activeMutes entry.
+ */
+function scheduleRestrictedRoleRemoval(userId: string, guildId: string, delayMs: number) {
+  const existing = restrictedRoleTimers.get(userId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(async () => {
+    restrictedRoleTimers.delete(userId);
+    activeMutes.delete(userId);
+    try {
+      const client = botClient;
+      if (!client || !client.isReady()) return;
+      const guild = guildId ? client.guilds.cache.get(guildId) : client.guilds.cache.first();
+      if (!guild) return;
+      const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+      if (!member) return;
+      const restrictedRole = guild.roles.cache.find(r => r.name === RESTRICTED_ROLE_NAME);
+      if (restrictedRole && member.roles.cache.has(restrictedRole.id)) {
+        await member.roles.remove(restrictedRole, 'Мут истёк — ограничения сняты');
+      }
+      try { await member.timeout(null, 'Мут истёк'); } catch {}
+      console.log(`[MOD] ✅ Removed restricted role from ${member.user.username} — mute expired`);
+      try {
+        await member.send('✅ Ваш мут истёк. Ограничения сняты.\n✅ Your mute has expired. Restrictions removed.');
+      } catch {}
+    } catch (err: any) {
+      console.error(`[MOD] Error removing restricted role for ${userId}: ${err.message}`);
+    }
+  }, delayMs);
+
+  restrictedRoleTimers.set(userId, timer);
+}
+
+/**
+ * Check if a user is actively muted (bot-level check).
+ * Checks: Discord timeout, Restricted role, AND in-memory activeMutes map.
+ */
+function isUserMuted(member: GuildMember): boolean {
+  // Check Discord timeout
+  if (member.communicationDisabledUntil && new Date(member.communicationDisabledUntil) > new Date()) {
+    return true;
+  }
+  // Check Restricted role
+  if (member.roles.cache.some(r => r.name === RESTRICTED_ROLE_NAME)) {
+    return true;
+  }
+  // Check in-memory mute tracker (covers guild owner and edge cases)
+  const expiresAt = activeMutes.get(member.id);
+  if (expiresAt && Date.now() < expiresAt) {
+    return true;
+  }
+  // Clean expired entry
+  if (expiresAt && Date.now() >= expiresAt) {
+    activeMutes.delete(member.id);
+  }
+  return false;
+}
+
+/**
+ * Restore stripped roles for a muted admin user.
+ * Called when mute expires or when /размут is used.
+ */
+async function restoreMutedRoles(userId: string, guildId?: string) {
+  // Always clean up bot-level mute tracker
+  activeMutes.delete(userId);
+  try {
+    // Get saved roles from DB
+    const entries = await db.select().from(discordMutedAdminRoles)
+      .where(eq(discordMutedAdminRoles.discordId, userId))
+      .limit(1);
+
+    if (entries.length === 0) return;
+
+    const entry = entries[0];
+    const roleIds: string[] = JSON.parse(entry.removedRoleIds);
+
+    // Get guild and member
+    const client = botClient;
+    if (!client || !client.isReady()) return;
+
+    const guild = guildId
+      ? client.guilds.cache.get(guildId)
+      : client.guilds.cache.first();
+    if (!guild) return;
+
+    const member = guild.members.cache.get(userId)
+      || await guild.members.fetch(userId).catch(() => null);
+    if (!member) return;
+
+    // Restore stripped roles
+    for (const roleId of roleIds) {
+      try {
+        const role = guild.roles.cache.get(roleId);
+        if (role) {
+          await member.roles.add(role, 'Автоматическое восстановление ролей после мута');
+        }
+      } catch (err: any) {
+        console.error(`[MOD] Failed to restore role ${roleId} for ${userId}: ${err.message}`);
+      }
+    }
+
+    // Remove restricted role
+    const restrictedRole = guild.roles.cache.find(r => r.name === RESTRICTED_ROLE_NAME);
+    if (restrictedRole && member.roles.cache.has(restrictedRole.id)) {
+      await member.roles.remove(restrictedRole, 'Мут истёк — ограничения сняты');
+    }
+
+    // Remove timeout if still set
+    try {
+      await member.timeout(null, 'Мут истёк');
+    } catch {}
+
+    // Remove from DB
+    await db.delete(discordMutedAdminRoles)
+      .where(eq(discordMutedAdminRoles.discordId, userId));
+
+    console.log(`[MOD] ✅ Restored ${roleIds.length} role(s) for ${member.user.username} — mute expired`);
+
+    // DM notification
+    try {
+      await member.send('✅ Ваш мут истёк. Ваши роли восстановлены.\n✅ Your mute has expired. Your roles have been restored.');
+    } catch {}
+  } catch (err: any) {
+    console.error(`[MOD] Error restoring muted roles for ${userId}: ${err.message}`);
+  }
+}
+
+/**
+ * On bot startup, restore any pending mute timers from DB.
+ * Called once after bot is ready.
+ */
+async function restorePendingMuteTimers() {
+  try {
+    const entries = await db.select().from(discordMutedAdminRoles);
+    const now = new Date();
+
+    for (const entry of entries) {
+      const expiresAt = new Date(entry.muteExpiresAt);
+      if (expiresAt <= now) {
+        // Mute already expired while bot was offline — restore immediately
+        await restoreMutedRoles(entry.discordId);
+      } else {
+        // Schedule future restore + track in activeMutes
+        const delayMs = expiresAt.getTime() - now.getTime();
+        activeMutes.set(entry.discordId, expiresAt.getTime());
+        const guild = botClient?.guilds.cache.first();
+        if (guild) {
+          scheduleRoleRestore(entry.discordId, guild.id, delayMs);
+          console.log(`[MOD] Scheduled role restore for ${entry.discordId} in ${Math.round(delayMs / 60000)}min`);
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error(`[MOD] Error restoring pending mute timers: ${err.message}`);
+  }
 }
 
 /**
@@ -310,6 +622,159 @@ async function getEarningSettings() {
       antiSpamPenaltyRate: 0.1,
     };
   }
+}
+
+/**
+ * Unmute a user from the web admin panel.
+ * Removes: Discord timeout, restricted role, stripped admin roles, bot-level tracking.
+ */
+export async function webUnmuteUser(discordId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const client = botClient;
+    if (!client || !client.isReady()) {
+      // At minimum, clean up in-memory state
+      activeMutes.delete(discordId);
+      return { success: true, message: 'Бот оффлайн — мут снят из памяти. Роли будут восстановлены при подключении.' };
+    }
+
+    const guild = client.guilds.cache.first();
+    if (!guild) return { success: false, message: 'Сервер не найден' };
+
+    const member = guild.members.cache.get(discordId)
+      || await guild.members.fetch(discordId).catch(() => null);
+
+    if (!member) {
+      activeMutes.delete(discordId);
+      return { success: true, message: 'Участник не на сервере — мут снят из памяти' };
+    }
+
+    // Remove Discord timeout
+    try { await member.timeout(null, 'Размут через админ-панель'); } catch {}
+
+    // Restore admin roles if stripped
+    await restoreMutedRoles(discordId, guild.id);
+
+    // Remove restricted role
+    const restrictedRole = guild.roles.cache.find(r => r.name === RESTRICTED_ROLE_NAME);
+    if (restrictedRole && member.roles.cache.has(restrictedRole.id)) {
+      await member.roles.remove(restrictedRole, 'Размут через админ-панель');
+    }
+
+    // Clear all timers & tracking
+    activeMutes.delete(discordId);
+    const t1 = muteRestoreTimers.get(discordId);
+    if (t1) { clearTimeout(t1); muteRestoreTimers.delete(discordId); }
+    const t2 = restrictedRoleTimers.get(discordId);
+    if (t2) { clearTimeout(t2); restrictedRoleTimers.delete(discordId); }
+
+    // DM notification
+    try {
+      await member.send('✅ Ваш мут снят администратором.\n✅ Your mute has been lifted by an administrator.');
+    } catch {}
+
+    return { success: true, message: `${member.user.username} размучен` };
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Get list of currently muted users (for admin panel).
+ */
+export async function getMutedUsers(): Promise<Array<{
+  discordId: string;
+  username: string;
+  avatar: string;
+  muteExpiresAt: string | null;
+  reason: string;
+  source: 'timeout' | 'restricted' | 'bot-level';
+}>> {
+  const results: Array<{
+    discordId: string;
+    username: string;
+    avatar: string;
+    muteExpiresAt: string | null;
+    reason: string;
+    source: 'timeout' | 'restricted' | 'bot-level';
+  }> = [];
+  const seenIds = new Set<string>();
+
+  try {
+    const client = botClient;
+    if (!client || !client.isReady()) return results;
+
+    const guild = client.guilds.cache.first();
+    if (!guild) return results;
+
+    // 1) Check Discord timeouts
+    for (const [, member] of guild.members.cache) {
+      if (member.user.bot) continue;
+      if (member.communicationDisabledUntil && new Date(member.communicationDisabledUntil) > new Date()) {
+        seenIds.add(member.id);
+        results.push({
+          discordId: member.id,
+          username: member.user.globalName || member.user.username,
+          avatar: member.user.displayAvatarURL({ size: 64 }),
+          muteExpiresAt: member.communicationDisabledUntil.toISOString(),
+          reason: 'Discord timeout',
+          source: 'timeout',
+        });
+      }
+    }
+
+    // 2) Check restricted role
+    const restrictedRole = guild.roles.cache.find(r => r.name === RESTRICTED_ROLE_NAME);
+    if (restrictedRole) {
+      for (const [, member] of restrictedRole.members) {
+        if (member.user.bot) continue;
+        if (seenIds.has(member.id)) {
+          // Already in list from timeout, update source
+          const existing = results.find(r => r.discordId === member.id);
+          if (existing) existing.source = 'restricted';
+          continue;
+        }
+        seenIds.add(member.id);
+        results.push({
+          discordId: member.id,
+          username: member.user.globalName || member.user.username,
+          avatar: member.user.displayAvatarURL({ size: 64 }),
+          muteExpiresAt: null,
+          reason: 'Restricted role',
+          source: 'restricted',
+        });
+      }
+    }
+
+    // 3) Check bot-level mutes (for guild owner)
+    for (const [userId, expiresAt] of activeMutes) {
+      if (Date.now() >= expiresAt) { activeMutes.delete(userId); continue; }
+      if (seenIds.has(userId)) continue;
+      seenIds.add(userId);
+      const member = guild.members.cache.get(userId);
+      results.push({
+        discordId: userId,
+        username: member?.user.globalName || member?.user.username || userId,
+        avatar: member?.user.displayAvatarURL({ size: 64 }) || '',
+        muteExpiresAt: new Date(expiresAt).toISOString(),
+        reason: 'Bot-level мут (owner)',
+        source: 'bot-level',
+      });
+    }
+
+    // 4) Enrich with DB data (admin mutes with stripped roles)
+    const dbEntries = await db.select().from(discordMutedAdminRoles);
+    for (const entry of dbEntries) {
+      const existing = results.find(r => r.discordId === entry.discordId);
+      if (existing) {
+        existing.muteExpiresAt = entry.muteExpiresAt.toISOString();
+        existing.reason = entry.reason || existing.reason;
+      }
+    }
+  } catch (err: any) {
+    console.error(`[MOD] Error getting muted users: ${err.message}`);
+  }
+
+  return results;
 }
 
 export async function setupDiscordBot() {
@@ -712,6 +1177,13 @@ export async function setupDiscordBot() {
       await restoreGradientsFromDB();
     } catch (e: any) {
       console.error('❌ Ошибка восстановления градиентов:', e.message);
+    }
+
+    // Restore pending mute timers (auto-unmute admins whose mute expired while bot was offline)
+    try {
+      await restorePendingMuteTimers();
+    } catch (e: any) {
+      console.error('❌ Ошибка восстановления таймеров мута:', e.message);
     }
     
     // Автоматическая синхронизация каждый час
@@ -1562,6 +2034,27 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
+    // ═══ BOT-LEVEL MUTE ENFORCEMENT ═══
+    // BEFORE anything else: if user is muted, delete message immediately.
+    // This works even if Discord permissions fail, even for server owner.
+    // Rules are EQUAL for EVERYONE — no exceptions.
+    try {
+      const member = message.member || await message.guild?.members.fetch(message.author.id).catch(() => null);
+      if (member && isUserMuted(member as GuildMember)) {
+        // Delete the message
+        message.delete().catch(() => {});
+        // Re-disconnect from voice if they somehow joined
+        if ((member as GuildMember).voice?.channel) {
+          try { await (member as GuildMember).voice.disconnect('Вы заглушены'); } catch {}
+        }
+        console.log(`[MOD] 🔇 Deleted message from muted user ${message.author.username}: "${message.content?.substring(0, 50)}"`);
+        return; // Stop all further processing — muted users cannot interact
+      }
+    } catch (muteCheckErr: any) {
+      // Don't block message processing if mute check fails
+      console.error(`[MOD] Mute check error: ${muteCheckErr.message}`);
+    }
+
     // Track activity (non-blocking)
     trackMessageActivity(message.author.id).catch(() => {});
 
@@ -1702,16 +2195,15 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
       const channelName = message.channel && 'name' in message.channel
         ? (message.channel as any).name : 'unknown';
 
-      // 4) TIMEOUT (MUTE) — every violation = Discord timeout, escalating duration
+      // 4) MUTE — every violation = mute, escalating duration. Works on ALL users including admins.
       const { durationMs, label: durationText } = getTimeoutDuration(escalation.count);
       try {
         const member = message.member || await message.guild?.members.fetch(message.author.id).catch(() => null);
-        if (member && 'timeout' in member) {
-          await (member as any).timeout(durationMs, `Автомодерация: ${escalation.count} нарушение(й) — мут ${durationText}`);
-          console.log(`[MOD] 🔇 Mute ${message.author.username} for ${durationText} (${escalation.count} violations)`);
+        if (member) {
+          await enforceMute(member as GuildMember, durationMs, `Автомодерация: ${escalation.count} нарушение(й) — мут ${durationText}`);
         }
       } catch (timeoutErr: any) {
-        console.error(`[MOD] Failed to timeout user: ${timeoutErr.message}`);
+        console.error(`[MOD] Failed to mute user: ${timeoutErr.message}`);
       }
 
       // Send private warning about the mute
@@ -1785,6 +2277,16 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
       // If content didn't change, skip
       if (oldMessage.content === newMessage.content) return;
 
+      // Block edits from muted users too
+      if (newMessage.member) {
+        try {
+          if (isUserMuted(newMessage.member)) {
+            newMessage.delete().catch(() => {});
+            return;
+          }
+        } catch {}
+      }
+
       const rules = await getChannelModerationRules(newMessage.channelId);
       if (!rules) return;
 
@@ -1816,13 +2318,12 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
         });
       }
 
-      // Mute user — every violation = timeout
+      // Mute user — every violation = mute. Works on ALL users including admins.
       const { durationMs, label: durationText } = getTimeoutDuration(escalation.count);
       try {
         const member = newMessage.member || await newMessage.guild?.members.fetch(newMessage.author.id).catch(() => null);
-        if (member && 'timeout' in member) {
-          await (member as any).timeout(durationMs, `Автомодерация: обход цензуры через редактирование — мут ${durationText}`);
-          console.log(`[MOD-EDIT] 🔇 Mute ${newMessage.author.username} for ${durationText} (${escalation.count} violations)`);
+        if (member) {
+          await enforceMute(member as GuildMember, durationMs, `Автомодерация: обход цензуры через редактирование — мут ${durationText}`);
         }
       } catch {}
 
@@ -1952,21 +2453,42 @@ IMPORTANT: Never generate harmful, discriminatory, or NSFW content. Maximum 600 
     }
   });
 
+  // ── AUTO-APPLY restricted role overwrites to new channels ──
+  client.on('channelCreate', async (channel) => {
+    try {
+      if (!channel.guild) return;
+      const restrictedRole = channel.guild.roles.cache.find(r => r.name === RESTRICTED_ROLE_NAME);
+      if (!restrictedRole) return;
+      // Apply deny overwrites for the restricted role
+      await channel.permissionOverwrites.create(restrictedRole, {
+        SendMessages: false,
+        SendMessagesInThreads: false,
+        CreatePublicThreads: false,
+        CreatePrivateThreads: false,
+        AddReactions: false,
+        Connect: false,
+        Speak: false,
+      });
+      console.log(`[RESTRICT] Applied restricted role overwrites to new channel #${channel.name}`);
+    } catch (err: any) {
+      console.error(`[RESTRICT] Failed to set overwrites on new channel: ${err.message}`);
+    }
+  });
+
   // Отслеживание войс активности
   client.on('voiceStateUpdate', async (oldState, newState) => {
     const userId = newState.member?.user.id;
     if (!userId || newState.member?.user.bot) return;
 
     try {
-      // ── MUTE ENFORCEMENT: kick timed-out users from voice ──
+      // ── MUTE ENFORCEMENT: kick muted users from voice ──
+      // Check BOTH Discord timeout AND restricted role AND bot-level mute (for owner)
       if (newState.channelId && newState.member) {
         const member = newState.member;
-        // Discord timeout = communicationDisabledUntil is set and in the future
-        if (member.communicationDisabledUntil && new Date(member.communicationDisabledUntil) > new Date()) {
+        if (isUserMuted(member)) {
           try {
             await member.voice.disconnect('Вы заглушены — войс запрещён во время мута');
-            console.log(`[MOD] 🔇 Kicked ${member.user.username} from voice — user is timed out until ${member.communicationDisabledUntil}`);
-            // Try to DM them
+            console.log(`[MOD] 🔇 Kicked ${member.user.username} from voice — muted`);
             member.user.send('⚠️ Вы не можете заходить в голосовые каналы во время мута.\n⚠️ You cannot join voice channels while muted.').catch(() => {});
           } catch (kickErr: any) {
             console.error(`[MOD] Failed to kick muted user from voice: ${kickErr.message}`);
@@ -3014,16 +3536,25 @@ async function handleMuteCommand(interaction: ChatInputCommandInteraction) {
 
   try {
     const member = await interaction.guild.members.fetch(user.id);
-    await member.timeout(minutes * 60 * 1000, reason);
+    const durationMs = minutes * 60 * 1000;
+    const success = await enforceMute(member, durationMs, `Мут от ${interaction.user.tag}: ${reason}`);
 
+    if (!success) {
+      await interaction.reply({ content: 'Не удалось замутить участника.', ephemeral: true });
+      return;
+    }
+
+    const isPrivileged = hasPrivilegedRoles(member);
     const embed = new EmbedBuilder()
       .setColor(0x808080)
       .setTitle('🔇 Участник замучен')
       .addFields(
         { name: 'Участник', value: user.tag, inline: true },
         { name: 'Длительность', value: `${minutes} мин`, inline: true },
-        { name: 'Причина', value: reason, inline: false }
+        { name: 'Причина', value: reason, inline: false },
+        { name: 'Метод', value: isPrivileged ? '⚠️ Ролевой мут (админ-роли временно сняты)' : 'Стандартный таймаут', inline: false }
       )
+      .setFooter({ text: 'Правила для всех одинаковые — никаких исключений' })
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
@@ -3042,9 +3573,35 @@ async function handleUnmuteCommand(interaction: ChatInputCommandInteraction) {
 
   try {
     const member = await interaction.guild.members.fetch(user.id);
-    await member.timeout(null);
+    
+    // Remove Discord timeout
+    await member.timeout(null).catch(() => {});
+    
+    // Restore admin roles if they were stripped during mute
+    await restoreMutedRoles(user.id, interaction.guild.id);
+    
+    // Remove restricted role (for all users including non-admins)
+    const restrictedRole = interaction.guild.roles.cache.find(r => r.name === RESTRICTED_ROLE_NAME);
+    if (restrictedRole && member.roles.cache.has(restrictedRole.id)) {
+      await member.roles.remove(restrictedRole, 'Размут через команду').catch(() => {});
+    }
+    
+    // Clear bot-level mute tracking
+    activeMutes.delete(user.id);
 
-    await interaction.reply({ content: `✅ Участник ${user.tag} размучен.` });
+    // Clear any pending restore timer
+    const existingTimer = muteRestoreTimers.get(user.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      muteRestoreTimers.delete(user.id);
+    }
+    const existingRestrictedTimer = restrictedRoleTimers.get(user.id);
+    if (existingRestrictedTimer) {
+      clearTimeout(existingRestrictedTimer);
+      restrictedRoleTimers.delete(user.id);
+    }
+
+    await interaction.reply({ content: `✅ Участник ${user.tag} размучен. Все роли восстановлены.` });
   } catch (error) {
     await interaction.reply({ content: 'Не удалось размутить участника.', ephemeral: true });
   }
