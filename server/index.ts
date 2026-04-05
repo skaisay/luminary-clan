@@ -2,6 +2,8 @@ import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import passport from "passport";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { log, serveStatic } from "./production";
 import { setupDiscordBot } from "./bot-commands";
@@ -20,7 +22,58 @@ process.on('uncaughtException', (error) => {
 const app = express();
 const PgStore = connectPg(session);
 
-app.set('trust proxy', true);
+app.set('trust proxy', 1); // Trust only first proxy (Render)
+
+// ─── Security headers ───
+app.use(helmet({
+  contentSecurityPolicy: false, // Disabled — Vite/React needs inline scripts in dev
+  crossOriginEmbedderPolicy: false, // Allow loading Discord CDN images
+}));
+
+// ─── Global rate limit: 200 requests per minute per IP ───
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много запросов. Попробуйте позже.' },
+  keyGenerator: (req) => {
+    return req.ip || req.socket.remoteAddress || 'unknown';
+  },
+});
+app.use('/api/', globalLimiter);
+
+// ─── Strict rate limit for auth endpoints: 10 per minute ───
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много попыток входа. Подождите минуту.' },
+});
+app.use('/api/auth/', authLimiter);
+app.use('/api/admin/login', authLimiter);
+
+// ─── Strict rate limit for file uploads: 5 per minute ───
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много загрузок. Подождите минуту.' },
+});
+app.use('/api/transfers/send', uploadLimiter);
+app.use('/api/upload', uploadLimiter);
+
+// ─── AI chat limiter: 15 per minute ───
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много запросов к AI. Подождите минуту.' },
+});
+app.use('/api/ai/', aiLimiter);
 
 declare module 'http' {
   interface IncomingMessage {
@@ -28,11 +81,12 @@ declare module 'http' {
   }
 }
 app.use(express.json({
+  limit: '10mb',
   verify: (req, _res, buf) => {
     req.rawBody = buf;
   }
 }));
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
 app.use(
   session({
