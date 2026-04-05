@@ -52,6 +52,7 @@ import ProfilePage from "@/pages/profile";
 import MiniGamesPage from "@/pages/mini-games";
 import DecorationShop from "@/pages/decoration-shop";
 import NicknameColorsPage from "@/pages/nickname-colors";
+import FileTransferPage from "@/pages/file-transfer";
 import ClanWarsPage from "@/pages/clan-wars";
 import NotFound from "@/pages/not-found";
 import { AiAssistant } from "@/components/AiAssistant";
@@ -81,6 +82,7 @@ function MainRouter() {
       <Route path="/daily-rewards"><MaintenanceGate pageId="daily-rewards"><DailyRewardsPage /></MaintenanceGate></Route>
       <Route path="/profile/:discordId?"><MaintenanceGate pageId="profile"><ProfilePage /></MaintenanceGate></Route>
       <Route path="/mini-games"><MaintenanceGate pageId="mini-games"><MiniGamesPage /></MaintenanceGate></Route>
+      <Route path="/file-transfer"><FileTransferPage /></Route>
       <Route component={NotFound} />
     </Switch>
   );

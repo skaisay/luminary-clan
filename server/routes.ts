@@ -7009,6 +7009,165 @@ Requirements:
     }
   });
 
+  // ============ FILE TRANSFER SYSTEM ============
+  const transferDir = path.join(process.cwd(), 'uploads', 'transfers');
+  try { fs.mkdirSync(transferDir, { recursive: true }); } catch {}
+
+  interface FileTransfer {
+    id: string;
+    fromDiscordId: string;
+    fromUsername: string;
+    fromAvatar: string;
+    toDiscordId: string;
+    toUsername: string;
+    filename: string;
+    originalName: string;
+    size: number;
+    mimeType: string;
+    createdAt: number;
+    downloaded: boolean;
+  }
+  const fileTransfers = new Map<string, FileTransfer>();
+
+  // Cleanup old transfers every 30 min (delete files older than 24h)
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, t] of fileTransfers) {
+      if (now - t.createdAt > 24 * 60 * 60 * 1000) {
+        try { fs.unlinkSync(path.join(transferDir, t.filename)); } catch {}
+        fileTransfers.delete(id);
+      }
+    }
+  }, 30 * 60 * 1000);
+
+  const transferUpload = (await import('multer')).default({
+    storage: (await import('multer')).default.diskStorage({
+      destination: (_req: any, _file: any, cb: any) => cb(null, transferDir),
+      filename: (_req: any, file: any, cb: any) => {
+        const ext = path.extname(file.originalname);
+        cb(null, `transfer_${Date.now()}_${Math.random().toString(36).slice(2, 10)}${ext}`);
+      },
+    }),
+    limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max
+  });
+
+  // Upload file to transfer to another user
+  app.post("/api/transfers/send", requireDiscordAuth, transferUpload.single('file'), async (req: any, res) => {
+    try {
+      const user = req.user;
+      if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация" });
+      if (!req.file) return res.status(400).json({ error: "Файл не прикреплён" });
+
+      const toDiscordId = req.body.toDiscordId;
+      if (!toDiscordId || typeof toDiscordId !== 'string') {
+        // Clean up uploaded file
+        try { fs.unlinkSync(req.file.path); } catch {}
+        return res.status(400).json({ error: "Укажите получателя" });
+      }
+
+      // Get receiver info
+      const receiver = await storage.getClanMemberByDiscordId(toDiscordId);
+      if (!receiver) {
+        try { fs.unlinkSync(req.file.path); } catch {}
+        return res.status(404).json({ error: "Получатель не найден" });
+      }
+
+      const id = `ft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const transfer: FileTransfer = {
+        id,
+        fromDiscordId: user.discordId,
+        fromUsername: user.username || '',
+        fromAvatar: user.avatar || '',
+        toDiscordId,
+        toUsername: receiver.username || '',
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        size: req.file.size,
+        mimeType: req.file.mimetype || 'application/octet-stream',
+        createdAt: Date.now(),
+        downloaded: false,
+      };
+      fileTransfers.set(id, transfer);
+
+      // SSE notify
+      if (app.locals.broadcastSSE) {
+        app.locals.broadcastSSE('file-transfer', {
+          id, fromUsername: transfer.fromUsername, fromAvatar: transfer.fromAvatar,
+          toDiscordId, originalName: transfer.originalName, size: transfer.size,
+        });
+      }
+
+      res.json({ success: true, transfer: { id, originalName: transfer.originalName, size: transfer.size, toUsername: transfer.toUsername } });
+    } catch (e: any) {
+      console.error('[TRANSFER] Upload error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Get incoming transfers for current user
+  app.get("/api/transfers/inbox", requireDiscordAuth, (req: any, res) => {
+    const user = req.user;
+    if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация" });
+    const items = Array.from(fileTransfers.values())
+      .filter(t => t.toDiscordId === user.discordId)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(t => ({
+        id: t.id, fromUsername: t.fromUsername, fromAvatar: t.fromAvatar, fromDiscordId: t.fromDiscordId,
+        originalName: t.originalName, size: t.size, mimeType: t.mimeType,
+        createdAt: t.createdAt, downloaded: t.downloaded,
+      }));
+    res.json(items);
+  });
+
+  // Get sent transfers for current user
+  app.get("/api/transfers/sent", requireDiscordAuth, (req: any, res) => {
+    const user = req.user;
+    if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация" });
+    const items = Array.from(fileTransfers.values())
+      .filter(t => t.fromDiscordId === user.discordId)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(t => ({
+        id: t.id, toUsername: t.toUsername, toDiscordId: t.toDiscordId,
+        originalName: t.originalName, size: t.size, mimeType: t.mimeType,
+        createdAt: t.createdAt, downloaded: t.downloaded,
+      }));
+    res.json(items);
+  });
+
+  // Download a transfer file
+  app.get("/api/transfers/download/:id", requireDiscordAuth, (req: any, res) => {
+    const user = req.user;
+    if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация" });
+    const transfer = fileTransfers.get(req.params.id);
+    if (!transfer) return res.status(404).json({ error: "Файл не найден" });
+    // Only receiver or sender can download
+    if (transfer.toDiscordId !== user.discordId && transfer.fromDiscordId !== user.discordId) {
+      return res.status(403).json({ error: "Нет доступа" });
+    }
+    const filePath = path.join(transferDir, transfer.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Файл удалён" });
+
+    transfer.downloaded = true;
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(transfer.originalName)}"`);
+    res.setHeader('Content-Type', transfer.mimeType);
+    res.setHeader('Content-Length', transfer.size.toString());
+    res.sendFile(filePath);
+  });
+
+  // Delete a transfer
+  app.delete("/api/transfers/:id", requireDiscordAuth, (req: any, res) => {
+    const user = req.user;
+    if (!user?.discordId) return res.status(401).json({ error: "Требуется авторизация" });
+    const transfer = fileTransfers.get(req.params.id);
+    if (!transfer) return res.status(404).json({ error: "Не найдено" });
+    if (transfer.fromDiscordId !== user.discordId && transfer.toDiscordId !== user.discordId) {
+      return res.status(403).json({ error: "Нет доступа" });
+    }
+    try { fs.unlinkSync(path.join(transferDir, transfer.filename)); } catch {}
+    fileTransfers.delete(req.params.id);
+    res.json({ success: true });
+  });
+
   // ============ WEBSITE PRESENCE TRACKING ============
   const onlineUsers = new Map<string, { discordId: string; username: string; avatar: string; lastSeen: number }>();
 

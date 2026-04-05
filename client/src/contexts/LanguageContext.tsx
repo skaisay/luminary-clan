@@ -82,6 +82,7 @@ const translations = {
       clanWars: 'Войны',
       decorations: 'Украшения',
       nicknameColors: 'Цвет ника',
+      fileTransfer: 'Файлы',
       menu: 'Меню',
     },
     dashboard: {
@@ -720,6 +721,7 @@ const translations = {
       clanWars: 'Wars',
       decorations: 'Decorations',
       nicknameColors: 'Nick Color',
+      fileTransfer: 'Files',
       menu: 'Menu',
     },
     dashboard: {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Home, Trophy, Newspaper, Users, Info, BarChart3, ShoppingBag, Package, Coins, Menu, LogOut, LogIn, User as UserIcon, Gamepad2, Music2, Award, ScrollText, ArrowLeftRight, Zap, Gift, Swords, Sparkles, Palette } from "lucide-react";
+import { Home, Trophy, Newspaper, Users, Info, BarChart3, ShoppingBag, Package, Coins, Menu, LogOut, LogIn, User as UserIcon, Gamepad2, Music2, Award, ScrollText, ArrowLeftRight, Zap, Gift, Swords, Sparkles, Palette, Send } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { DiscordFlowerButton } from "@/components/discord-flower-button";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -113,6 +113,11 @@ const menuItemsConfig = [
     key: "nav.miniGames",
     url: "/mini-games",
     icon: Gamepad2,
+  },
+  {
+    key: "nav.fileTransfer",
+    url: "/file-transfer",
+    icon: Send,
   },
 ];
 
