@@ -53,23 +53,20 @@ function getFileIcon(mime: string) {
 }
 
 // Transfer animation overlay
-function TransferAnimation({ fromUser, toUser, fileName, onDone }: {
+function TransferAnimation({ fromUser, toUser, fileName, progress, status, onDone }: {
   fromUser: { username: string; avatar: string };
   toUser: { username: string; avatar: string };
   fileName: string;
+  progress: number; // 0-100 real upload progress
+  status: 'uploading' | 'done' | 'error';
   onDone: () => void;
 }) {
-  const [progress, setProgress] = useState(0);
-
   useEffect(() => {
-    const interval = setInterval(() => {
-      setProgress(p => {
-        if (p >= 100) { clearInterval(interval); setTimeout(onDone, 600); return 100; }
-        return p + 2;
-      });
-    }, 40);
-    return () => clearInterval(interval);
-  }, [onDone]);
+    if (status === 'done') {
+      const timer = setTimeout(onDone, 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [status, onDone]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
@@ -130,11 +127,11 @@ function TransferAnimation({ fromUser, toUser, fileName, onDone }: {
             <div className="flex flex-col items-center gap-2">
               <div className="relative">
                 <div className={`w-20 h-20 rounded-full overflow-hidden border-2 shadow-lg transition-all duration-500 ${
-                  progress >= 100 ? 'border-green-500/80 shadow-green-500/20' : 'border-blue-500/50 shadow-blue-500/20'
+                  status === 'done' ? 'border-green-500/80 shadow-green-500/20' : 'border-blue-500/50 shadow-blue-500/20'
                 }`}>
                   <img src={toUser.avatar} alt="" className="w-full h-full object-cover" />
                 </div>
-                {progress >= 100 && (
+                {status === 'done' && (
                   <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-2 border-black flex items-center justify-center animate-bounce">
                     <Check className="w-3 h-3 text-white" />
                   </div>
@@ -155,7 +152,7 @@ function TransferAnimation({ fromUser, toUser, fileName, onDone }: {
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
             }}>
-              {progress >= 100 ? '✓ Отправлено!' : `${progress}%`}
+              {status === 'done' ? '✓ Отправлено!' : status === 'error' ? '✗ Ошибка' : `${Math.round(progress)}%`}
             </div>
           </div>
         </div>
@@ -178,6 +175,9 @@ export default function FileTransferPage() {
     toUser: { username: string; avatar: string };
     fileName: string;
   } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState<'uploading' | 'done' | 'error'>('uploading');
+  const [isSending, setIsSending] = useState(false);
   const [tab, setTab] = useState<'send' | 'inbox' | 'sent'>('send');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -198,40 +198,62 @@ export default function FileTransferPage() {
     refetchInterval: 10000,
   });
 
-  const sendMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedFile || !selectedUser) throw new Error("Выберите файл и получателя");
-      const form = new FormData();
-      form.append('file', selectedFile);
-      form.append('toDiscordId', selectedUser.discordId);
-      const res = await fetch('/api/transfers/send', { method: 'POST', body: form, credentials: 'include' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Upload failed' }));
-        throw new Error(err.error || 'Upload failed');
+  const handleSend = useCallback(() => {
+    if (!selectedFile || !selectedUser || !user || isSending) return;
+
+    setIsSending(true);
+    setUploadProgress(0);
+    setUploadStatus('uploading');
+    setTransferAnim({
+      fromUser: { username: user.username || '', avatar: user.avatar || '' },
+      toUser: { username: selectedUser.username, avatar: selectedUser.avatar },
+      fileName: selectedFile.name,
+    });
+
+    const form = new FormData();
+    form.append('file', selectedFile);
+    form.append('toDiscordId', selectedUser.discordId);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/transfers/send');
+    xhr.withCredentials = true;
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        setUploadProgress(Math.round((e.loaded / e.total) * 95)); // 95% = uploaded, waiting for server
       }
-      return res.json();
-    },
-    onMutate: () => {
-      if (selectedUser && user) {
-        setTransferAnim({
-          fromUser: { username: user.username || '', avatar: user.avatar || '' },
-          toUser: { username: selectedUser.username, avatar: selectedUser.avatar },
-          fileName: selectedFile?.name || '',
-        });
-      }
-    },
-    onSuccess: () => {
-      setTimeout(() => {
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setUploadProgress(100);
+        setUploadStatus('done');
         toast({ title: t('fileTransfer.sent', 'Файл отправлен! ✨') });
         setSelectedFile(null);
         queryClient.invalidateQueries({ queryKey: ["/api/transfers/sent"] });
-      }, 2500);
-    },
-    onError: (e: any) => {
-      setTransferAnim(null);
-      toast({ title: t('fileTransfer.error', 'Ошибка'), description: e.message, variant: "destructive" });
-    },
-  });
+      } else {
+        let msg = 'Ошибка загрузки';
+        try { msg = JSON.parse(xhr.responseText)?.error || msg; } catch {}
+        setUploadStatus('error');
+        setTimeout(() => {
+          setTransferAnim(null);
+          toast({ title: t('fileTransfer.error', 'Ошибка'), description: msg, variant: "destructive" });
+        }, 800);
+      }
+      setIsSending(false);
+    };
+
+    xhr.onerror = () => {
+      setUploadStatus('error');
+      setTimeout(() => {
+        setTransferAnim(null);
+        toast({ title: t('fileTransfer.error', 'Ошибка'), description: 'Не удалось подключиться к серверу', variant: "destructive" });
+      }, 800);
+      setIsSending(false);
+    };
+
+    xhr.send(form);
+  }, [selectedFile, selectedUser, user, isSending, toast, t]);
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -279,6 +301,8 @@ export default function FileTransferPage() {
           fromUser={transferAnim.fromUser}
           toUser={transferAnim.toUser}
           fileName={transferAnim.fileName}
+          progress={uploadProgress}
+          status={uploadStatus}
           onDone={() => setTransferAnim(null)}
         />
       )}
@@ -446,10 +470,10 @@ export default function FileTransferPage() {
                   <Button
                     className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
                     size="lg"
-                    disabled={sendMutation.isPending}
-                    onClick={() => sendMutation.mutate()}
+                    disabled={isSending}
+                    onClick={handleSend}
                   >
-                    {sendMutation.isPending ? (
+                    {isSending ? (
                       <><RefreshCw className="w-5 h-5 mr-2 animate-spin" /> {t('fileTransfer.sending', 'Отправка...')}</>
                     ) : (
                       <><Send className="w-5 h-5 mr-2" /> {t('fileTransfer.sendFile', 'Отправить файл')}</>
