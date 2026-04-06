@@ -379,6 +379,137 @@ export async function changeDiscordNickname(discordId: string, newNickname: stri
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// BULK NICKNAME MANAGEMENT — mass rename + restore
+// In-memory storage of original nicknames for restore capability
+// ═══════════════════════════════════════════════════════════════
+
+// Map: discordId → original display name (before bulk rename)
+const savedOriginalNicknames = new Map<string, string>();
+let lastBulkRenameTime: Date | null = null;
+
+/**
+ * Bulk rename all (or selected) members on the Discord server.
+ * Saves original nicknames for later restore.
+ */
+export async function bulkRenameMembers(
+  newName: string,
+  memberIds?: string[] // if omitted → all members
+): Promise<{ success: number; failed: number; total: number; errors: string[] }> {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  if (!newName || newName.length > 32) {
+    throw new Error('Имя должно быть от 1 до 32 символов');
+  }
+
+  // Fetch all members to ensure cache is populated
+  await guild.members.fetch();
+
+  const members = guild.members.cache
+    .filter(m => !m.user.bot)
+    .filter(m => !memberIds || memberIds.includes(m.id));
+
+  let success = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const [, member] of members) {
+    // Save original nickname before changing
+    if (!savedOriginalNicknames.has(member.id)) {
+      savedOriginalNicknames.set(member.id, member.nickname || member.user.globalName || member.user.username);
+    }
+
+    try {
+      if (!member.manageable) {
+        errors.push(`${member.user.username}: недостаточно прав`);
+        failed++;
+        continue;
+      }
+      await member.setNickname(newName, 'Массовая смена имени через админ-панель');
+      success++;
+      // Small delay to avoid rate limits
+      await new Promise(r => setTimeout(r, 200));
+    } catch (err: any) {
+      errors.push(`${member.user.username}: ${err.message}`);
+      failed++;
+    }
+  }
+
+  lastBulkRenameTime = new Date();
+  console.log(`[NICKNAME] Bulk rename to "${newName}": ${success} ok, ${failed} failed out of ${members.size}`);
+
+  return { success, failed, total: members.size, errors: errors.slice(0, 20) };
+}
+
+/**
+ * Restore all saved original nicknames.
+ */
+export async function restoreOriginalNicknames(): Promise<{ success: number; failed: number; total: number; errors: string[] }> {
+  const client = getSharedBot();
+  if (!client) throw new Error('Бот не подключён');
+  const guild = getGuild(client);
+  if (!guild) throw new Error('Сервер не найден');
+
+  if (savedOriginalNicknames.size === 0) {
+    throw new Error('Нет сохранённых имён для восстановления');
+  }
+
+  let success = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const [discordId, originalName] of savedOriginalNicknames) {
+    try {
+      const member = guild.members.cache.get(discordId)
+        || await guild.members.fetch(discordId).catch(() => null);
+      if (!member) {
+        failed++;
+        continue;
+      }
+      if (!member.manageable) {
+        errors.push(`${member.user.username}: недостаточно прав`);
+        failed++;
+        continue;
+      }
+      // Set to null (clears nickname to display original username) or to saved name
+      // If the saved name equals the username, just clear the nickname
+      const nameToSet = originalName === member.user.username || originalName === member.user.globalName
+        ? null : originalName;
+      await member.setNickname(nameToSet, 'Восстановление оригинального имени через админ-панель');
+      success++;
+      await new Promise(r => setTimeout(r, 200));
+    } catch (err: any) {
+      errors.push(`${discordId}: ${err.message}`);
+      failed++;
+    }
+  }
+
+  const total = savedOriginalNicknames.size;
+  savedOriginalNicknames.clear();
+  lastBulkRenameTime = null;
+  console.log(`[NICKNAME] Restored originals: ${success} ok, ${failed} failed out of ${total}`);
+
+  return { success, failed, total, errors: errors.slice(0, 20) };
+}
+
+/**
+ * Get bulk rename status: whether a rename is active and how many saved.
+ */
+export function getBulkRenameStatus(): {
+  isActive: boolean;
+  savedCount: number;
+  lastRenameTime: string | null;
+} {
+  return {
+    isActive: savedOriginalNicknames.size > 0,
+    savedCount: savedOriginalNicknames.size,
+    lastRenameTime: lastBulkRenameTime?.toISOString() || null,
+  };
+}
+
 /**
  * Set a nickname color for a user by creating/reusing a personal color role.
  * Discord shows the color of the highest-positioned role.

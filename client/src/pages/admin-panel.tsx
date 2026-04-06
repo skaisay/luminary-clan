@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Shield, Settings, Users, Newspaper, BarChart3, Activity, LogOut, Loader2, Hash, Store, Coins, FileText, Ban, Sparkles, Globe, ShieldAlert } from "lucide-react";
+import { Shield, Settings, Users, Newspaper, BarChart3, Activity, LogOut, Loader2, Hash, Store, Coins, FileText, Ban, Sparkles, Globe, ShieldAlert, UserCog } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import AdminSiteBans from "@/pages/admin-site-bans";
 import AdminDecorationsTab from "@/components/admin/admin-decorations-tab";
 import AdminServersTab from "@/components/admin/admin-servers-tab";
 import AdminModeration from "@/pages/admin-moderation";
+import AdminNicknames from "@/pages/admin-nicknames";
 
 export default function AdminPanel() {
   const [, navigate] = useLocation();
@@ -154,6 +155,10 @@ export default function AdminPanel() {
               <Globe className="w-4 h-4" />
               <span className="hidden sm:inline">Серверы</span>
             </TabsTrigger>
+            <TabsTrigger value="nicknames" className="gap-2" data-testid="tab-nicknames">
+              <UserCog className="w-4 h-4" />
+              <span className="hidden sm:inline">Ники</span>
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="settings">
@@ -212,6 +217,10 @@ export default function AdminPanel() {
 
           <TabsContent value="servers">
             <AdminServersTab />
+          </TabsContent>
+
+          <TabsContent value="nicknames">
+            <AdminNicknames />
           </TabsContent>
         </Tabs>
       </div>

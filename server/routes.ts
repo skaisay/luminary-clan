@@ -1744,6 +1744,44 @@ Concise(1-2 sent), emojis, English. "change/set/make/give/add"→edit→fill→s
     }
   });
 
+  // ==================== BULK NICKNAME MANAGEMENT ====================
+
+  // Bulk rename all or selected members
+  app.post("/api/admin/discord/bulk-rename", requireAdmin, async (req, res) => {
+    try {
+      const { newName, memberIds } = req.body;
+      if (!newName || typeof newName !== 'string') {
+        return res.status(400).json({ error: "newName обязателен" });
+      }
+      const { bulkRenameMembers } = await import("./discord");
+      const result = await bulkRenameMembers(newName, memberIds);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Restore original nicknames
+  app.post("/api/admin/discord/restore-nicknames", requireAdmin, async (req, res) => {
+    try {
+      const { restoreOriginalNicknames } = await import("./discord");
+      const result = await restoreOriginalNicknames();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get bulk rename status
+  app.get("/api/admin/discord/bulk-rename-status", requireAdmin, async (req, res) => {
+    try {
+      const { getBulkRenameStatus } = await import("./discord");
+      res.json(getBulkRenameStatus());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/admin/discord/send-message", requireAdmin, async (req, res) => {
     try {
       const { channelId, message } = req.body;
